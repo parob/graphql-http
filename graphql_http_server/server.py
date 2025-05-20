@@ -115,7 +115,10 @@ class GraphQLHTTPServer:
         self.health_path = health_path
         self.execution_context_class = execution_context_class
         self.auth_domain = auth_domain
-        self.jwks_client = PyJWKClient(f"https://{auth_domain}/.well-known/jwks.json")
+        if auth_domain:
+            self.jwks_client = PyJWKClient(f"https://{auth_domain}/.well-known/jwks.json")
+        else:
+            self.jwks_client = None
         self.auth_audience = auth_audience
         self.auth_enabled = auth_enabled
 
@@ -345,14 +348,9 @@ class GraphQLHTTPServer:
         app_to_run = self.app
 
         if main:
-            # If a main callable is provided, create a simple Starlette app
-            # that routes all requests to this main callable.
-            # The main callable is expected to be an async function:
-            # async def main_function(request: Request) -> Response: ...
             async def main_endpoint_wrapper(request: Request) -> Response:
                 return await main(request)
 
-            # Define a route that captures all paths and methods to pass to main
             main_routes = [
                 Route(
                     "/{path:path}", 
@@ -360,9 +358,6 @@ class GraphQLHTTPServer:
                     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
                 )
             ]
-            # Create a new Starlette application with only the main route
-            # No explicit middleware here, as `main` takes full control.
-            # If `main` calls `self.dispatch`, it will go through `self.app`'s middleware.
             app_to_run = Starlette(routes=main_routes)
 
         uvicorn.run(app_to_run, host=host, port=port, **kwargs)
