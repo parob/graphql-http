@@ -1,0 +1,74 @@
+name: Python Package CI/CD
+
+on:
+  push:
+    branches:
+      - main # Or your default branch
+    tags:
+      - 'v*.*.*' # For publishing to PyPI
+  pull_request:
+    branches:
+      - main # Or your default branch
+
+jobs:
+  build_and_test:
+    name: Build and Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"] # Your Pipfile specifies 3.13
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Pipenv
+      run: pip install pipenv
+
+    - name: Install dependencies
+      run: pipenv install --dev --deploy --system
+      # --system installs to the Python provided by setup-python
+      # --deploy ensures Pipfile.lock is up-to-date (fails if not)
+
+    - name: Lint with Flake8
+      run: pipenv run flake8 .
+      # Consider adding more specific paths if needed, e.g.,
+      # pipenv run flake8 graphql_http_server/ tests/
+
+    - name: Test with Pytest
+      run: pipenv run pytest
+
+  publish:
+    name: Publish to PyPI
+    needs: build_and_test # Ensure tests pass before publishing
+    runs-on: ubuntu-latest
+    # Only run this job if pushing a tag like v1.2.3
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13' # Use your project's primary Python version
+
+    - name: Install build dependencies
+      run: python -m pip install --upgrade pip build twine
+
+    - name: Build package
+      run: python -m build --sdist --wheel .
+      # This creates sdist and wheel in the dist/ directory
+
+    - name: Publish package to PyPI
+      env:
+        PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      run: python -m twine upload dist/* --skip-existing
+      # PYPI_API_TOKEN must be configured as a secret in your GitHub repository settings 
