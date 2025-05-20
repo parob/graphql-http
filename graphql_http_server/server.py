@@ -292,7 +292,9 @@ class GraphQLHTTPServer:
             else:
                 status = 500
 
-        if isinstance(e, (jwt.exceptions.InvalidTokenError, ValueError)):
+        if isinstance(e, HttpQueryError):
+            error_message = str(e.message)
+        elif isinstance(e, (jwt.exceptions.InvalidTokenError, ValueError)):
             error_message = str(e)
         else:
             error_message = "Internal Server Error"

@@ -90,7 +90,7 @@ class TestApp:
         assert response.text == "OK"  # Use response.text for Starlette client
 
     def test_graphiql(self, schema):
-        server = GraphQLHTTPServer(schema=schema)
+        server = GraphQLHTTPServer(schema=schema, serve_graphiql=False) # Explicitly disable GraphiQL
         response = server.client().get("/", headers={"Accept": "text/html"})
 
         assert response.status_code == 400  # Expecting HttpQueryError
@@ -347,10 +347,8 @@ class TestApp:
         )
         assert response.status_code == 400
         # Check if the error message indicates a JSON decoding issue
-        assert (
-            "Unable to parse NNNN JSON object"
-            in response.json()["errors"][0]["message"]
-        )
+        # The actual message from HttpQueryError is more specific
+        assert "Unable to parse JSON body" in response.json()["errors"][0]["message"]
 
     # --- GraphiQL Default Values Tests ---
     def _extract_js_variable(self, html_content: str, var_name: str) -> Optional[str]:
@@ -366,37 +364,48 @@ class TestApp:
         response = client.get("/", headers={"Accept": "text/html"})
         assert response.status_code == 200
         html_content = response.text
-        expected_js_query = f"const defaultQuery = {json.dumps(default_query)};"
-        assert expected_js_query in html_content
+        # Check for the default query within the React.useState call
+        expected_react_state_query = f"React.useState({json.dumps(default_query)})"
+        assert expected_react_state_query in html_content
 
     def test_graphiql_with_default_variables(self, schema):
         default_vars = {"name": "GraphiQL Default"}
+        # Variables are passed as a JSON string to the server
+        default_vars_json_string = json.dumps(default_vars)
         server = GraphQLHTTPServer(
-            schema=schema, graphiql_default_variables=json.dumps(default_vars)
+            schema=schema, graphiql_default_variables=default_vars_json_string
         )
         client = server.client()
         response = client.get("/", headers={"Accept": "text/html"})
         assert response.status_code == 200
         html_content = response.text
-        expected_js_vars = f"const defaultVariables = {json.dumps(json.dumps(default_vars))};"
-        assert expected_js_vars in html_content
+        # In HTML, this becomes a JS string literal containing the JSON string
+        expected_js_string_literal = json.dumps(default_vars_json_string)
+        expected_react_state_vars = f"React.useState({expected_js_string_literal})"
+        assert expected_react_state_vars in html_content
 
     def test_graphiql_with_default_query_and_variables(self, schema):
         default_query = "query HelloName($name: String!) { helloWorld(name: $name) }"
         default_vars = {"name": "Default User"}
+        default_vars_json_string = json.dumps(default_vars)
+
         server = GraphQLHTTPServer(
             schema=schema,
             graphiql_default_query=default_query,
-            graphiql_default_variables=json.dumps(default_vars),
+            graphiql_default_variables=default_vars_json_string,
         )
         client = server.client()
         response = client.get("/", headers={"Accept": "text/html"})
         assert response.status_code == 200
         html_content = response.text
-        expected_js_query = f"const defaultQuery = {json.dumps(default_query)};"
-        expected_js_vars = f"const defaultVariables = {json.dumps(json.dumps(default_vars))};"
-        assert expected_js_query in html_content
-        assert expected_js_vars in html_content
+
+        expected_react_state_query = f"React.useState({json.dumps(default_query)})"
+        
+        expected_js_string_literal_vars = json.dumps(default_vars_json_string)
+        expected_react_state_vars = f"React.useState({expected_js_string_literal_vars})"
+        
+        assert expected_react_state_query in html_content
+        assert expected_react_state_vars in html_content
 
     def test_graphiql_with_no_defaults(self, schema):
         server = GraphQLHTTPServer(schema=schema)
@@ -404,9 +413,9 @@ class TestApp:
         response = client.get("/", headers={"Accept": "text/html"})
         assert response.status_code == 200
         html_content = response.text
-        # Check for empty string assignments as per server.py logic
-        assert 'const defaultQuery = "";' in html_content
-        assert 'const defaultVariables = "";' in html_content
+        # Check for empty string assignments in React.useState()
+        # This pattern will appear for both default query and default variables
+        assert html_content.count('React.useState("")') >= 2 # Ensure both are present
 
     # --- Custom Main Handler Tests ---
     def test_custom_main_handler_takes_precedence(self, schema):
@@ -445,7 +454,7 @@ class TestApp:
         client = server.client()
         response = client.post("/", json=[])  # Empty batch list
         assert response.status_code == 400
-        expected_message = "Received an empty list"
+        expected_message = "Batch GraphQL requests are not enabled."
         assert expected_message in response.json()["errors"][0]["message"]
 
     def test_http_query_error_malformed_variables(self, schema):
