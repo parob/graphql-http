@@ -45,6 +45,8 @@ jobs:
     needs: build_and_test # Ensure tests pass before publishing
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
     
     steps:
     - name: Checkout repository
@@ -62,6 +64,4 @@ jobs:
       run: python -m build --sdist --wheel .
 
     - name: Publish package to PyPI
-      env:
-        PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       run: python -m twine upload dist/* --skip-existing
