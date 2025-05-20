@@ -90,7 +90,9 @@ class TestApp:
         assert response.text == "OK"  # Use response.text for Starlette client
 
     def test_graphiql(self, schema):
-        server = GraphQLHTTPServer(schema=schema, serve_graphiql=False) # Explicitly disable GraphiQL
+        server = GraphQLHTTPServer(
+            schema=schema, serve_graphiql=False
+        )  # Explicitly disable GraphiQL
         response = server.client().get("/", headers={"Accept": "text/html"})
 
         assert response.status_code == 400  # Expecting HttpQueryError
@@ -183,10 +185,7 @@ class TestApp:
         )
         assert response.status_code == 401
         expected_message = "Authorization header is missing or not Bearer"
-        assert (
-            expected_message
-            in response.json()["errors"][0]["message"]
-        )
+        assert expected_message in response.json()["errors"][0]["message"]
 
     def test_auth_bearer_with_invalid_jwt_format(self, schema):
         server = GraphQLHTTPServer(
@@ -400,10 +399,10 @@ class TestApp:
         html_content = response.text
 
         expected_react_state_query = f"React.useState({json.dumps(default_query)})"
-        
+
         expected_js_string_literal_vars = json.dumps(default_vars_json_string)
         expected_react_state_vars = f"React.useState({expected_js_string_literal_vars})"
-        
+
         assert expected_react_state_query in html_content
         assert expected_react_state_vars in html_content
 
@@ -415,7 +414,7 @@ class TestApp:
         html_content = response.text
         # Check for empty string assignments in React.useState()
         # This pattern will appear for both default query and default variables
-        assert html_content.count('React.useState("")') >= 2 # Ensure both are present
+        assert html_content.count('React.useState("")') >= 2  # Ensure both are present
 
     # --- Custom Main Handler Tests ---
     def test_custom_main_handler_takes_precedence(self, schema):
