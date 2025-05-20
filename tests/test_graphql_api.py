@@ -53,7 +53,7 @@ class TestGraphQLAPI:
         response = server.client().get('/?query={hello(name:"rob")}')
 
         assert response.status_code == 200
-        assert response.json() == {"data":{"hello":"hey rob"}}
+        assert response.json() == {"data": {"hello": "hey rob"}}
 
     def test_graphql_api_error(self):
         from graphql_api import GraphQLAPI

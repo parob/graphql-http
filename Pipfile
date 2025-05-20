@@ -13,6 +13,7 @@ httpx = "*"
 starlette = "*"
 uvicorn = "*"   
 python-multipart = "*"
+black = "*"
 
 [dev]
 pytest = "*"
@@ -21,3 +22,5 @@ pytest-asyncio = "*"
 coverage = "*"
 graphql-api = "*"
 flake8 = "*"
+
+[dev-packages]

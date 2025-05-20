@@ -2,7 +2,6 @@ import os
 import copy
 import json
 
-from inspect import signature
 from typing import Any, List, Callable, Optional, Type, Awaitable
 
 from graphql import GraphQLError
@@ -116,7 +115,9 @@ class GraphQLHTTPServer:
         self.execution_context_class = execution_context_class
         self.auth_domain = auth_domain
         if auth_domain:
-            self.jwks_client = PyJWKClient(f"https://{auth_domain}/.well-known/jwks.json")
+            self.jwks_client = PyJWKClient(
+                f"https://{auth_domain}/.well-known/jwks.json"
+            )
         else:
             self.jwks_client = None
         self.auth_audience = auth_audience
@@ -126,8 +127,10 @@ class GraphQLHTTPServer:
             Route("/{path:path}", self.dispatch, methods=["GET", "POST", "OPTIONS"])
         ]
         if self.health_path:
-            routes.insert(0, Route(self.health_path, self.health_check, methods=["GET"]))
-        
+            routes.insert(
+                0, Route(self.health_path, self.health_check, methods=["GET"])
+            )
+
         middleware_stack = []
         if self.allow_cors:
             allow_headers_list = ["Content-Type"]
@@ -138,22 +141,21 @@ class GraphQLHTTPServer:
                 "allow_methods": ["GET", "POST", "OPTIONS"],
                 "allow_headers": allow_headers_list,
             }
-            if self.auth_enabled: # If auth is enabled, assume credentials might be used.
+            if (
+                self.auth_enabled
+            ):  # If auth is enabled, assume credentials might be used.
                 # Reflect the origin, similar to old behavior, and allow credentials.
                 # This is a broad setting; for production, specific origins are better.
-                cors_kwargs["allow_origin_regex"] = r"https?://.*" # Allows any http/https origin
+                cors_kwargs["allow_origin_regex"] = (
+                    r"https?://.*"  # Allows any http/https
+                )
                 cors_kwargs["allow_credentials"] = True
             else:
                 # If no auth, can be more permissive with origins and no credentials.
                 cors_kwargs["allow_origins"] = ["*"]
 
-            middleware_stack.append(
-                StarletteMiddleware(
-                    CORSMiddleware,
-                    **cors_kwargs
-                )
-            )
-        
+            middleware_stack.append(StarletteMiddleware(CORSMiddleware, **cors_kwargs))
+
         self.app = Starlette(routes=routes, middleware=middleware_stack)
 
     @staticmethod
@@ -163,8 +165,6 @@ class GraphQLHTTPServer:
     encode = staticmethod(json_encode)
 
     async def dispatch(self, request: Request) -> Response:
-        headers = {}
-
         try:
             request_method = request.method.lower()
             data = await self.parse_body(request=request)
@@ -176,14 +176,20 @@ class GraphQLHTTPServer:
                 try:
                     auth_header = request.headers.get("Authorization")
                     if not auth_header or not auth_header.startswith("Bearer "):
-                        raise InvalidTokenError("Authorization header is missing or not Bearer")
-                    
+                        raise InvalidTokenError(
+                            "Authorization header is missing or not Bearer"
+                        )
+
                     token = auth_header[len("Bearer ") :]
 
                     unverified_header = jwt.get_unverified_header(token)
                     if not self.jwks_client:
-                         return self.error_response(ValueError("JWKS client not configured"), status=500)
-                    signing_key = self.jwks_client.get_signing_key(unverified_header["kid"])
+                        return self.error_response(
+                            ValueError("JWKS client not configured"), status=500
+                        )
+                    signing_key = self.jwks_client.get_signing_key(
+                        unverified_header["kid"]
+                    )
 
                     jwt.decode(
                         token,
@@ -218,7 +224,9 @@ class GraphQLHTTPServer:
                 with open(graphiql_path, "r") as f:
                     html_content = f.read()
                 html_content = html_content.replace("DEFAULT_QUERY", default_query)
-                html_content = html_content.replace("DEFAULT_VARIABLES", default_variables)
+                html_content = html_content.replace(
+                    "DEFAULT_VARIABLES", default_variables
+                )
 
                 return HTMLResponse(html_content)
 
@@ -228,7 +236,7 @@ class GraphQLHTTPServer:
                     allow_h = ["Content-Type"]
                     if self.auth_enabled:
                         allow_h.append("Authorization")
-                    
+
                     response_headers = {
                         "Access-Control-Allow-Credentials": "true",
                         "Access-Control-Allow-Headers": ", ".join(allow_h),
@@ -256,37 +264,45 @@ class GraphQLHTTPServer:
                 execution_context_class=self.execution_context_class,
             )
             result, status_code = encode_execution_results(
-                execution_results, 
-                is_batch=isinstance(data, list), 
-                encode=lambda x: x
+                execution_results, is_batch=isinstance(data, list), encode=lambda x: x
             )
-            
+
             return JSONResponse(
                 result,
                 status_code=status_code,
             )
 
         except HttpQueryError as e:
-            return self.error_response(e)
+            return self.error_response(e, status=getattr(e, "status_code", None))
 
     async def health_check(self, request: Request) -> Response:
         return PlainTextResponse("OK")
 
     @staticmethod
     def error_response(e, status=None):
-        error_payload = {"errors": [str(e)]}
-        response_status = status if status is not None else getattr(e, "status_code", 500 if not isinstance(e, HttpQueryError) else 200)
-        
-        custom_headers = getattr(e, "headers", {}) or {}
+        if status is None:
+            if (
+                isinstance(e, GraphQLError)
+                and e.extensions
+                and "statusCode" in e.extensions
+            ):
+                status = e.extensions["statusCode"]
+            elif hasattr(e, "status_code"):
+                status = e.status_code
+            else:
+                status = 500
+
+        if isinstance(e, (jwt.exceptions.InvalidTokenError, ValueError)):
+            error_message = str(e)
+        else:
+            error_message = "Internal Server Error"
 
         return JSONResponse(
-            error_payload,
-            status_code=response_status,
-            headers=custom_headers
+            {"errors": [{"message": error_message}]}, status_code=status
         )
 
     async def parse_body(self, request: Request):
-        content_type = request.headers.get("content-type", "").split(";")[0].strip()
+        content_type = request.headers.get("Content-Type", "")
 
         if content_type == "application/graphql":
             body_bytes = await request.body()
@@ -311,23 +327,34 @@ class GraphQLHTTPServer:
                 return load_json_body(body_bytes.decode("utf8"))
             except (HttpQueryError, UnicodeDecodeError):
                 return {"query": body_bytes.decode("utf8")}
-        
+
         return {}
 
     def should_serve_graphiql(self, request: Request):
-        if not self.serve_graphiql or "raw" in request.query_params:
+        if not self.serve_graphiql or (
+            self.health_path and request.url.path == self.health_path
+        ):
             return False
-
-        return self.request_wants_html(request=request)
+        if "raw" in request.query_params:
+            return False
+        return self.request_wants_html(request)
 
     def request_wants_html(self, request: Request):
-        accept_header = request.headers.get("accept", "")
-        
+        accept_header = request.headers.get("accept", "").lower()
+        # Serve HTML if "text/html" is accepted and "application/json" is not,
+        # or if "text/html" is more preferred than "application/json".
+        # A simple check: if "text/html" is present and "application/json" is not,
+        # or if "text/html" appears before "application/json".
+        # For */*, we should not serve HTML by default.
         if "text/html" in accept_header:
             if "application/json" in accept_header:
-                return True
-            return True
-        return False
+                # If both are present, serve HTML only if text/html comes first
+                # (this is a simplification of q-factor parsing)
+                return accept_header.find("text/html") < accept_header.find(
+                    "application/json"
+                )
+            return True  # Only text/html is present
+        return False  # text/html is not present, or only */*
 
     def client(self):
         return TestClient(self.app)
@@ -339,25 +366,18 @@ class GraphQLHTTPServer:
         main: Optional[Callable[[Request], Awaitable[Response]]] = None,
         **kwargs,
     ):
-        if host is None:
-            host = "localhost"
-
-        if port is None:
-            port = 5000
-        
-        app_to_run = self.app
+        hostname = host or "127.0.0.1"
+        port_num = port or 5000
 
         if main:
+
             async def main_endpoint_wrapper(request: Request) -> Response:
                 return await main(request)
 
-            main_routes = [
-                Route(
-                    "/{path:path}", 
-                    main_endpoint_wrapper, 
-                    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
-                )
-            ]
-            app_to_run = Starlette(routes=main_routes)
+            custom_routes = [Route("/{path:path}", main_endpoint_wrapper)]
+            app_to_run = Starlette(routes=custom_routes)
+        else:
+            app_to_run = self.app
 
-        uvicorn.run(app_to_run, host=host, port=port, **kwargs)
+        print(f"GraphQL server running at http://{hostname}:{port_num}/graphql")
+        uvicorn.run(app_to_run, host=hostname, port=port_num, **kwargs)

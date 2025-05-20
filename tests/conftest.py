@@ -1,12 +1,12 @@
 import pytest
 
 from graphql import (
-    GraphQLSchema, 
-    GraphQLObjectType, 
-    GraphQLField, 
-    GraphQLString, 
-    GraphQLArgument, 
-    GraphQLNonNull
+    GraphQLSchema,
+    GraphQLObjectType,
+    GraphQLField,
+    GraphQLString,
+    GraphQLArgument,
+    GraphQLNonNull,
 )
 
 
@@ -21,12 +21,10 @@ def schema():
             fields={
                 "hello": GraphQLField(type_=GraphQLString, resolve=lambda *_: "world"),
                 "helloWorld": GraphQLField(
-                    type_=GraphQLString, 
-                    args={
-                        "name": GraphQLArgument(GraphQLNonNull(GraphQLString))
-                    },
-                    resolve=resolve_hello_world
-                )
+                    type_=GraphQLString,
+                    args={"name": GraphQLArgument(GraphQLNonNull(GraphQLString))},
+                    resolve=resolve_hello_world,
+                ),
             },
         )
     )
