@@ -1,0 +1,4 @@
+include README.md
+include VERSION
+include graphql_http_server/graphiql/index.html
+include graphql_http_server/service/service_manager_default.graphql
