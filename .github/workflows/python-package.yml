@@ -5,7 +5,7 @@ on:
     branches:
       - main # Or your default branch
     tags:
-      - 'v*.*.*' # For publishing to PyPI
+      - '*.*.*' # For publishing to PyPI
   pull_request:
     branches:
       - main # Or your default branch
@@ -44,11 +44,21 @@ jobs:
     name: Publish to PyPI
     needs: build_and_test # Ensure tests pass before publishing
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     permissions:
       id-token: write
     
     steps:
+    - name: Validate tag format (e.g., 1.0.0)
+      run: |
+        TAG_NAME="${{ github.ref_name }}"
+        if ! [[ "$TAG_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Error: Tag '$TAG_NAME' is not in the required X.Y.Z numeric format (e.g., 1.0.0)."
+          exit 1
+        fi
+        echo "Tag '$TAG_NAME' is valid."
+      shell: bash
+
     - name: Checkout repository
       uses: actions/checkout@v4
 
@@ -59,6 +69,10 @@ jobs:
 
     - name: Install build dependencies
       run: python -m pip install --upgrade pip build twine
+
+    - name: Update VERSION file
+      run: echo "${{ github.ref_name }}" > VERSION
+      shell: bash
 
     - name: Build package
       run: python -m build --sdist --wheel .
