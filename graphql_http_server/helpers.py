@@ -98,7 +98,7 @@ def json_encode(data: Union[Dict, List], pretty: bool = False) -> str:
 
 def encode_execution_results(
     execution_results: List[Optional[ExecutionResult]],
-    format_error: Callable[[Exception], Dict] = None,
+    format_error: Optional[Callable[[Exception], Dict]] = None,
     is_batch: bool = False,
     encode: Callable[[Dict], Any] = json_encode,
 ) -> Tuple[Any, int]:

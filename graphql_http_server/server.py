@@ -41,14 +41,14 @@ import uvicorn
 def run_simple(
     schema,
     root_value: Any = None,
-    middleware: List[Callable[[Callable, Any], Any]] = None,
-    hostname: str = None,
-    port: int = None,
+    middleware: Optional[List[Callable[[Callable, Any], Any]]] = None,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
     **kwargs,
 ):
     return GraphQLHTTPServer.from_api(
         schema=schema, root_value=root_value, middleware=middleware, **kwargs
-    ).run(host=hostname, port=port, **kwargs)
+    ).run(host=host, port=port, **kwargs)
 
 
 graphiql_dir = os.path.join(os.path.dirname(__file__), "graphiql")
@@ -64,9 +64,9 @@ class GraphQLHTTPServer:
         except ImportError:
             raise ImportError("GraphQLAPI is not installed.")
 
-        api: GraphQLAPI = api
+        graphql_api: GraphQLAPI = api
 
-        executor = api.executor(root_value=root_value)
+        executor = graphql_api.executor(root_value=root_value)
 
         schema: GraphQLSchema = executor.schema
         meta = executor.meta
@@ -91,72 +91,24 @@ class GraphQLHTTPServer:
         middleware: List[Callable[[Callable, Any], Any]] = None,
         context_value: Any = None,
         serve_graphiql: bool = True,
-        graphiql_default_query: str = None,
-        graphiql_default_variables: str = None,
-        allow_cors: bool = False,
-        health_path: str = None,
-        execution_context_class: Optional[Type[ExecutionContext]] = None,
-        auth_domain: str = None,
-        auth_audience: str = None,
-        auth_enabled: bool = False,
+        graphiql_default_query: Optional[str] = None,
+        execution_context_class: Optional[Type[ExecutionContext]] = None
     ):
         if middleware is None:
             middleware = []
 
         self.schema = schema
         self.root_value = root_value
-        self.middleware = middleware
         self.context_value = context_value
         self.serve_graphiql = serve_graphiql
         self.graphiql_default_query = graphiql_default_query
-        self.graphiql_default_variables = graphiql_default_variables
-        self.allow_cors = allow_cors
-        self.health_path = health_path
         self.execution_context_class = execution_context_class
-        self.auth_domain = auth_domain
-        if auth_domain:
-            self.jwks_client = PyJWKClient(
-                f"https://{auth_domain}/.well-known/jwks.json"
-            )
-        else:
-            self.jwks_client = None
-        self.auth_audience = auth_audience
-        self.auth_enabled = auth_enabled
 
         routes = [
             Route("/{path:path}", self.dispatch, methods=["GET", "POST", "OPTIONS"])
         ]
-        if self.health_path:
-            routes.insert(
-                0, Route(self.health_path, self.health_check, methods=["GET"])
-            )
 
-        middleware_stack = []
-        if self.allow_cors:
-            allow_headers_list = ["Content-Type"]
-            if self.auth_enabled:
-                allow_headers_list.append("Authorization")
-
-            cors_kwargs = {
-                "allow_methods": ["GET", "POST", "OPTIONS"],
-                "allow_headers": allow_headers_list,
-            }
-            if (
-                self.auth_enabled
-            ):  # If auth is enabled, assume credentials might be used.
-                # Reflect the origin, similar to old behavior, and allow credentials.
-                # This is a broad setting; for production, specific origins are better.
-                cors_kwargs["allow_origin_regex"] = (
-                    r"https?://.*"  # Allows any http/https
-                )
-                cors_kwargs["allow_credentials"] = True
-            else:
-                # If no auth, can be more permissive with origins and no credentials.
-                cors_kwargs["allow_origins"] = ["*"]
-
-            middleware_stack.append(StarletteMiddleware(CORSMiddleware, **cors_kwargs))
-
-        self.app = Starlette(routes=routes, middleware=middleware_stack)
+        self.app = Starlette(routes=routes)
 
     @staticmethod
     def format_error(error: GraphQLError) -> {}:
@@ -169,83 +121,20 @@ class GraphQLHTTPServer:
             request_method = request.method.lower()
             data = await self.parse_body(request=request)
 
-            if self.health_path and request.path == self.health_path:
-                return Response("OK")
-
-            if self.auth_enabled and request_method != "options":
-                try:
-                    auth_header = request.headers.get("Authorization")
-                    if not auth_header or not auth_header.startswith("Bearer "):
-                        raise InvalidTokenError(
-                            "Authorization header is missing or not Bearer"
-                        )
-
-                    token = auth_header[len("Bearer ") :]
-
-                    unverified_header = jwt.get_unverified_header(token)
-                    if not self.jwks_client:
-                        return self.error_response(
-                            ValueError("JWKS client not configured"), status=500
-                        )
-                    signing_key = self.jwks_client.get_signing_key(
-                        unverified_header["kid"]
-                    )
-
-                    jwt.decode(
-                        token,
-                        audience=self.auth_audience,
-                        issuer=f"https://{self.auth_domain}/",
-                        key=signing_key.key,
-                        algorithms=["RS256"],
-                    )
-                except (
-                    InvalidTokenError,
-                    InvalidAudienceError,
-                    InvalidIssuerError,
-                    JSONDecodeError,
-                    DecodeError,
-                    KeyError,
-                    Exception,
-                ) as e:
-                    return self.error_response(e, status=401)
 
             if request_method == "get" and self.should_serve_graphiql(request=request):
                 graphiql_path = os.path.join(graphiql_dir, "index.html")
+
                 if self.graphiql_default_query:
                     default_query = json.dumps(self.graphiql_default_query)
                 else:
                     default_query = '""'
 
-                if self.graphiql_default_variables:
-                    default_variables = json.dumps(self.graphiql_default_variables)
-                else:
-                    default_variables = '""'
-
                 with open(graphiql_path, "r") as f:
                     html_content = f.read()
                 html_content = html_content.replace("DEFAULT_QUERY", default_query)
-                html_content = html_content.replace(
-                    "DEFAULT_VARIABLES", default_variables
-                )
 
                 return HTMLResponse(html_content)
-
-            if request_method == "options":
-                response_headers = {}
-                if self.allow_cors:
-                    allow_h = ["Content-Type"]
-                    if self.auth_enabled:
-                        allow_h.append("Authorization")
-
-                    response_headers = {
-                        "Access-Control-Allow-Credentials": "true",
-                        "Access-Control-Allow-Headers": ", ".join(allow_h),
-                        "Access-Control-Allow-Methods": "GET, POST",
-                    }
-                    origin = request.headers.get("ORIGIN")
-                    if origin:
-                        response_headers["Access-Control-Allow-Origin"] = origin
-                return PlainTextResponse("OK", headers=response_headers)
 
             context_value = copy.copy(self.context_value)
 
@@ -333,53 +222,45 @@ class GraphQLHTTPServer:
         return {}
 
     def should_serve_graphiql(self, request: Request):
-        if not self.serve_graphiql or (
-            self.health_path and request.url.path == self.health_path
-        ):
+
+        if not self.serve_graphiql:
             return False
+        
         if "raw" in request.query_params:
             return False
-        return self.request_wants_html(request)
-
-    def request_wants_html(self, request: Request):
+        
         accept_header = request.headers.get("accept", "").lower()
-        # Serve HTML if "text/html" is accepted and "application/json" is not,
-        # or if "text/html" is more preferred than "application/json".
-        # A simple check: if "text/html" is present and "application/json" is not,
-        # or if "text/html" appears before "application/json".
-        # For */*, we should not serve HTML by default.
+
         if "text/html" in accept_header:
             if "application/json" in accept_header:
-                # If both are present, serve HTML only if text/html comes first
-                # (this is a simplification of q-factor parsing)
                 return accept_header.find("text/html") < accept_header.find(
                     "application/json"
                 )
-            return True  # Only text/html is present
-        return False  # text/html is not present, or only */*
+            return True
+        
+        return False
 
     def client(self):
         return TestClient(self.app)
 
     def run(
         self,
-        host: str = None,
-        port: int = None,
+        host: Optional[str] = "127.0.0.1",
+        port: Optional[int = 5000,
         main: Optional[Callable[[Request], Awaitable[Response]]] = None,
         **kwargs,
     ):
-        hostname = host or "127.0.0.1"
-        port_num = port or 5000
 
         if main:
-
             async def main_endpoint_wrapper(request: Request) -> Response:
                 return await main(request)
 
-            custom_routes = [Route("/{path:path}", main_endpoint_wrapper)]
+            custom_routes = [
+                Route("/{path:path}", main_endpoint_wrapper, methods=["GET", "POST", "OPTIONS"])
+            ]
             app_to_run = Starlette(routes=custom_routes)
         else:
             app_to_run = self.app
 
-        print(f"GraphQL server running at http://{hostname}:{port_num}/graphql")
-        uvicorn.run(app_to_run, host=hostname, port=port_num, **kwargs)
+        print(f"GraphQL server running at http://{host}:{port}/graphql")
+        uvicorn.run(app_to_run, host=host, port=port, **kwargs)
