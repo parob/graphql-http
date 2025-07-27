@@ -1,7 +1,6 @@
 import threading
 import time
 import json
-from typing import Optional
 
 from starlette.testclient import TestClient  # Import TestClient
 
@@ -349,7 +348,6 @@ class TestApp:
         # The actual message from HttpQueryError is more specific
         assert "Unable to parse JSON body" in response.json()["errors"][0]["message"]
 
-
     def test_graphiql_with_default_query(self, schema):
         default_query = "{ defaultHello: hello }"
         server = GraphQLHTTPServer(schema=schema, graphiql_default_query=default_query)
@@ -360,7 +358,6 @@ class TestApp:
         # Check for the default query within the React.useState call
         expected_react_state_query = f"{json.dumps(default_query)}"
         assert expected_react_state_query in html_content
-
 
     # --- Custom Main Handler Tests ---
     def test_custom_main_handler_takes_precedence(self, schema):

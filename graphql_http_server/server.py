@@ -30,10 +30,7 @@ from graphql_http_server.helpers import (
 import jwt
 from jwt import (
     PyJWKClient,
-    InvalidTokenError,
-    InvalidAudienceError,
-    InvalidIssuerError,
-    DecodeError,
+    InvalidTokenError
 )
 import uvicorn
 
@@ -137,10 +134,10 @@ class GraphQLHTTPServer:
                 allow_headers_list.append("Authorization")
 
             allow_origin_regex = None
-            allow_credentials=False
-            allow_origins=()
+            allow_credentials = False
+            allow_origins = ()
 
-            if (self.auth_enabled):  
+            if (self.auth_enabled):
                 allow_origin_regex = (
                     r"https?://.*"  # Allows any http/https
                 )
@@ -149,7 +146,7 @@ class GraphQLHTTPServer:
                 allow_origins = ["*"]
 
             middleware_stack.append(StarletteMiddleware(
-                CORSMiddleware, 
+                CORSMiddleware,
                 allow_methods=["GET", "POST", "OPTIONS"],
                 allow_headers=allow_headers_list,
                 allow_origin_regex=allow_origin_regex,
@@ -186,7 +183,7 @@ class GraphQLHTTPServer:
                             ValueError("JWKS client not configured"), status=500
                         )
 
-                    token = auth_header.replace("Bearer ","")
+                    token = auth_header.replace("Bearer ", "")
                     signing_key = self.jwks_client.get_signing_key_from_jwt(token)
                     jwt.decode(
                         token,
