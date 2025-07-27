@@ -2,7 +2,7 @@ import os
 import copy
 import json
 
-from typing import Any, List, Callable, Optional, Type, Awaitable
+from typing import Any, List, Callable, Optional, Type, Awaitable, Dict
 
 from graphql import GraphQLError
 from graphql_api.context import GraphQLContext
@@ -41,9 +41,9 @@ import uvicorn
 def run_simple(
     schema,
     root_value: Any = None,
-    middleware: List[Callable[[Callable, Any], Any]] = None,
-    hostname: str = None,
-    port: int = None,
+    middleware: Optional[List[Callable[[Callable, Any], Any]]] = None,
+    hostname: Optional[str] = None,
+    port: Optional[int] = None,
     **kwargs,
 ):
     return GraphQLHTTPServer.from_api(
@@ -64,9 +64,9 @@ class GraphQLHTTPServer:
         except ImportError:
             raise ImportError("GraphQLAPI is not installed.")
 
-        api: GraphQLAPI = api
+        graphql_api: GraphQLAPI = api
 
-        executor = api.executor(root_value=root_value)
+        executor = graphql_api.executor(root_value=root_value)
 
         schema: GraphQLSchema = executor.schema
         meta = executor.meta
@@ -88,16 +88,16 @@ class GraphQLHTTPServer:
         self,
         schema: GraphQLSchema,
         root_value: Any = None,
-        middleware: List[Callable[[Callable, Any], Any]] = None,
+        middleware: Optional[List[Callable[[Callable, Any], Any]]] = None,
         context_value: Any = None,
         serve_graphiql: bool = True,
-        graphiql_default_query: str = None,
-        graphiql_default_variables: str = None,
+        graphiql_default_query: Optional[str] = None,
         allow_cors: bool = False,
-        health_path: str = None,
+        health_path: Optional[str] = None,
         execution_context_class: Optional[Type[ExecutionContext]] = None,
-        auth_domain: str = None,
-        auth_audience: str = None,
+        auth_jwks_uri: Optional[str] = None,
+        auth_issuer: Optional[str] = None,
+        auth_audience: Optional[str] = None,
         auth_enabled: bool = False,
     ):
         if middleware is None:
@@ -109,19 +109,18 @@ class GraphQLHTTPServer:
         self.context_value = context_value
         self.serve_graphiql = serve_graphiql
         self.graphiql_default_query = graphiql_default_query
-        self.graphiql_default_variables = graphiql_default_variables
         self.allow_cors = allow_cors
         self.health_path = health_path
         self.execution_context_class = execution_context_class
-        self.auth_domain = auth_domain
-        if auth_domain:
-            self.jwks_client = PyJWKClient(
-                f"https://{auth_domain}/.well-known/jwks.json"
-            )
-        else:
-            self.jwks_client = None
+        self.auth_jwks_uri = auth_jwks_uri
+        self.auth_issuer = auth_issuer
         self.auth_audience = auth_audience
         self.auth_enabled = auth_enabled
+
+        if auth_jwks_uri:
+            self.jwks_client = PyJWKClient(auth_jwks_uri)
+        else:
+            self.jwks_client = None
 
         routes = [
             Route("/{path:path}", self.dispatch, methods=["GET", "POST", "OPTIONS"])
@@ -137,30 +136,33 @@ class GraphQLHTTPServer:
             if self.auth_enabled:
                 allow_headers_list.append("Authorization")
 
-            cors_kwargs = {
-                "allow_methods": ["GET", "POST", "OPTIONS"],
-                "allow_headers": allow_headers_list,
-            }
-            if (
-                self.auth_enabled
-            ):  # If auth is enabled, assume credentials might be used.
-                # Reflect the origin, similar to old behavior, and allow credentials.
-                # This is a broad setting; for production, specific origins are better.
-                cors_kwargs["allow_origin_regex"] = (
+            allow_origin_regex = None
+            allow_credentials=False
+            allow_origins=()
+
+            if (self.auth_enabled):  
+                allow_origin_regex = (
                     r"https?://.*"  # Allows any http/https
                 )
-                cors_kwargs["allow_credentials"] = True
+                allow_credentials = True
             else:
-                # If no auth, can be more permissive with origins and no credentials.
-                cors_kwargs["allow_origins"] = ["*"]
+                allow_origins = ["*"]
 
-            middleware_stack.append(StarletteMiddleware(CORSMiddleware, **cors_kwargs))
+            middleware_stack.append(StarletteMiddleware(
+                CORSMiddleware, 
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=allow_headers_list,
+                allow_origin_regex=allow_origin_regex,
+                allow_credentials=allow_credentials,
+                allow_origins=allow_origins
+            ))
 
         self.app = Starlette(routes=routes, middleware=middleware_stack)
 
     @staticmethod
-    def format_error(error: GraphQLError) -> {}:
-        return error.formatted
+    def format_error(error: GraphQLError) -> Dict[str, Any]:
+        error_dict: Dict[str, Any] = error.formatted  # type: ignore
+        return error_dict
 
     encode = staticmethod(json_encode)
 
@@ -169,7 +171,7 @@ class GraphQLHTTPServer:
             request_method = request.method.lower()
             data = await self.parse_body(request=request)
 
-            if self.health_path and request.path == self.health_path:
+            if self.health_path and request.url.path == self.health_path:
                 return Response("OK")
 
             if self.auth_enabled and request_method != "options":
@@ -179,34 +181,22 @@ class GraphQLHTTPServer:
                         raise InvalidTokenError(
                             "Authorization header is missing or not Bearer"
                         )
-
-                    token = auth_header[len("Bearer ") :]
-
-                    unverified_header = jwt.get_unverified_header(token)
                     if not self.jwks_client:
                         return self.error_response(
                             ValueError("JWKS client not configured"), status=500
                         )
-                    signing_key = self.jwks_client.get_signing_key(
-                        unverified_header["kid"]
-                    )
 
+                    token = auth_header.replace("Bearer ","")
+                    signing_key = self.jwks_client.get_signing_key_from_jwt(token)
                     jwt.decode(
                         token,
                         audience=self.auth_audience,
-                        issuer=f"https://{self.auth_domain}/",
+                        issuer=self.auth_issuer,
                         key=signing_key.key,
                         algorithms=["RS256"],
+                        verify=True
                     )
-                except (
-                    InvalidTokenError,
-                    InvalidAudienceError,
-                    InvalidIssuerError,
-                    JSONDecodeError,
-                    DecodeError,
-                    KeyError,
-                    Exception,
-                ) as e:
+                except Exception as e:
                     return self.error_response(e, status=401)
 
             if request_method == "get" and self.should_serve_graphiql(request=request):
@@ -216,17 +206,9 @@ class GraphQLHTTPServer:
                 else:
                     default_query = '""'
 
-                if self.graphiql_default_variables:
-                    default_variables = json.dumps(self.graphiql_default_variables)
-                else:
-                    default_variables = '""'
-
                 with open(graphiql_path, "r") as f:
                     html_content = f.read()
                 html_content = html_content.replace("DEFAULT_QUERY", default_query)
-                html_content = html_content.replace(
-                    "DEFAULT_VARIABLES", default_variables
-                )
 
                 return HTMLResponse(html_content)
 
@@ -252,12 +234,17 @@ class GraphQLHTTPServer:
             if isinstance(context_value, GraphQLContext):
                 context_value.meta["http_request"] = request
 
+            query_data: Dict[str, Any] = {}
+
+            for key, value in request.query_params.items():
+                query_data[key] = value
+
             execution_results, all_params = await run_in_threadpool(
                 run_http_query,
                 self.schema,
                 request_method,
                 data,
-                query_data=request.query_params,
+                query_data=query_data,
                 root_value=self.root_value,
                 middleware=self.middleware,
                 context_value=context_value,
@@ -288,7 +275,7 @@ class GraphQLHTTPServer:
             ):
                 status = e.extensions["statusCode"]
             elif hasattr(e, "status_code"):
-                status = e.status_code
+                status = e.status_code  # type: ignore
             else:
                 status = 500
 
@@ -363,8 +350,8 @@ class GraphQLHTTPServer:
 
     def run(
         self,
-        host: str = None,
-        port: int = None,
+        host: Optional[str] = None,
+        port: Optional[int] = None,
         main: Optional[Callable[[Request], Awaitable[Response]]] = None,
         **kwargs,
     ):

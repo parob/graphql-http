@@ -1,66 +1,98 @@
 <!--
- *  Copyright (c) 2021 GraphQL Contributors
+ *  Copyright (c) 2025 GraphQL Contributors
  *  All rights reserved.
  *
  *  This source code is licensed under the license found in the
  *  LICENSE file in the root directory of this source tree.
 -->
-<!DOCTYPE html>
-<html lang="en" style="font-size: 14px">
-<head>
-    <title></title>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GraphiQL 5 with React 19 and GraphiQL Explorer</title>
     <style>
-        body {
-            height: 100%;
-            margin: 0;
-            width: 100%;
-            overflow: hidden;
-        }
+      body {
+        margin: 0;
+      }
 
-        #graphiql {
-            height: 100vh;
-        }
+      #graphiql {
+        height: 100dvh;
+      }
+
+      .loading {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 4rem;
+      }
     </style>
+    <link rel="stylesheet" href="https://esm.sh/graphiql/dist/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://esm.sh/@graphiql/plugin-explorer/dist/style.css"
+    />
+    <!--
+     * Note:
+     * The ?standalone flag bundles the module along with all of its `dependencies`, excluding `peerDependencies`, into a single JavaScript file.
+     * `@emotion/is-prop-valid` is a shim to remove the console error ` module "@emotion /is-prop-valid" not found`. Upstream issue: https://github.com/motiondivision/motion/issues/3126
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@19.1.0",
+          "react/": "https://esm.sh/react@19.1.0/",
 
-    <link rel="stylesheet" href="https://unpkg.com/graphiql@4/graphiql.min.css"/>
-    <link rel="stylesheet" href="https://unpkg.com/@graphiql/plugin-explorer@4/dist/style.css"/>
-</head>
+          "react-dom": "https://esm.sh/react-dom@19.1.0",
+          "react-dom/": "https://esm.sh/react-dom@19.1.0/",
 
-<body>
-<div id="graphiql">Loading...</div>
+          "graphiql": "https://esm.sh/graphiql?standalone&external=react,react-dom,@graphiql/react,graphql",
+          "graphiql/": "https://esm.sh/graphiql/",
+          "@graphiql/plugin-explorer": "https://esm.sh/@graphiql/plugin-explorer?standalone&external=react,@graphiql/react,graphql",
+          "@graphiql/react": "https://esm.sh/@graphiql/react?standalone&external=react,react-dom,graphql,@graphiql/toolkit,@emotion/is-prop-valid",
 
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/graphiql@4/graphiql.min.js"></script>
-<script crossorigin src="https://unpkg.com/@graphiql/plugin-explorer@4/dist/index.umd.js"></script><script>
+          "@graphiql/toolkit": "https://esm.sh/@graphiql/toolkit?standalone&external=graphql",
+          "graphql": "https://esm.sh/graphql@16.11.0",
+          "@emotion/is-prop-valid": "data:text/javascript,"
+        }
+      }
+    </script>
+    <script type="module">
+      import React from 'react';
+      import ReactDOM from 'react-dom/client';
+      import { GraphiQL, HISTORY_PLUGIN } from 'graphiql';
+      import { createGraphiQLFetcher } from '@graphiql/toolkit';
+      import { explorerPlugin } from '@graphiql/plugin-explorer';
+      import 'graphiql/setup-workers/esm.sh';
 
-    const params = Object.fromEntries(new URLSearchParams(location.search));
-    const { query, variables, operationName, ...rest } = params;
-    const fetchURL = '?' + new URLSearchParams(rest).toString();
-
-    const fetcher = GraphiQL.createFetcher({ url: fetchURL });
-
-    function App() {
-      const [gql, setGql] = React.useState(DEFAULT_QUERY);
-      const [variablesGql, setVariablesGql] = React.useState(DEFAULT_VARIABLES);
-
-      const explorer = GraphiQLPluginExplorer.explorerPlugin({
-        query: gql,
-        onEdit: setGql,
+      const params = Object.fromEntries(new URLSearchParams(location.search));
+      const { query, variables, operationName, ...rest } = params;
+      const fetchURL = '?' + new URLSearchParams(rest).toString();
+      
+      const fetcher = createGraphiQLFetcher({
+        url: fetchURL
       });
-      return React.createElement(GraphiQL, {
-        fetcher,
-        query: gql,
-        variables: variablesGql,
-        onEditVariables: setVariablesGql,
-        onEditQuery: setGql,
-        plugins: [explorer],
-        headerEditorEnabled: true,
-      });
-    }
+      const plugins = [HISTORY_PLUGIN, explorerPlugin()];
 
-    ReactDOM.createRoot(document.getElementById('graphiql'))
-            .render(React.createElement(App));
-</script>
-</body>
+      function App() {
+        return React.createElement(GraphiQL, {
+          fetcher,
+          plugins,
+          defaultEditorToolsVisibility: true,
+          isHeadersEditorEnabled: true,
+          defaultQuery: "DEFAULT_QUERY"
+        });
+      }
+
+      const container = document.getElementById('graphiql');
+      const root = ReactDOM.createRoot(container);
+      root.render(React.createElement(App));
+    </script>
+  </head>
+  <body>
+    <div id="graphiql">
+      <div class="loading">Loading…</div>
+    </div>
+  </body>
 </html>

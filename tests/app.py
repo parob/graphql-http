@@ -17,14 +17,9 @@ query HelloQuery($name: String!){
 }
 """
 
-default_variables = """
-{ "name": "Rob" }
-"""
-
 server = GraphQLHTTPServer.from_api(
     api=api,
-    graphiql_default_query=default_query,
-    graphiql_default_variables=default_variables,
+    graphiql_default_query=default_query
 )
 
 
