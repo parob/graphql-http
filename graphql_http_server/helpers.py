@@ -22,6 +22,7 @@ from graphql import (
     get_operation_ast,
     parse,
     validate,
+    FieldNode
 )
 
 from .error import HttpQueryError
@@ -183,6 +184,7 @@ def execute_graphql_request(
     schema: GraphQLSchema,
     params: GraphQLParams,
     allow_only_query: bool = False,
+    allow_only_introspection: bool = True,
     **kwargs,
 ):
     if not params.query:
@@ -207,6 +209,26 @@ def execute_graphql_request(
                     f"from a POST request.",
                     headers={"Allow": "POST"},
                 )
+            
+    if allow_only_introspection:
+        is_introspection_query = True
+        operation_ast = get_operation_ast(document, params.operation_name)
+        if operation_ast:
+            for field in operation_ast.selection_set.selections:
+                if isinstance(field, FieldNode):
+                    if field.name.value.startswith("___"):
+                        is_introspection_query = False
+                else: 
+                    is_introspection_query = False
+        else:
+            is_introspection_query = False
+
+        if not is_introspection_query:
+            raise HttpQueryError(
+                401,
+                f"Only introspection operations are permitted."
+            )
+
 
     # Note: the schema is not validated here for performance reasons.
     # This should be done only once when starting the server.

@@ -170,32 +170,7 @@ class GraphQLHTTPServer:
 
             if self.health_path and request.url.path == self.health_path:
                 return Response("OK")
-
-            if self.auth_enabled and request_method != "options":
-                try:
-                    auth_header = request.headers.get("Authorization")
-                    if not auth_header or not auth_header.startswith("Bearer "):
-                        raise InvalidTokenError(
-                            "Authorization header is missing or not Bearer"
-                        )
-                    if not self.jwks_client:
-                        return self.error_response(
-                            ValueError("JWKS client not configured"), status=500
-                        )
-
-                    token = auth_header.replace("Bearer ", "")
-                    signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-                    jwt.decode(
-                        token,
-                        audience=self.auth_audience,
-                        issuer=self.auth_issuer,
-                        key=signing_key.key,
-                        algorithms=["RS256"],
-                        verify=True
-                    )
-                except Exception as e:
-                    return self.error_response(e, status=401)
-
+            
             if request_method == "get" and self.should_serve_graphiql(request=request):
                 graphiql_path = os.path.join(graphiql_dir, "index.html")
                 if self.graphiql_default_query:
@@ -208,7 +183,7 @@ class GraphQLHTTPServer:
                 html_content = html_content.replace("DEFAULT_QUERY", default_query)
 
                 return HTMLResponse(html_content)
-
+            
             if request_method == "options":
                 response_headers = {}
                 if self.allow_cors:
@@ -225,6 +200,32 @@ class GraphQLHTTPServer:
                     if origin:
                         response_headers["Access-Control-Allow-Origin"] = origin
                 return PlainTextResponse("OK", headers=response_headers)
+            
+            if self.auth_enabled:
+                try:
+                    auth_header = request.headers.get("Authorization")
+                    if not auth_header or not auth_header.startswith("Bearer "):
+                        raise InvalidTokenError(
+                            "Authorization header is missing or not Bearer"
+                        )
+                    if not self.jwks_client:
+                        return self.error_response(
+                            ValueError("JWKS client not configured"), status=500
+                        )
+
+                    token = auth_header.replace("Bearer ", "")\
+
+                    signing_key = self.jwks_client.get_signing_key_from_jwt(token)
+                    jwt.decode(
+                        token,
+                        audience=self.auth_audience,
+                        issuer=self.auth_issuer,
+                        key=signing_key.key,
+                        algorithms=["RS256"],
+                        verify=True
+                    )
+                except Exception as e:
+                    return self.error_response(e, status=401)
 
             context_value = copy.copy(self.context_value)
 
