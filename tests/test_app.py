@@ -295,14 +295,13 @@ class TestApp:
     def test_allow_only_introspection(self, schema):
         server = GraphQLHTTPServer(
             schema=schema,
-            allow_only_introspection=True,
+            auth_enabled=True,
         )
         client = server.client()
 
         # Test that a regular query is blocked
         response = client.get("/?query={hello}")
         assert response.status_code == 401
-        assert "Only introspection operations are permitted" in response.json()["errors"][0]["message"]
 
         # Test that an introspection query is allowed
         introspection_query = """

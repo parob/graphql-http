@@ -205,33 +205,42 @@ class GraphQLHTTPServer:
                 return PlainTextResponse("OK", headers=response_headers)
             
             if self.auth_enabled:
-                try:
-                    auth_header = request.headers.get("Authorization")
-                    if not auth_header or not auth_header.startswith("Bearer "):
-                        raise InvalidTokenError(
-                            "Authorization header is missing or not Bearer"
-                        )
-                    if not self.jwks_client:
-                        return self.error_response(
-                            ValueError("JWKS client not configured"), status=500
-                        )
+                if self.auth_enabled_for_introspection == False:
+                    introspection_fields = ["__schema", "__type", "__typename"]
+                    query_data_lower = str(data).lower()
+                    introspection_fields_present = [
+                        f for f in introspection_fields if f in query_data_lower
+                    ]
+                    if introspection_fields_present:
+                        allow_only_introspection = True
 
-                    token = auth_header.replace("Bearer ", "")\
+                if not allow_only_introspection:
+                    try:
+                        auth_header = request.headers.get("Authorization")
+                        if not auth_header or not auth_header.startswith("Bearer "):
+                            raise InvalidTokenError(
+                                "Authorization header is missing or not Bearer"
+                            )
+                        if not self.jwks_client:
+                            return self.error_response(
+                                ValueError("JWKS client not configured"), status=500
+                            )
 
-                    signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-                    jwt.decode(
-                        token,
-                        audience=self.auth_audience,
-                        issuer=self.auth_issuer,
-                        key=signing_key.key,
-                        algorithms=["RS256"],
-                        verify=True
-                    )
-                except Exception as e:
-                    return self.error_response(e, status=401)
+                        token = auth_header.replace("Bearer ", "")\
+
+                        signing_key = self.jwks_client.get_signing_key_from_jwt(token)
+                        jwt.decode(
+                            token,
+                            audience=self.auth_audience,
+                            issuer=self.auth_issuer,
+                            key=signing_key.key,
+                            algorithms=["RS256"],
+                            verify=True
+                        )
+                    except Exception as e:
+                        return self.error_response(e, status=401)
                 
-                if self.auth_enabled_for_introspection == False and "intospection" in str(data).lower():
-                    allow_only_introspection = True
+
 
             context_value = copy.copy(self.context_value)
 
