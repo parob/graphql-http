@@ -173,7 +173,7 @@ class GraphQLHTTPServer:
 
             if self.health_path and request.url.path == self.health_path:
                 return Response("OK")
-            
+
             if request_method == "get" and self.should_serve_graphiql(request=request):
                 graphiql_path = os.path.join(graphiql_dir, "index.html")
                 if self.graphiql_default_query:
@@ -186,7 +186,7 @@ class GraphQLHTTPServer:
                 html_content = html_content.replace("DEFAULT_QUERY", default_query)
 
                 return HTMLResponse(html_content)
-            
+
             if request_method == "options":
                 response_headers = {}
                 if self.allow_cors:
@@ -203,9 +203,9 @@ class GraphQLHTTPServer:
                     if origin:
                         response_headers["Access-Control-Allow-Origin"] = origin
                 return PlainTextResponse("OK", headers=response_headers)
-            
+
             if self.auth_enabled:
-                if self.auth_enabled_for_introspection == False:
+                if self.auth_enabled_for_introspection is False:
                     introspection_fields = ["__schema", "__type", "__typename"]
                     query_data_lower = str(data).lower()
                     introspection_fields_present = [
@@ -239,8 +239,6 @@ class GraphQLHTTPServer:
                         )
                     except Exception as e:
                         return self.error_response(e, status=401)
-                
-
 
             context_value = copy.copy(self.context_value)
 

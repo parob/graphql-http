@@ -209,7 +209,7 @@ def execute_graphql_request(
                     f"from a POST request.",
                     headers={"Allow": "POST"},
                 )
-            
+
     if allow_only_introspection:
         operation_ast = get_operation_ast(document, params.operation_name)
         is_introspection_query = False
@@ -226,7 +226,6 @@ def execute_graphql_request(
             raise HttpQueryError(
                 401, "Only introspection operations are permitted."
             )
-
 
     # Note: the schema is not validated here for performance reasons.
     # This should be done only once when starting the server.
