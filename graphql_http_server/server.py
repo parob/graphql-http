@@ -179,7 +179,7 @@ class GraphQLHTTPServer:
                 if self.graphiql_default_query:
                     default_query = json.dumps(self.graphiql_default_query)
                 else:
-                    default_query = '""'
+                    default_query = ''
 
                 with open(graphiql_path, "r") as f:
                     html_content = f.read()
