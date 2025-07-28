@@ -96,6 +96,7 @@ class GraphQLHTTPServer:
         auth_issuer: Optional[str] = None,
         auth_audience: Optional[str] = None,
         auth_enabled: bool = False,
+        auth_enabled_for_introspection: bool = False,
     ):
         if middleware is None:
             middleware = []
@@ -113,6 +114,7 @@ class GraphQLHTTPServer:
         self.auth_issuer = auth_issuer
         self.auth_audience = auth_audience
         self.auth_enabled = auth_enabled
+        self.auth_enabled_for_introspection = auth_enabled_for_introspection
 
         if auth_jwks_uri:
             self.jwks_client = PyJWKClient(auth_jwks_uri)
@@ -167,6 +169,7 @@ class GraphQLHTTPServer:
         try:
             request_method = request.method.lower()
             data = await self.parse_body(request=request)
+            allow_only_introspection = False
 
             if self.health_path and request.url.path == self.health_path:
                 return Response("OK")
@@ -226,6 +229,9 @@ class GraphQLHTTPServer:
                     )
                 except Exception as e:
                     return self.error_response(e, status=401)
+                
+                if self.auth_enabled_for_introspection == False and "intospection" in str(data).lower():
+                    allow_only_introspection = True
 
             context_value = copy.copy(self.context_value)
 
@@ -242,6 +248,7 @@ class GraphQLHTTPServer:
                 self.schema,
                 request_method,
                 data,
+                allow_only_introspection=allow_only_introspection,
                 query_data=query_data,
                 root_value=self.root_value,
                 middleware=self.middleware,

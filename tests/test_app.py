@@ -292,6 +292,36 @@ class TestApp:
         assert response.text == "OK"
         assert "errors" not in response.text.lower()
 
+    def test_allow_only_introspection(self, schema):
+        server = GraphQLHTTPServer(
+            schema=schema,
+            allow_only_introspection=True,
+        )
+        client = server.client()
+
+        # Test that a regular query is blocked
+        response = client.get("/?query={hello}")
+        assert response.status_code == 401
+        assert "Only introspection operations are permitted" in response.json()["errors"][0]["message"]
+
+        # Test that an introspection query is allowed
+        introspection_query = """
+            query IntrospectionQuery {
+              __schema {
+                queryType {
+                  name
+                }
+              }
+            }
+        """
+        response = client.post(
+            "/",
+            json={"query": introspection_query},
+        )
+        assert response.status_code == 200
+        assert "errors" not in response.json()
+        assert "data" in response.json()
+
     # --- End Authentication Tests ---
 
     # --- Request Body Parsing Tests ---

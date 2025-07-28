@@ -99,7 +99,7 @@ def json_encode(data: Union[Dict, List], pretty: bool = False) -> str:
 
 def encode_execution_results(
     execution_results: List[Optional[ExecutionResult]],
-    format_error: Callable[[Exception], Dict] = None,
+    format_error: Optional[Callable[[Exception], Dict]] = None,
     is_batch: bool = False,
     encode: Callable[[Dict], Any] = json_encode,
 ) -> Tuple[Any, int]:
@@ -157,7 +157,7 @@ def get_response(
 
 def format_execution_result(
     execution_result: Optional[ExecutionResult],
-    format_error: Optional[Callable[[Exception], Dict]] = None,
+    format_error: Optional[Callable[[GraphQLError], Dict]] = None,
 ) -> GraphQLResponse:
     if not format_error:
         from graphql_http_server import GraphQLHTTPServer
@@ -211,22 +211,20 @@ def execute_graphql_request(
                 )
             
     if allow_only_introspection:
-        is_introspection_query = True
         operation_ast = get_operation_ast(document, params.operation_name)
-        if operation_ast:
-            for field in operation_ast.selection_set.selections:
-                if isinstance(field, FieldNode):
-                    if field.name.value.startswith("___"):
-                        is_introspection_query = False
-                else: 
-                    is_introspection_query = False
-        else:
-            is_introspection_query = False
+        is_introspection_query = False
+        if operation_ast and operation_ast.selection_set:
+            selections = operation_ast.selection_set.selections
+            if selections:
+                is_introspection_query = all(
+                    isinstance(field, FieldNode)
+                    and field.name.value.startswith("__")
+                    for field in selections
+                )
 
         if not is_introspection_query:
             raise HttpQueryError(
-                401,
-                f"Only introspection operations are permitted."
+                401, "Only introspection operations are permitted."
             )
 
 
