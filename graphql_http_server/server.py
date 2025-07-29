@@ -19,6 +19,8 @@ from json import JSONDecodeError
 
 from graphql.type.schema import GraphQLSchema
 from graphql.execution.execute import ExecutionContext
+from graphql.utilities import print_schema
+import uvicorn
 
 from graphql_http_server.helpers import (
     HttpQueryError,
@@ -32,24 +34,8 @@ from jwt import (
     PyJWKClient,
     InvalidTokenError
 )
-import uvicorn
-
-
-def run_simple(
-    schema,
-    root_value: Any = None,
-    middleware: Optional[List[Callable[[Callable, Any], Any]]] = None,
-    hostname: Optional[str] = None,
-    port: Optional[int] = None,
-    **kwargs,
-):
-    return GraphQLHTTPServer.from_api(
-        schema=schema, root_value=root_value, middleware=middleware, **kwargs
-    ).run(host=hostname, port=port, **kwargs)
-
 
 graphiql_dir = os.path.join(os.path.dirname(__file__), "graphiql")
-
 
 class GraphQLHTTPServer:
     @classmethod
@@ -122,6 +108,7 @@ class GraphQLHTTPServer:
             self.jwks_client = None
 
         routes = [
+            Route("/sdl", self.download_sdl, methods=["GET"]),
             Route("/{path:path}", self.dispatch, methods=["GET", "POST", "OPTIONS"])
         ]
         if self.health_path:
@@ -177,7 +164,10 @@ class GraphQLHTTPServer:
             if request_method == "get" and self.should_serve_graphiql(request=request):
                 graphiql_path = os.path.join(graphiql_dir, "index.html")
                 if self.graphiql_default_query:
-                    default_query = json.dumps(self.graphiql_default_query)
+                    if isinstance(self.graphiql_default_query, str):
+                        default_query = self.graphiql_default_query
+                    else:
+                        default_query = json.dumps(self.graphiql_default_query)
                 else:
                     default_query = ''
 
@@ -214,6 +204,7 @@ class GraphQLHTTPServer:
                     if introspection_fields_present:
                         allow_only_introspection = True
 
+
                 if not allow_only_introspection:
                     try:
                         auth_header = request.headers.get("Authorization")
@@ -226,7 +217,7 @@ class GraphQLHTTPServer:
                                 ValueError("JWKS client not configured"), status=500
                             )
 
-                        token = auth_header.replace("Bearer ", "")\
+                        token = auth_header.replace("Bearer ", "")
 
                         signing_key = self.jwks_client.get_signing_key_from_jwt(token)
                         jwt.decode(
@@ -235,7 +226,7 @@ class GraphQLHTTPServer:
                             issuer=self.auth_issuer,
                             key=signing_key.key,
                             algorithms=["RS256"],
-                            verify=True
+                            verify=True,
                         )
                     except Exception as e:
                         return self.error_response(e, status=401)
@@ -276,6 +267,19 @@ class GraphQLHTTPServer:
 
     async def health_check(self, request: Request) -> Response:
         return PlainTextResponse("OK")
+
+    async def download_sdl(self, request: Request) -> Response:
+        try:
+            sdl_content = print_schema(self.schema)
+            return PlainTextResponse(
+                sdl_content,
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Content-Disposition": "attachment; filename=schema.graphql"
+                }
+            )
+        except Exception as e:
+            return self.error_response(e, status=500)
 
     @staticmethod
     def error_response(e, status=None):
@@ -360,25 +364,9 @@ class GraphQLHTTPServer:
     def client(self):
         return TestClient(self.app)
 
-    def run(
-        self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        main: Optional[Callable[[Request], Awaitable[Response]]] = None,
-        **kwargs,
-    ):
+    def run(self, host: Optional[str] = None, port: Optional[int] = None, **kwargs):
         hostname = host or "127.0.0.1"
         port_num = port or 5000
 
-        if main:
-
-            async def main_endpoint_wrapper(request: Request) -> Response:
-                return await main(request)
-
-            custom_routes = [Route("/{path:path}", main_endpoint_wrapper)]
-            app_to_run = Starlette(routes=custom_routes)
-        else:
-            app_to_run = self.app
-
         print(f"GraphQL server running at http://{hostname}:{port_num}/graphql")
-        uvicorn.run(app_to_run, host=hostname, port=port_num, **kwargs)
+        uvicorn.run(self.app, host=hostname, port=port_num, **kwargs)   

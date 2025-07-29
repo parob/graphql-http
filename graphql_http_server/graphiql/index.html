@@ -66,6 +66,64 @@
       import { explorerPlugin } from '@graphiql/plugin-explorer';
       import 'graphiql/setup-workers/esm.sh';
 
+      // SDL Download Plugin
+      const sdlDownloadPlugin = {
+        title: 'SDL Download',
+        icon: () => React.createElement('svg', {
+          width: '16',
+          height: '16',
+          viewBox: '0 0 24 24',
+          fill: 'currentColor'
+        }, React.createElement('path', {
+          d: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z'
+        })),
+        content: () => React.createElement('div', {
+          style: {
+            padding: '16px',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }
+        }, [
+          React.createElement('h3', { key: 'title', style: { margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' } }, 'Schema Download'),
+          React.createElement('p', { 
+            key: 'description', 
+            style: { margin: '0 0 16px 0', fontSize: '12px', color: '#666', lineHeight: '1.4' } 
+          }, 'Download the GraphQL schema definition in SDL (Schema Definition Language) format.'),
+          React.createElement('button', {
+            key: 'download-btn',
+            onClick: () => {
+              window.open('/sdl', '_blank');
+            },
+            style: {
+              padding: '8px 16px',
+              backgroundColor: '#0366d6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: '500',
+              alignSelf: 'flex-start'
+            },
+            onMouseOver: (e) => { e.target.style.backgroundColor = '#0256cc'; },
+            onMouseOut: (e) => { e.target.style.backgroundColor = '#0366d6'; }
+          }, 'Download SDL'),
+          React.createElement('div', {
+            key: 'info',
+            style: {
+              marginTop: 'auto',
+              padding: '12px',
+              backgroundColor: '#f6f8fa',
+              borderRadius: '4px',
+              fontSize: '11px',
+              color: '#586069'
+            }
+          }, 'The SDL file contains the complete schema definition including types, queries, mutations, and subscriptions.')
+        ])
+      };
+
       const params = Object.fromEntries(new URLSearchParams(location.search));
       const { query, variables, operationName, ...rest } = params;
       const fetchURL = '?' + new URLSearchParams(rest).toString();
@@ -73,7 +131,7 @@
       const fetcher = createGraphiQLFetcher({
         url: fetchURL
       });
-      const plugins = [HISTORY_PLUGIN, explorerPlugin()];
+      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin];
 
       function App() {
         return React.createElement(GraphiQL, {

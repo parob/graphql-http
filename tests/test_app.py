@@ -1,6 +1,7 @@
 import threading
 import time
 import json
+import uvicorn
 
 from starlette.testclient import TestClient  # Import TestClient
 
@@ -43,7 +44,7 @@ class TestApp:
         server = GraphQLHTTPServer(schema=schema)
         response = server.client().post(
             "/",
-            data='{"query":"{hello}"}',
+            data='{"query":"{hello}"}', # type: ignore
             headers={"Content-Type": "application/json"},
         )
 
@@ -62,7 +63,7 @@ class TestApp:
         assert isinstance(response_get.json(), dict)
         assert response_get.json() == {"data": {"hello": "world"}}
 
-        # Test with POST request (json payload)
+        # Test with POST request
         response_post_json = client.post("/", json={"query": "{hello}"})
         assert response_post_json.status_code == 200
         assert response_post_json.headers["content-type"] == "application/json"
@@ -72,7 +73,7 @@ class TestApp:
         # Test with POST request (raw string data)
         response_post_data = client.post(
             "/",
-            data='{"query":"{hello}"}',
+            data='{"query":"{hello}"}', # type: ignore
             headers={"Content-Type": "application/json"},
         )
         assert response_post_data.status_code == 200
@@ -100,7 +101,7 @@ class TestApp:
     def test_run_app_graphiql(self, schema):
         server = GraphQLHTTPServer(schema=schema)
 
-        thread = threading.Thread(target=server.run, daemon=True, kwargs={"port": 5252})
+        thread = threading.Thread(target=uvicorn.run, daemon=True, kwargs={"app": server.app, "port": 5252})
         thread.start()
 
         # Allow server to start
@@ -440,3 +441,44 @@ class TestApp:
         assert response.status_code == 400
         expected_message = "Variables are invalid JSON"
         assert expected_message in response.json()["errors"][0]["message"]
+
+    # --- SDL Download Tests ---
+    def test_sdl_download_route(self, schema):
+        server = GraphQLHTTPServer(schema=schema)
+        client = server.client()
+        response = client.get("/sdl")
+        
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert response.headers["content-disposition"] == "attachment; filename=schema.graphql"
+        
+        # Check that the response contains valid SDL content
+        sdl_content = response.text
+        assert "RootQueryType" in sdl_content
+        assert "hello: String" in sdl_content
+
+    def test_sdl_download_with_auth_disabled(self, schema):
+        server = GraphQLHTTPServer(schema=schema, auth_enabled=False)
+        client = server.client()
+        response = client.get("/sdl")
+        
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        sdl_content = response.text
+        assert "RootQueryType" in sdl_content
+
+    def test_sdl_download_with_auth_enabled_should_work(self, schema):
+        # SDL download should work even with auth enabled since it's a public schema
+        server = GraphQLHTTPServer(
+            schema=schema,
+            auth_enabled=True,
+            auth_jwks_uri="test.domain",
+            auth_audience="test_audience"
+        )
+        client = server.client()
+        response = client.get("/sdl")
+        
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        sdl_content = response.text
+        assert "RootQueryType" in sdl_content

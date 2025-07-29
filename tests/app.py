@@ -11,11 +11,7 @@ class HelloWorld:
         return f"Hello {name}!"
 
 
-default_query = """
-query HelloQuery($name: String!){
-  helloWorld(name: $name)
-}
-"""
+default_query = "query HelloQuery($name: String!){  helloWorld(name: $name) }"
 
 server = GraphQLHTTPServer.from_api(
     api=api,
@@ -23,10 +19,6 @@ server = GraphQLHTTPServer.from_api(
 )
 
 
-async def main(request):
-    print(f"Request {request} received!")
-    return await server.dispatch(request=request)
-
 
 if __name__ == "__main__":
-    server.run(port=3501, main=main)
+    server.run(port=3501)
