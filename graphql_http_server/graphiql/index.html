@@ -64,6 +64,7 @@
       import { GraphiQL, HISTORY_PLUGIN } from 'graphiql';
       import { createGraphiQLFetcher } from '@graphiql/toolkit';
       import { explorerPlugin } from '@graphiql/plugin-explorer';
+      import { buildClientSchema, printSchema, getIntrospectionQuery } from 'graphql';
       import 'graphiql/setup-workers/esm.sh';
 
       // SDL Download Plugin
@@ -82,16 +83,24 @@
           const [loading, setLoading] = React.useState(false);
           const [error, setError] = React.useState(null);
 
-          const fetchSDL = async () => {
+          const generateSDL = async () => {
             setLoading(true);
             setError(null);
             try {
-              const response = await fetch('/sdl');
-              if (!response.ok) {
-                throw new Error(`Failed to fetch SDL: ${response.statusText}`);
+              const introspectionQuery = getIntrospectionQuery();
+              
+              const result = await fetcher({
+                query: introspectionQuery,
+                operationName: 'IntrospectionQuery'
+              });
+              
+              if (result.errors) {
+                throw new Error(result.errors[0].message);
               }
-              const content = await response.text();
-              setSdlContent(content);
+              
+              const schema = buildClientSchema(result.data);
+              const sdl = printSchema(schema);
+              setSdlContent(sdl);
             } catch (err) {
               setError(err.message);
             } finally {
@@ -100,7 +109,7 @@
           };
 
           React.useEffect(() => {
-            fetchSDL();
+            generateSDL();
           }, []);
 
           return React.createElement('div', {
@@ -116,7 +125,7 @@
             React.createElement('p', { 
               key: 'description', 
               style: { margin: '0 0 16px 0', fontSize: '12px', color: '#666', lineHeight: '1.4' } 
-            }, 'Download the GraphQL schema definition in SDL (Schema Definition Language) format.'),
+            }, 'Generate and download the GraphQL schema definition in SDL (Schema Definition Language) format using introspection.'),
             
             // Schema Preview Section
             React.createElement('div', {
@@ -173,7 +182,7 @@
                   fontSize: '12px',
                   color: '#586069'
                 }
-              }, 'Loading schema preview...') :
+              }, 'Generating SDL from schema...') :
               
               error ? React.createElement('div', {
                 key: 'error-preview',
@@ -189,7 +198,7 @@
                   padding: '12px',
                   textAlign: 'center'
                 }
-              }, `Error loading preview: ${error}`) :
+              }, `Error generating SDL: ${error}`) :
               
               React.createElement('pre', {
                 key: 'sdl-preview',
@@ -208,28 +217,47 @@
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word'
                 }
-              }, sdlContent.length > 2000 ? sdlContent.substring(0, 2000) + '\n\n... (truncated, download full file)' : sdlContent)
+              }, sdlContent)
             ]),
             
             React.createElement('button', {
               key: 'download-btn',
               onClick: () => {
-                window.open('/sdl', '_blank');
+                if (sdlContent) {
+                  const blob = new Blob([sdlContent], { type: 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'schema.graphql';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }
               },
+              disabled: !sdlContent || loading,
               style: {
                 padding: '8px 16px',
-                backgroundColor: '#0366d6',
+                backgroundColor: (!sdlContent || loading) ? '#ccc' : '#0366d6',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
-                cursor: 'pointer',
+                cursor: (!sdlContent || loading) ? 'not-allowed' : 'pointer',
                 fontSize: '12px',
                 fontWeight: '500',
                 alignSelf: 'flex-start',
                 marginTop: '8px'
               },
-              onMouseOver: (e) => { e.target.style.backgroundColor = '#0256cc'; },
-              onMouseOut: (e) => { e.target.style.backgroundColor = '#0366d6'; }
+              onMouseOver: (e) => { 
+                if (!(!sdlContent || loading)) {
+                  e.target.style.backgroundColor = '#0256cc'; 
+                }
+              },
+              onMouseOut: (e) => { 
+                if (!(!sdlContent || loading)) {
+                  e.target.style.backgroundColor = '#0366d6'; 
+                }
+              }
             }, 'Download schema.graphql'),
             
             React.createElement('div', {
@@ -241,7 +269,7 @@
                 fontSize: '11px',
                 color: '#586069'
               }
-            }, 'The SDL file contains the complete schema definition including types, queries, mutations, and subscriptions.')
+            }, 'The SDL is generated from schema introspection and contains the complete schema definition including types, queries, mutations, and subscriptions.')
           ]);
         }
       };

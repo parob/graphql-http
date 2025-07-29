@@ -19,7 +19,6 @@ from json import JSONDecodeError
 
 from graphql.type.schema import GraphQLSchema
 from graphql.execution.execute import ExecutionContext
-from graphql.utilities import print_schema
 import uvicorn
 
 from graphql_http_server.helpers import (
@@ -109,7 +108,6 @@ class GraphQLHTTPServer:
             self.jwks_client = None
 
         routes = [
-            Route("/sdl", self.download_sdl, methods=["GET"]),
             Route("/{path:path}", self.dispatch, methods=["GET", "POST", "OPTIONS"])
         ]
         if self.health_path:
@@ -267,19 +265,6 @@ class GraphQLHTTPServer:
 
     async def health_check(self, request: Request) -> Response:
         return PlainTextResponse("OK")
-
-    async def download_sdl(self, request: Request) -> Response:
-        try:
-            sdl_content = print_schema(self.schema)
-            return PlainTextResponse(
-                sdl_content,
-                headers={
-                    "Content-Type": "text/plain; charset=utf-8",
-                    "Content-Disposition": "attachment; filename=schema.graphql"
-                }
-            )
-        except Exception as e:
-            return self.error_response(e, status=500)
 
     @staticmethod
     def error_response(e, status=None):
