@@ -124,6 +124,547 @@
         ])
       };
 
+      // UML Diagram Plugin
+      const umlDiagramPlugin = {
+        title: 'Schema Diagram',
+        icon: () => React.createElement('svg', {
+          width: '16',
+          height: '16',
+          viewBox: '0 0 24 24',
+          fill: 'currentColor'
+        }, [
+          React.createElement('circle', { key: 'node1', cx: '6', cy: '6', r: '2' }),
+          React.createElement('circle', { key: 'node2', cx: '18', cy: '6', r: '2' }),
+          React.createElement('circle', { key: 'node3', cx: '6', cy: '18', r: '2' }),
+          React.createElement('circle', { key: 'node4', cx: '18', cy: '18', r: '2' }),
+          React.createElement('line', { key: 'line1', x1: '8', y1: '6', x2: '16', y2: '6', stroke: 'currentColor', strokeWidth: '1.5' }),
+          React.createElement('line', { key: 'line2', x1: '6', y1: '8', x2: '6', y2: '16', stroke: 'currentColor', strokeWidth: '1.5' }),
+          React.createElement('line', { key: 'line3', x1: '8', y1: '18', x2: '16', y2: '18', stroke: 'currentColor', strokeWidth: '1.5' }),
+          React.createElement('line', { key: 'line4', x1: '18', y1: '8', x2: '18', y2: '16', stroke: 'currentColor', strokeWidth: '1.5' })
+        ]),
+        content: () => {
+          const [schemaData, setSchemaData] = React.useState(null);
+          const [loading, setLoading] = React.useState(false);
+          const [error, setError] = React.useState(null);
+          const svgRef = React.useRef(null);
+          const [transform, setTransform] = React.useState({ x: 0, y: 0, scale: 1 });
+          const [isDragging, setIsDragging] = React.useState(false);
+          const [dragStart, setDragStart] = React.useState({ x: 0, y: 0 });
+
+          const loadSchema = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+              const introspectionQuery = `
+                query IntrospectionQuery {
+                  __schema {
+                    queryType { name }
+                    mutationType { name }
+                    subscriptionType { name }
+                    types {
+                      ...FullType
+                    }
+                  }
+                }
+                
+                fragment FullType on __Type {
+                  kind
+                  name
+                  description
+                  fields(includeDeprecated: true) {
+                    name
+                    description
+                    args {
+                      ...InputValue
+                    }
+                    type {
+                      ...TypeRef
+                    }
+                    isDeprecated
+                    deprecationReason
+                  }
+                  inputFields {
+                    ...InputValue
+                  }
+                  interfaces {
+                    ...TypeRef
+                  }
+                  enumValues(includeDeprecated: true) {
+                    name
+                    description
+                    isDeprecated
+                    deprecationReason
+                  }
+                  possibleTypes {
+                    ...TypeRef
+                  }
+                }
+                
+                fragment InputValue on __InputValue {
+                  name
+                  description
+                  type { ...TypeRef }
+                  defaultValue
+                }
+                
+                fragment TypeRef on __Type {
+                  kind
+                  name
+                  ofType {
+                    kind
+                    name
+                    ofType {
+                      kind
+                      name
+                      ofType {
+                        kind
+                        name
+                        ofType {
+                          kind
+                          name
+                          ofType {
+                            kind
+                            name
+                            ofType {
+                              kind
+                              name
+                              ofType {
+                                kind
+                                name
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+              
+              const result = await fetcher({
+                query: introspectionQuery,
+                operationName: 'IntrospectionQuery'
+              });
+              if (result.errors) {
+                throw new Error(result.errors[0].message);
+              }
+              setSchemaData(result.data);
+            } catch (err) {
+              setError(err.message);
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          const getTypeName = (type) => {
+            if (type.kind === 'NON_NULL' || type.kind === 'LIST') {
+              return getTypeName(type.ofType);
+            }
+            return type.name;
+          };
+
+          const generateDiagram = (data) => {
+            if (!data || !data.__schema) return null;
+
+            const schema = data.__schema;
+            const queryTypeName = schema.queryType?.name;
+            const mutationTypeName = schema.mutationType?.name;
+            const subscriptionTypeName = schema.subscriptionType?.name;
+
+            const types = schema.types.filter(type => 
+              !type.name.startsWith('__') && 
+              ['OBJECT', 'INTERFACE', 'ENUM', 'INPUT_OBJECT'].includes(type.kind)
+            );
+
+            // Separate root types and regular types
+            const rootTypes = types.filter(type => 
+              type.name === queryTypeName || 
+              type.name === mutationTypeName || 
+              type.name === subscriptionTypeName
+            );
+            const regularTypes = types.filter(type => 
+              type.name !== queryTypeName && 
+              type.name !== mutationTypeName && 
+              type.name !== subscriptionTypeName
+            );
+
+            const typePositions = {};
+            const connections = [];
+            let y = 50;
+
+            // Position root types first (top row)
+            rootTypes.forEach((type, index) => {
+              const x = 50 + index * 280;
+              typePositions[type.name] = { x, y };
+            });
+
+            // Position regular types below
+            y += 220;
+            regularTypes.forEach((type, index) => {
+              const x = 50 + (index % 3) * 250;
+              if (index % 3 === 0 && index > 0) y += 200;
+              typePositions[type.name] = { x, y };
+            });
+
+            // Collect field relationships for all types
+            types.forEach(type => {
+              if (type.fields) {
+                type.fields.forEach(field => {
+                  const fieldTypeName = getTypeName(field.type);
+                  if (types.find(t => t.name === fieldTypeName)) {
+                    connections.push({
+                      from: type.name,
+                      to: fieldTypeName,
+                      label: field.name
+                    });
+                  }
+                });
+              }
+            });
+
+            return { 
+              types, 
+              typePositions, 
+              connections, 
+              queryTypeName, 
+              mutationTypeName, 
+              subscriptionTypeName 
+            };
+          };
+
+          const handleMouseDown = (e) => {
+            setIsDragging(true);
+            setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+          };
+
+          const handleMouseMove = (e) => {
+            if (!isDragging) return;
+            setTransform(prev => ({
+              ...prev,
+              x: e.clientX - dragStart.x,
+              y: e.clientY - dragStart.y
+            }));
+          };
+
+          const handleMouseUp = () => {
+            setIsDragging(false);
+          };
+
+          const handleWheel = (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            setTransform(prev => ({
+              ...prev,
+              scale: Math.max(0.1, Math.min(3, prev.scale * delta))
+            }));
+          };
+
+          const resetView = () => {
+            setTransform({ x: 0, y: 0, scale: 1 });
+          };
+
+          const zoomIn = () => {
+            setTransform(prev => ({
+              ...prev,
+              scale: Math.min(3, prev.scale * 1.2)
+            }));
+          };
+
+          const zoomOut = () => {
+            setTransform(prev => ({
+              ...prev,
+              scale: Math.max(0.1, prev.scale / 1.2)
+            }));
+          };
+
+          React.useEffect(() => {
+            loadSchema();
+          }, []);
+
+          React.useEffect(() => {
+            if (isDragging) {
+              document.addEventListener('mousemove', handleMouseMove);
+              document.addEventListener('mouseup', handleMouseUp);
+              return () => {
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+              };
+            }
+          }, [isDragging, dragStart]);
+
+          const diagram = schemaData ? generateDiagram(schemaData) : null;
+
+          return React.createElement('div', {
+            style: {
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }
+          }, [
+            // Header
+            React.createElement('div', {
+              key: 'header',
+              style: {
+                padding: '12px 16px',
+                backgroundColor: '#f6f8fa',
+                borderRadius: '8px 8px 0 0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }
+            }, [
+              React.createElement('h3', { 
+                key: 'title',
+                style: { margin: 0, fontSize: '14px', fontWeight: 'bold' } 
+              }, 'GraphQL Schema Diagram'),
+              React.createElement('div', { 
+                key: 'controls',
+                style: { display: 'flex', gap: '4px' }
+              }, [
+                React.createElement('button', {
+                  key: 'zoom-out',
+                  onClick: zoomOut,
+                  title: 'Zoom Out',
+                  style: {
+                    padding: '4px 6px',
+                    backgroundColor: '#f0f0f0',
+                    border: '1px solid #ccc',
+                    borderRadius: '3px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }
+                }, '−'),
+                React.createElement('button', {
+                  key: 'zoom-in',
+                  onClick: zoomIn,
+                  title: 'Zoom In',
+                  style: {
+                    padding: '4px 6px',
+                    backgroundColor: '#f0f0f0',
+                    border: '1px solid #ccc',
+                    borderRadius: '3px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }
+                }, '+'),
+                React.createElement('button', {
+                  key: 'reset',
+                  onClick: resetView,
+                  title: 'Reset View',
+                  style: {
+                    padding: '4px 8px',
+                    backgroundColor: '#f0f0f0',
+                    border: '1px solid #ccc',
+                    borderRadius: '3px',
+                    fontSize: '11px',
+                    cursor: 'pointer'
+                  }
+                }, '⌂')
+              ])
+            ]),
+            
+            // Content
+            loading ? React.createElement('div', {
+              key: 'loading',
+              style: {
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                color: '#666'
+              }
+            }, 'Loading schema...') :
+            
+            error ? React.createElement('div', {
+              key: 'error',
+              style: {
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                color: '#d73a49',
+                textAlign: 'center',
+                padding: '20px'
+              }
+            }, `Error: ${error}`) :
+            
+            diagram ? React.createElement('div', {
+              key: 'diagram',
+              style: {
+                flex: 1,
+                overflow: 'hidden',
+                cursor: isDragging ? 'grabbing' : 'grab',
+                position: 'relative'
+              },
+              onMouseDown: handleMouseDown,
+              onWheel: handleWheel
+            }, [
+              React.createElement('svg', {
+                key: 'svg',
+                ref: svgRef,
+                style: {
+                  width: '100%',
+                  height: '100%',
+                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`
+                }
+              }, [
+                // Clean background
+                React.createElement('rect', {
+                  key: 'background',
+                  x: '0',
+                  y: '0',
+                  width: '100%',
+                  height: '100%',
+                  fill: '#ffffff'
+                }),
+                
+                // Connections
+                ...diagram.connections.map((conn, i) => {
+                  const fromPos = diagram.typePositions[conn.from];
+                  const toPos = diagram.typePositions[conn.to];
+                  if (!fromPos || !toPos) return null;
+                  
+                  return React.createElement('g', { key: `conn-${i}` }, [
+                    React.createElement('line', {
+                      key: 'line',
+                      x1: fromPos.x + 120,
+                      y1: fromPos.y + 50,
+                      x2: toPos.x,
+                      y2: toPos.y + 50,
+                      stroke: '#666',
+                      strokeWidth: '1',
+                      markerEnd: 'url(#arrowhead)'
+                    }),
+                    React.createElement('text', {
+                      key: 'label',
+                      x: (fromPos.x + toPos.x + 120) / 2,
+                      y: (fromPos.y + toPos.y + 100) / 2,
+                      fill: '#666',
+                      fontSize: '10',
+                      textAnchor: 'middle'
+                    }, conn.label)
+                  ]);
+                }),
+                
+                // Arrow marker
+                React.createElement('defs', { key: 'arrow-defs' }, [
+                  React.createElement('marker', {
+                    key: 'arrowhead',
+                    id: 'arrowhead',
+                    markerWidth: '10',
+                    markerHeight: '7',
+                    refX: '9',
+                    refY: '3.5',
+                    orient: 'auto'
+                  }, [
+                    React.createElement('polygon', {
+                      key: 'arrow-poly',
+                      points: '0 0, 10 3.5, 0 7',
+                      fill: '#666'
+                    })
+                  ])
+                ]),
+                
+                // Type boxes
+                ...diagram.types.map((type, i) => {
+                  const pos = diagram.typePositions[type.name];
+                  const height = 60 + (type.fields ? Math.min(type.fields.length * 16, 120) : 0);
+                  const isQuery = type.name === diagram.queryTypeName;
+                  const isMutation = type.name === diagram.mutationTypeName;
+                  const isSubscription = type.name === diagram.subscriptionTypeName;
+                  const isRootType = isQuery || isMutation || isSubscription;
+                  
+                  return React.createElement('g', { key: `type-${i}` }, [
+                    // Box
+                    React.createElement('rect', {
+                      key: 'box',
+                      x: pos.x,
+                      y: pos.y,
+                      width: '200',
+                      height: height,
+                      fill: isQuery ? '#e8f5e8' :
+                            isMutation ? '#fff3e0' :
+                            isSubscription ? '#f3e5f5' :
+                            type.kind === 'OBJECT' ? '#e3f2fd' : 
+                            type.kind === 'INTERFACE' ? '#f3e5f5' :
+                            type.kind === 'ENUM' ? '#fff3e0' : '#e8f5e8',
+                      stroke: isQuery ? '#4caf50' :
+                              isMutation ? '#ff9800' :
+                              isSubscription ? '#9c27b0' :
+                              type.kind === 'OBJECT' ? '#2196f3' :
+                              type.kind === 'INTERFACE' ? '#9c27b0' :
+                              type.kind === 'ENUM' ? '#ff9800' : '#4caf50',
+                      strokeWidth: isRootType ? '3' : '2',
+                      rx: '4'
+                    }),
+                    
+                    // Type name
+                    React.createElement('text', {
+                      key: 'name',
+                      x: pos.x + 10,
+                      y: pos.y + 18,
+                      fill: '#333',
+                      fontSize: '14',
+                      fontWeight: 'bold'
+                    }, type.name),
+                    
+                    // Type kind/root label
+                    React.createElement('text', {
+                      key: 'kind',
+                      x: pos.x + 10,
+                      y: pos.y + 35,
+                      fill: isRootType ? '#d73a49' : '#666',
+                      fontSize: '10',
+                      fontWeight: isRootType ? 'bold' : 'normal'
+                    }, isQuery ? '🔍 ROOT QUERY' :
+                        isMutation ? '✏️  ROOT MUTATION' :
+                        isSubscription ? '📡 ROOT SUBSCRIPTION' :
+                        `(${type.kind})`),
+                    
+                    // Fields
+                    ...(type.fields || []).slice(0, 7).map((field, j) => [
+                      React.createElement('text', {
+                        key: `field-${j}`,
+                        x: pos.x + 10,
+                        y: pos.y + 55 + j * 16,
+                        fill: '#555',
+                        fontSize: '11'
+                      }, `${field.name}: ${getTypeName(field.type)}`)
+                    ]).flat(),
+                    
+                    // "..." if more fields
+                    type.fields && type.fields.length > 7 ? 
+                    React.createElement('text', {
+                      key: 'more',
+                      x: pos.x + 10,
+                      y: pos.y + 55 + 7 * 16,
+                      fill: '#999',
+                      fontSize: '11',
+                      fontStyle: 'italic'
+                    }, `... ${type.fields.length - 7} more`) : null
+                  ]);
+                })
+              ])
+            ]) : React.createElement('div', {
+              key: 'no-data',
+              style: {
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '14px',
+                color: '#666'
+              }
+            }, 'No schema data available')
+          ]);
+        }
+      };
+
       const params = Object.fromEntries(new URLSearchParams(location.search));
       const { query, variables, operationName, ...rest } = params;
       const fetchURL = '?' + new URLSearchParams(rest).toString();
@@ -131,7 +672,7 @@
       const fetcher = createGraphiQLFetcher({
         url: fetchURL
       });
-      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin];
+      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, umlDiagramPlugin];
 
       function App() {
         return React.createElement(GraphiQL, {

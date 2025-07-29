@@ -18,7 +18,5 @@ server = GraphQLHTTPServer.from_api(
     graphiql_default_query=default_query
 )
 
-
-
 if __name__ == "__main__":
     server.run(port=3501)

@@ -482,3 +482,4 @@ class TestApp:
         assert response.headers["content-type"] == "text/plain; charset=utf-8"
         sdl_content = response.text
         assert "RootQueryType" in sdl_content
+
