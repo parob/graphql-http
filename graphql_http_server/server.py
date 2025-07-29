@@ -2,7 +2,7 @@ import os
 import copy
 import json
 
-from typing import Any, List, Callable, Optional, Type, Awaitable, Dict
+from typing import Any, List, Callable, Optional, Type, Dict
 
 from graphql import GraphQLError
 from graphql_api.context import GraphQLContext
@@ -36,6 +36,7 @@ from jwt import (
 )
 
 graphiql_dir = os.path.join(os.path.dirname(__file__), "graphiql")
+
 
 class GraphQLHTTPServer:
     @classmethod
@@ -204,7 +205,6 @@ class GraphQLHTTPServer:
                     if introspection_fields_present:
                         allow_only_introspection = True
 
-
                 if not allow_only_introspection:
                     try:
                         auth_header = request.headers.get("Authorization")
@@ -369,4 +369,4 @@ class GraphQLHTTPServer:
         port_num = port or 5000
 
         print(f"GraphQL server running at http://{hostname}:{port_num}/graphql")
-        uvicorn.run(self.app, host=hostname, port=port_num, **kwargs)   
+        uvicorn.run(self.app, host=hostname, port=port_num, **kwargs)
