@@ -79,14 +79,14 @@
         })),
         content: () => React.createElement('div', {
           style: {
-            padding: '16px',
+            padding: '0px',
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
             gap: '16px'
           }
         }, [
-          React.createElement('h3', { key: 'title', style: { margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' } }, 'Schema Download'),
+          React.createElement('h3', { key: 'title', style: { margin: '0 0 8px 0', fontSize: '29px', fontWeight: 'bold' } }, 'SDL'),
           React.createElement('p', { 
             key: 'description', 
             style: { margin: '0 0 16px 0', fontSize: '12px', color: '#666', lineHeight: '1.4' } 
@@ -126,7 +126,7 @@
 
       // UML Diagram Plugin
       const umlDiagramPlugin = {
-        title: 'Schema Diagram',
+        title: 'Graph',
         icon: () => React.createElement('svg', {
           width: '16',
           height: '16',
@@ -406,8 +406,7 @@
             React.createElement('div', {
               key: 'header',
               style: {
-                padding: '12px 16px',
-                backgroundColor: '#f6f8fa',
+                padding: '0px',
                 borderRadius: '8px 8px 0 0',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -416,8 +415,8 @@
             }, [
               React.createElement('h3', { 
                 key: 'title',
-                style: { margin: 0, fontSize: '14px', fontWeight: 'bold' } 
-              }, 'GraphQL Schema Diagram'),
+                style: { margin: 0, fontSize: '29px', fontWeight: '500' } 
+              }, 'Graph'),
               React.createElement('div', { 
                 key: 'controls',
                 style: { display: 'flex', gap: '4px' }
