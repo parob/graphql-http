@@ -110,7 +110,7 @@ class CaseStudy:
         return self.data.get("description")
 
 
-@key(fields="study { caseNumber }") # type: ignore
+@key(fields="study { caseNumber }")  # type: ignore
 @type
 class ProductResearch:
     def __init__(self, data: Dict[str, Any]):
@@ -145,7 +145,7 @@ class ProductDimension:
         return self.data.get("unit")
 
 
-@key(fields="email") # type: ignore
+@key(fields="email")  # type: ignore
 @type
 class User:
     def __init__(self, data: Dict[str, Any]):
@@ -155,7 +155,7 @@ class User:
     def _resolve_reference(cls, reference: Dict[str, Any]):
         return User(user)
 
-    @requires(fields="totalProductsCreated yearsOfEmployment") # type: ignore
+    @requires(fields="totalProductsCreated yearsOfEmployment")  # type: ignore
     @field
     def average_products_created_per_year(self) -> Optional[int]:
         total = self.data.get("totalProductsCreated")
@@ -169,7 +169,7 @@ class User:
     def email(self) -> GraphQLID:  # type: ignore
         return self.data.get("email")
 
-    @override(**{"from": "users"}) # type: ignore
+    @override(**{"from": "users"})  # type: ignore
     @field
     def name(self) -> Optional[str]:
         return self.data.get("name")
@@ -185,7 +185,7 @@ class User:
         return self.data.get("yearsOfEmployment", 0)
 
 
-@key(fields="sku package") # type: ignore
+@key(fields="sku package")  # type: ignore
 @type
 class DeprecatedProduct:
     @classmethod
@@ -216,7 +216,7 @@ class DeprecatedProduct:
 
 
 @interfaceObject
-@key(fields="id") # type: ignore
+@key(fields="id")  # type: ignore
 @type
 class Inventory:
     def __init__(self, data: Dict[str, Any]):
@@ -237,9 +237,9 @@ class Inventory:
 
 
 @custom
-@key(fields="id") # type: ignore
-@key(fields="sku package") # type: ignore
-@key(fields="sku variation { id }") # type: ignore
+@key(fields="id")  # type: ignore
+@key(fields="sku package")  # type: ignore
+@key(fields="sku variation { id }")  # type: ignore
 @type
 class Product:
     def __init__(self, data: Dict[str, Any]):
@@ -287,7 +287,7 @@ class Product:
             return ProductDimension(dims)
         return None
 
-    @provides(fields="totalProductsCreated") # type: ignore
+    @provides(fields="totalProductsCreated")  # type: ignore
     @field
     def created_by(self) -> Optional[User]:
         user_data = self.data.get("createdBy")
@@ -295,7 +295,7 @@ class Product:
             return User(user_data)
         return None
 
-    @tag(name="internal") # type: ignore
+    @tag(name="internal")  # type: ignore
     @field
     def notes(self) -> Optional[str]:
         return self.data.get("notes")
@@ -315,7 +315,7 @@ class Root:
                 return Product(product_data)
         return None
 
-    @deprecated(reason="Use product query instead") # type: ignore
+    @deprecated(reason="Use product query instead")  # type: ignore
     @field
     def deprecated_product(self, sku: str, package: str) -> Optional[DeprecatedProduct]:
         if (
@@ -334,9 +334,9 @@ def federation_example_api():
             "url": "https://myspecs.dev/myCustomDirective/v1.0",
             "import": ["@custom"],
         }
-    )(api) # type: ignore
+    )(api)  # type: ignore
 
-    composeDirective(name="@custom")(api) # type: ignore
+    composeDirective(name="@custom")(api)  # type: ignore
     schema, _ = api.build_schema()
 
     return api

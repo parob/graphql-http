@@ -44,7 +44,7 @@ class TestApp:
         server = GraphQLHTTPServer(schema=schema)
         response = server.client().post(
             "/",
-            data='{"query":"{hello}"}', # type: ignore
+            data='{"query":"{hello}"}',  # type: ignore
             headers={"Content-Type": "application/json"},
         )
 
@@ -73,7 +73,7 @@ class TestApp:
         # Test with POST request (raw string data)
         response_post_data = client.post(
             "/",
-            data='{"query":"{hello}"}', # type: ignore
+            data='{"query":"{hello}"}',  # type: ignore
             headers={"Content-Type": "application/json"},
         )
         assert response_post_data.status_code == 200
@@ -447,11 +447,11 @@ class TestApp:
         server = GraphQLHTTPServer(schema=schema)
         client = server.client()
         response = client.get("/sdl")
-        
+
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/plain; charset=utf-8"
         assert response.headers["content-disposition"] == "attachment; filename=schema.graphql"
-        
+
         # Check that the response contains valid SDL content
         sdl_content = response.text
         assert "RootQueryType" in sdl_content
@@ -461,7 +461,7 @@ class TestApp:
         server = GraphQLHTTPServer(schema=schema, auth_enabled=False)
         client = server.client()
         response = client.get("/sdl")
-        
+
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/plain; charset=utf-8"
         sdl_content = response.text
@@ -477,9 +477,8 @@ class TestApp:
         )
         client = server.client()
         response = client.get("/sdl")
-        
+
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/plain; charset=utf-8"
         sdl_content = response.text
         assert "RootQueryType" in sdl_content
-
