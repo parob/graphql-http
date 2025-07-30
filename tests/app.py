@@ -320,7 +320,14 @@ class HelloWorld:
     @api.field(mutable=True)
     def update_user(self, id: str, name: str, email: str) -> Optional[User]:
         return None
+        
+    @api.field(mutable=True)
+    def update_book(self, id: str, title: str, author: Author, isbn: str, 
+                 publisher: Publisher, genres: list[Genre], status: BookStatus = BookStatus.AVAILABLE,
+                 page_count: Optional[int] = None, publication_year: Optional[int] = None) -> Optional[Book]:
+        return None
     
+
     @api.field
     def user(self) -> User:
         address = Address("789 Main St", "Springfield", "IL", "62701")

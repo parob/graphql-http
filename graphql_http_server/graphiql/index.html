@@ -10,7 +10,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GraphiQL 5 with React 19 and GraphiQL Explorer</title>
+    <title>GraphiQL</title>
     <style>
       body {
         margin: 0;
@@ -53,9 +53,9 @@
         z-index: 2;
       }
 
-      /* Smooth node position transitions */
+      /* Smooth node position transitions - disabled to prevent blur/movement */
       .smooth-node-transition {
-        transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+        /* transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important; */
       }
 
       /* Smooth edge transitions */
@@ -425,6 +425,7 @@
             // Find the ELK edge that matches this React Flow edge
             const elkEdge = elkDebugData.edges.find(e => e.id === id);
             
+            
             if (elkEdge && elkEdge.sections && elkEdge.sections.length > 0) {
               const section = elkEdge.sections[0];
               const startPoint = section.startPoint;
@@ -435,30 +436,33 @@
               let pathData = '';
               const radius = 500; // Corner radius - extra rounded corners for natural curves
               
-              const points = [startPoint, ...bendPoints, endPoint];
+              let points = [startPoint, ...bendPoints, endPoint];
+              
+              // Check if this edge comes from the compound root node
+              const isFromCompoundRoot = id.startsWith('type-HelloWorld');
+              
               
               if (points.length === 2) {
-                // Straight line, no bends - create smooth curves at start and end
-                const horizontalDistance = 7.5; // Distance to extend horizontally
+                const horizontalDistance = 15;
                 const startX = points[0].x;
                 const startY = points[0].y;
                 const endX = points[1].x;
                 const endY = points[1].y;
                 
-                // Create control points for subtle curve on straight edges
-                const verticalOffset = 8; // Small vertical curve for straight edges
-                const cp1x = startX + horizontalDistance * 2; // Smaller horizontal extension
-                const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Small curve away from target
-                const cp2x = endX - horizontalDistance * 2; // Smaller horizontal pull back  
-                const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Small curve away from source
+                const cp1x = startX + horizontalDistance + 20; // Extend horizontally first
+                const cp1y = startY;
+                const cp2x = endX - 20;
+                const cp2y = endY;
                 
-                pathData = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+                pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+                
               } else {
                 // Path with rounded corners - add horizontal section at start
-                const horizontalDistance = 7.5; // Distance to extend horizontally
+                const horizontalDistance = isFromCompoundRoot ? 15 : 7.5; // Longer horizontal section for compound root edges
                 const startX = points[0].x;
                 const startY = points[0].y;
                 pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY}`;
+                
                 
                 // Create modified points where the first and last bend points are adjusted
                 // to create smooth transitions from/to the horizontal sections
@@ -522,8 +526,26 @@
                   const cp2x = curr.x + (dx2 / len2) * r;
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
-                  // Use different smooth factor for first and last bend points
-                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.75 : 0.9; // Bigger smooth factor for first and last bends, normal for others
+                  // Calculate smooth factor first (needed for special handling)
+                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.6 : 0.9; // Smaller smooth factor for first and last bends to make them less curvy
+                  
+                  // Special handling for first bend point after horizontal line (compound root edges)
+                  if (isFirstBendPoint && isFromCompoundRoot) {
+                    // Create one seamless curve from horizontal line end through the bend point
+                    const horizontalEndX = workingPoints[0].x;
+                    const horizontalEndY = workingPoints[0].y;
+                    
+                    // Control points for seamless transition from horizontal line through bend point
+                    const smoothCP1x = horizontalEndX + Math.min(30, Math.abs(curr.x - horizontalEndX) * 0.5);
+                    const smoothCP1y = horizontalEndY;
+                    
+                    // Use the regular curve's second control point for seamless continuation
+                    const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
+                    const ctrl2y = cp2y + (curr.y - cp2y) * smoothFactor;
+                    
+                    pathData += ` C ${smoothCP1x} ${smoothCP1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
+                    continue; // Skip the regular bend point logic for this point
+                  }
                   const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
                   const ctrl1y = cp1y + (curr.y - cp1y) * smoothFactor;
                   const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
@@ -539,6 +561,7 @@
                 
                 // Simple straight line to target - the last bend point now provides the curve
                 pathData += ` L ${finalStartX} ${finalStartY} L ${endX} ${endY}`;
+                
               }
               
               
@@ -599,6 +622,7 @@
             }
           }
           
+          
           // Fallback with subtle curves if no ELK data
           const horizontalDistance = 7.5;
           const verticalOffset = 8;
@@ -625,7 +649,7 @@
 
       // Custom GraphQL Type Node Component
       const GraphQLTypeNode = ({ data }) => {
-        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected } = data;
+        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected, isDownstreamOfSelected } = data;
         const isQueryType = data.isQueryType;
         const isMutationType = data.isMutationType;
         const isSubscriptionType = data.isSubscriptionType;
@@ -634,20 +658,24 @@
         
         const nodeContent = React.createElement('div', {
           style: {
-            background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 'white',
-            border: isSelected ? '3px solid #0366d6' : shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
+            background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 
+                       isDownstreamOfSelected ? 'linear-gradient(135deg, #f8f9ff 0%, #f4f6ff 100%)' : 'white',
+            border: isSelected ? '3px solid #0366d6' : 
+                   isDownstreamOfSelected ? '2px solid #0366d6' :
+                   shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
             borderRadius: '8px',
             minWidth: '280px',
             maxWidth: '320px',
             boxShadow: isSelected ? '0 8px 24px rgba(3,102,214,0.4), 0 0 0 1px rgba(3,102,214,0.1)' : 
+                       isDownstreamOfSelected ? '0 4px 12px rgba(3,102,214,0.2), 0 0 0 1px rgba(3,102,214,0.05)' :
                        shouldDim ? '0 1px 3px rgba(0,0,0,0.05)' : '0 2px 8px rgba(0,0,0,0.1)',
             position: 'relative',
             opacity: data.hidden ? 0 : (shouldDim ? 0.25 : 1), // Hide with opacity for DOM stability
             visibility: data.hidden ? 'hidden' : 'visible', // Also use visibility for better performance
             pointerEvents: data.hidden ? 'none' : 'auto', // Disable interaction for hidden nodes
-            transform: isSelected ? 'scale(1.02)' : 'scale(1)',
-            zIndex: isSelected ? 10 : shouldDim ? 1 : 5,
-            transition: 'all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+            transform: 'scale(1)',
+            zIndex: isSelected ? 10 : isDownstreamOfSelected ? 8 : shouldDim ? 1 : 5,
+            transition: 'border 0.2s ease, box-shadow 0.2s ease, background 0.2s ease'
           }
         }, [
           // Root type label (subtle header row)
@@ -735,12 +763,10 @@
                 onMouseEnter: (e) => {
                   e.target.style.background = '#e1e4e8';
                   e.target.style.color = '#24292e';
-                  e.target.style.transform = 'scale(1.05)';
                 },
                 onMouseLeave: (e) => {
                   e.target.style.background = '#f6f8fa';
                   e.target.style.color = '#656d76';
-                  e.target.style.transform = 'scale(1)';
                 }
               }, React.createElement('svg', {
                 width: '40',
@@ -754,10 +780,10 @@
           ]),
           
           // Fields with handles (for objects, interfaces, inputs) OR enum values (for enums)
-          (type.fields || type.enumValues) && React.createElement('div', {
+          (type.fields || type.inputFields || type.enumValues) && React.createElement('div', {
             key: 'fields',
             style: { padding: '0', position: 'relative' }
-          }, (type.fields || type.enumValues).map((field, fieldIndex) => {
+          }, (type.fields || type.inputFields || type.enumValues).map((field, fieldIndex) => {
             // Handle both fields and enum values
             const isEnumValue = !field.type; // Enum values don't have a type property
             const fieldTypeString = isEnumValue ? '' : getTypeString(field.type);
@@ -766,7 +792,7 @@
             
             // Calculate handle position - accounting for header height (60px) and field position
             const handleTop = 60 + (fieldIndex * 45) + 22; // 22px is half the field height to center the handle
-            const totalItems = (type.fields || type.enumValues).length;
+            const totalItems = (type.fields || type.inputFields || type.enumValues).length;
             
             return React.createElement('div', {
               key: field.name,
@@ -933,10 +959,94 @@
               setLayoutedData(layouted);
               setNodes(layouted.nodes);
               setEdges(layouted.edges);
+              
+              // Center single node if only one is visible
+              const visibleNodes = layouted.nodes.filter(node => !node.data?.hidden);
+              if (visibleNodes.length === 1 && reactFlowInstance) {
+                const singleNode = visibleNodes[0];
+                setTimeout(() => {
+                  reactFlowInstance.setCenter(singleNode.position.x + 142, singleNode.position.y + 150, {
+                    zoom: 1,
+                    duration: 600
+                  });
+                }, 200); // Much shorter delay - just enough for layout to settle
+              }
+              
+              // Handle pending navigation after layout completes
+              if (window.pendingNavigation) {
+                const targetNodeId = window.pendingNavigation;
+                window.pendingNavigation = null;
+                
+                console.log('Handling pending navigation to:', targetNodeId);
+                console.log('ReactFlow instance available:', !!reactFlowInstance);
+                console.log('Target node found:', !!layouted.nodes.find(n => n.id === targetNodeId));
+                
+                // Delay for 1 second to let user see the full view first
+                setTimeout(() => {
+                  const targetNode = layouted.nodes.find(n => n.id === targetNodeId);
+                  if (targetNode && targetNode.position && reactFlowInstance) {
+                    console.log('Navigating to target node:', targetNode.id, 'at position:', targetNode.position);
+                    reactFlowInstance.fitBounds({
+                      x: targetNode.position.x,
+                      y: targetNode.position.y,
+                      width: 320,
+                      height: 200
+                    }, {
+                      padding: 0.2,
+                      duration: 600
+                    });
+                    setSelectedNodeId(targetNodeId);
+                  } else {
+                    console.log('Failed to navigate - missing:', {
+                      targetNode: !!targetNode,
+                      position: targetNode?.position,
+                      reactFlowInstance: !!reactFlowInstance
+                    });
+                  }
+                }, 1000); // 1 second delay to let user see the full view
+              }
             };
             
             applyLayout();
-          }, [schemaData, showOnlyRootTypes, selectedNodeId, focusedNodeId]);
+          }, [schemaData, showOnlyRootTypes, focusedNodeId]);
+
+          // Update node and edge highlighting when selection changes (without triggering layout)
+          React.useEffect(() => {
+            if (!schemaData || !layoutedData.nodes.length) return;
+            
+            // Regenerate both nodes and edges with updated highlighting
+            const { nodes: newNodes, edges: newEdges } = generateCompleteFlowData();
+            
+            // Keep the existing positions from layoutedData but update the data
+            const updatedNodes = layoutedData.nodes.map(layoutedNode => {
+              const newNodeData = newNodes.find(n => n.id === layoutedNode.id);
+              if (newNodeData) {
+                return {
+                  ...layoutedNode,
+                  data: newNodeData.data
+                };
+              }
+              return layoutedNode;
+            });
+            
+            // Keep the existing edge paths from layoutedData but update the styling
+            const updatedEdges = layoutedData.edges.map(layoutedEdge => {
+              const newEdgeData = newEdges.find(e => e.id === layoutedEdge.id);
+              if (newEdgeData) {
+                return {
+                  ...layoutedEdge,
+                  style: newEdgeData.style,
+                  animated: newEdgeData.animated,
+                  markerEnd: newEdgeData.markerEnd,
+                  labelStyle: newEdgeData.labelStyle
+                };
+              }
+              return layoutedEdge;
+            });
+            
+            setNodes(updatedNodes);
+            setEdges(updatedEdges);
+          }, [selectedNodeId]);
 
           // Handle smooth animations when focusing/unfocusing
           React.useEffect(() => {
@@ -971,10 +1081,15 @@
                     
                     // Now smoothly animate to the target state
                     setTimeout(() => {
-                      reactFlowInstance.fitView({
-                        duration: 700,
-                        padding: focusedNodeId ? 0.15 : 0.12 // Increased padding for full view to prevent top cutoff
-                      });
+                      // Check if only one node is visible - if so, let the centering logic handle it
+                      const visibleNodes = layoutedData.nodes.filter(node => !node.data?.hidden);
+                      if (visibleNodes.length > 1 || !focusedNodeId) {
+                        // Run fitView for multiple nodes OR when going back to full view
+                        reactFlowInstance.fitView({
+                          duration: 700,
+                          padding: focusedNodeId ? 0.15 : 0.12 // Increased padding for full view to prevent top cutoff
+                        });
+                      }
                       
                       setTimeout(() => {
                         if (!focusedNodeId) {
@@ -1094,8 +1209,9 @@
             
             // Convert React Flow format to ELK format with port information
             const elkNodes = visibleNodes.map((node, nodeIndex) => {
-              // Count fields OR enum values
+              // Count fields, inputFields, OR enum values
               const itemCount = node.data.type.fields ? node.data.type.fields.length : 
+                                node.data.type.inputFields ? node.data.type.inputFields.length :
                                 node.data.type.enumValues ? node.data.type.enumValues.length : 0;
               
               // Check if this is a root type (has extra header)
@@ -1124,8 +1240,8 @@
                 y: 30 + rootTypeHeaderHeight + targetOffset // Account for root type header
               });
               
-              // Add source ports for ALL fields OR enum values to maintain correct ordering
-              const items = node.data.type.fields || node.data.type.enumValues || [];
+              // Add source ports for ALL fields, inputFields, OR enum values to maintain correct ordering
+              const items = node.data.type.fields || node.data.type.inputFields || node.data.type.enumValues || [];
               items.forEach((item, itemIndex) => {
                 const isEnumValue = !item.type; // Enum values don't have a type property
                 
@@ -1201,9 +1317,9 @@
                 if (node.data.isQueryType) {
                   layoutOptions['elk.position'] = '(50, 50)';
                 } else if (node.data.isMutationType) {
-                  layoutOptions['elk.position'] = '(50, 400)'; // Below Query
+                  layoutOptions['elk.position'] = '(50, 600)'; // Below Query, on the left
                 } else if (node.data.isSubscriptionType) {
-                  layoutOptions['elk.position'] = '(50, 750)'; // Below Mutation
+                  layoutOptions['elk.position'] = '(50, 400)'; // Between Query and Mutation
                 }
               } else {
                 layoutOptions['elk.priority'] = priority.toString();
@@ -1228,25 +1344,157 @@
               };
             });
 
+            // Identify isolated nodes (no incoming or outgoing edges)
+            const connectedNodeIds = new Set();
+            visibleEdges.forEach(edge => {
+              connectedNodeIds.add(edge.source);
+              connectedNodeIds.add(edge.target);
+            });
+            
+            // Separate nodes into ELK-processed and React Flow-only
+            const isolatedNodes = elkNodes.filter(node => !connectedNodeIds.has(node.id));
+            const connectedElkNodes = elkNodes.filter(node => connectedNodeIds.has(node.id));
+            
+            // Separate root nodes from regular nodes for ELK compound node approach (only among connected nodes)
+            const rootNodes = connectedElkNodes.filter(node => {
+              const originalNode = visibleNodes.find(n => n.id === node.id);
+              return originalNode && (originalNode.data.isQueryType || originalNode.data.isMutationType || originalNode.data.isSubscriptionType);
+            }).sort((a, b) => {
+              // Sort to ensure consistent order: Query, Mutation, Subscription
+              const getOrder = (node) => {
+                const originalNode = visibleNodes.find(n => n.id === node.id);
+                if (originalNode.data.isQueryType) return 0;
+                if (originalNode.data.isMutationType) return 1;
+                if (originalNode.data.isSubscriptionType) return 2;
+                return 3;
+              };
+              return getOrder(a) - getOrder(b);
+            });
+            
+            const regularNodes = connectedElkNodes.filter(node => {
+              const originalNode = visibleNodes.find(n => n.id === node.id);
+              return originalNode && !(originalNode.data.isQueryType || originalNode.data.isMutationType || originalNode.data.isSubscriptionType);
+            });
+            
+            // Calculate positions for each root type within the compound
+            const rootTypePositions = new Map();
+            let currentY = 0;
+            
+            rootNodes.forEach((node, index) => {
+              // Use the exact same dimensions that were calculated for the original ELK node
+              const originalElkNode = elkNodes.find(n => n.id === node.id);
+              const nodeHeight = originalElkNode.height;
+              const nodeWidth = originalElkNode.width;
+              
+              rootTypePositions.set(node.id, {
+                x: 0,
+                y: currentY,
+                height: nodeHeight,
+                width: nodeWidth
+              });
+              
+              currentY += nodeHeight + 50; // 50px spacing between root types
+            });
+            
+            // Calculate total compound height with extra buffer for ELK port positioning
+            const totalCompoundHeight = currentY - 50 + 50; // Remove last spacing, add 50px buffer for bottom ports
+            
+            // Create a compound node that ELK treats as a single unit  
+            const compoundRootNode = rootNodes.length > 0 ? {
+              id: 'compound-root',
+              width: rootNodes.length > 0 ? rootTypePositions.get(rootNodes[0].id).width : 320, // Use same width as root nodes
+              height: totalCompoundHeight,
+              // Collect all ports from root nodes and move them to compound level
+              ports: rootNodes.flatMap((node) => {
+                const position = rootTypePositions.get(node.id);
+                return node.ports.map(port => {
+                  const updatedPortId = port.id.replace(node.id, 'compound-root');
+                  console.log(`Port ID update: ${port.id} -> ${updatedPortId}`);
+                  return {
+                    ...port,
+                    // Update port ID to use compound-root prefix to match updated edge sources
+                    id: updatedPortId,
+                    // Adjust port positions to account for actual stacked layout positions
+                    y: port.y + position.y
+                  };
+                });
+              }),
+              children: rootNodes.map((node) => {
+                const position = rootTypePositions.get(node.id);
+                return {
+                  ...node,
+                  ports: [], // Remove ports from children since they're now on compound
+                  layoutOptions: {},
+                  // Use exact calculated positions and dimensions
+                  x: position.x,
+                  y: position.y,
+                  width: position.width,
+                  height: position.height
+                };
+              }),
+              edges: [], // No edges within the compound
+              layoutOptions: {
+                'elk.algorithm': 'fixed', // Use fixed algorithm to respect child positions
+                'elk.padding': '[top=0,left=0,bottom=0,right=0]',
+                'elk.portConstraints': 'FIXED_POS'
+              }
+            } : null;
+            
+            // Update edges to reference compound node instead of individual root nodes
+            const updatedEdges = elkEdges.map(edge => {
+              const rootNodeIds = rootNodes.map(n => n.id);
+              console.log(`Checking edge: ${edge.id}, sources: ${edge.sources}, rootNodeIds: ${rootNodeIds}`);
+              const sourceIsRoot = rootNodeIds.some(id => edge.sources[0].startsWith(id));
+              
+              if (sourceIsRoot && compoundRootNode) {
+                // Replace root node reference with compound node reference
+                return {
+                  ...edge,
+                  sources: edge.sources.map(source => {
+                    console.log(`Processing source: ${source}, checking against rootNodeIds: ${rootNodeIds}`);
+                    // Find the longest matching root ID to avoid partial matches
+                    const matchingRootId = rootNodeIds
+                      .filter(id => source.startsWith(id))
+                      .sort((a, b) => b.length - a.length)[0]; // Get the longest match
+                    console.log(`Matching root ID found: ${matchingRootId}`);
+                    if (matchingRootId) {
+                      // Replace the entire root node ID with compound-root
+                      const updatedSource = source.replace(matchingRootId, 'compound-root');
+                      console.log(`Edge source update: ${source} -> ${updatedSource} (replaced ${matchingRootId})`);
+                      return updatedSource;
+                    }
+                    return source;
+                  })
+                };
+              }
+              return edge;
+            });
+            
+            // Debug final compound node structure
+            if (compoundRootNode) {
+              console.log('Final compound node ports:', compoundRootNode.ports.map(p => ({ id: p.id, x: p.x, y: p.y })));
+              console.log('Final updated edges:', updatedEdges.map(e => ({ id: e.id, sources: e.sources, targets: e.targets })));
+            }
+            
             const elkGraph = {
               id: 'root',
-              children: elkNodes,
-              edges: elkEdges,
+              children: compoundRootNode ? [compoundRootNode, ...regularNodes] : elkNodes,
+              edges: compoundRootNode ? updatedEdges : elkEdges,
               layoutOptions: {
                 'elk.algorithm': 'layered',
                 'elk.direction': 'RIGHT',
                 'elk.spacing.nodeNode': '60',
                 'elk.layered.spacing.nodeNodeBetweenLayers': '120',
                 'elk.spacing.edgeNode': '80',
-                'elk.spacing.edgeEdge': '20',
+                'elk.spacing.edgeEdge': '30',
                 'elk.edgeRouting': 'POLYLINE',
                 'elk.layered.mergeEdges': 'false',
                 'elk.layered.unnecessaryBendpoints': 'false',
                 'elk.layered.edgeRouting.polyline.sloppyRouting': 'false',
-                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '2',
-                'elk.spacing.portPort': '15',
+                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '4',
+                'elk.spacing.portPort': '18',
                 'elk.portAlignment.default': 'DISTRIBUTED',
-                'elk.layered.edgeRouting.multiEdgeSpacing': '20',
+                'elk.layered.edgeRouting.multiEdgeSpacing': '30',
                 'elk.layered.edgeRouting.sloppySplineRouting': 'false',
                 'elk.separateConnectedComponents': 'false',
                 'elk.padding': '[top=30,left=30,bottom=30,right=30]',
@@ -1261,28 +1509,85 @@
               // Debug port information
               console.log('Node order in ELK input:', elkGraph.children.map(n => n.id));
               elkGraph.children.forEach((node, nodeIndex) => {
-                console.log(`Node ${nodeIndex}: ${node.id}:`, {
-                  priority: node.layoutOptions?.['elk.priority'],
-                  position: node.layoutOptions?.['elk.position'],
-                  totalPorts: node.ports.length,
-                  relationships: node.ports.filter(p => p.isRelationship).length,
-                  scalars: node.ports.filter(p => p.isScalar).length,
-                  others: node.ports.filter(p => !p.isRelationship && !p.isScalar && !p.id.includes('-target')).length,
-                  portOrder: node.ports.map(p => ({
-                    index: p.layoutOptions?.['elk.port.index'],
-                    side: p.layoutOptions?.['elk.port.side'],
-                    fieldName: p.id.split('-field-')[1] || 'target',
-                    type: p.isRelationship ? 'REL' : p.isScalar ? 'SCALAR' : p.id.includes('-target') ? 'TARGET' : 'OTHER',
-                    y: p.y
-                  }))
-                });
+                if (node.id === 'compound-root') {
+                  console.log(`Compound Node ${nodeIndex}: ${node.id}:`, {
+                    width: node.width,
+                    height: node.height,
+                    childCount: node.children ? node.children.length : 0,
+                    totalPorts: node.ports ? node.ports.length : 0,
+                    algorithm: node.layoutOptions?.['elk.algorithm'],
+                    portConstraints: node.layoutOptions?.['elk.portConstraints']
+                  });
+                  if (node.ports) {
+                    console.log(`  Compound ports (${node.ports.length}):`, node.ports.map(p => ({
+                      id: p.id,
+                      x: p.x,
+                      y: p.y,
+                      isRelationship: p.isRelationship,
+                      isScalar: p.isScalar,
+                      fieldType: p.fieldType
+                    })));
+                  }
+                  if (node.children) {
+                    node.children.forEach((child, childIndex) => {
+                      console.log(`  Child ${childIndex}: ${child.id}:`, {
+                        x: child.x,
+                        y: child.y,
+                        totalPorts: child.ports ? child.ports.length : 0
+                      });
+                    });
+                  }
+                } else if (node.ports) {
+                  console.log(`Node ${nodeIndex}: ${node.id}:`, {
+                    priority: node.layoutOptions?.['elk.priority'],
+                    position: node.layoutOptions?.['elk.position'],
+                    totalPorts: node.ports.length,
+                    relationships: node.ports.filter(p => p.isRelationship).length,
+                    scalars: node.ports.filter(p => p.isScalar).length,
+                    others: node.ports.filter(p => !p.isRelationship && !p.isScalar && !p.id.includes('-target')).length,
+                    portOrder: node.ports.map(p => ({
+                      index: p.layoutOptions?.['elk.port.index'],
+                      side: p.layoutOptions?.['elk.port.side'],
+                      fieldName: p.id.split('-field-')[1] || 'target',
+                      type: p.isRelationship ? 'REL' : p.isScalar ? 'SCALAR' : p.id.includes('-target') ? 'TARGET' : 'OTHER',
+                      y: p.y
+                    }))
+                  });
+                } else {
+                  console.log(`Node ${nodeIndex}: ${node.id}:`, {
+                    priority: node.layoutOptions?.['elk.priority'],
+                    position: node.layoutOptions?.['elk.position'],
+                    totalPorts: 0,
+                    note: 'No ports'
+                  });
+                }
               });
               
               const layoutedGraph = await elk.layout(elkGraph);
               console.log('ELK Output:', layoutedGraph);
               
+              // Flatten compound node structure and adjust positions
+              let flattenedNodes = [];
+              layoutedGraph.children.forEach(child => {
+                if (child.id === 'compound-root' && child.children) {
+                  // Extract individual nodes from compound and adjust their positions relative to compound position
+                  child.children.forEach(rootNode => {
+                    // Restore ports to the individual root nodes for proper edge routing
+                    const position = rootTypePositions.get(rootNode.id);
+                    const originalNode = rootNodes.find(n => n.id === rootNode.id);
+                    
+                    rootNode.x += child.x;
+                    rootNode.y += child.y;
+                    rootNode.ports = originalNode.ports; // Restore original ports
+                    flattenedNodes.push(rootNode);
+                  });
+                } else {
+                  flattenedNodes.push(child);
+                }
+              });
+              
               // Debug ELK output port positioning
-              layoutedGraph.children.forEach((elkNode, nodeIndex) => {
+              flattenedNodes.forEach((elkNode, nodeIndex) => {
                 console.log(`ELK Output Node ${nodeIndex}: ${elkNode.id}:`, {
                   position: `(${elkNode.x}, ${elkNode.y})`,
                   size: `${elkNode.width}x${elkNode.height}`,
@@ -1297,12 +1602,21 @@
               });
               
               // Store ELK debug data - preserve our custom port properties
-              layoutedGraph.children.forEach(elkNode => {
+              flattenedNodes.forEach(elkNode => {
                 if (elkNode.ports) {
                   elkNode.ports.forEach(elkPort => {
-                    // Find the original port to preserve our custom properties
-                    const originalNode = elkGraph.children.find(n => n.id === elkNode.id);
-                    const originalPort = originalNode?.ports.find(p => p.id === elkPort.id);
+                    // Find the original port - for compound node, look in the compound's ports
+                    let originalPort;
+                    if (elkNode.id === 'compound-root') {
+                      // Find original port in the compound node's port collection
+                      const compound = layoutedGraph.children.find(n => n.id === 'compound-root');
+                      originalPort = compoundRootNode?.ports.find(p => p.id === elkPort.id);
+                    } else {
+                      // Regular node - find in original elkNodes
+                      let originalNode = elkNodes.find(n => n.id === elkNode.id);
+                      originalPort = originalNode?.ports.find(p => p.id === elkPort.id);
+                    }
+                    
                     if (originalPort) {
                       elkPort.isRelationship = originalPort.isRelationship;
                       elkPort.isScalar = originalPort.isScalar;
@@ -1312,6 +1626,10 @@
                 }
               });
               
+              // Update layoutedGraph with flattened nodes for React Flow
+              layoutedGraph.children = flattenedNodes;
+              
+              console.log('All ELK edge IDs:', layoutedGraph.edges.map(e => e.id));
               setElkDebugData(layoutedGraph);
               
               // Apply positions back to React Flow nodes (only for visible nodes)
@@ -1319,21 +1637,63 @@
               nodes.forEach(node => {
                 originalPositions[node.id] = { ...node.position };
                 
-                // Only update positions for visible nodes that were processed by ELK
+                // Only update positions for visible nodes
                 if (!node.data.hidden) {
-                  const elkNode = layoutedGraph.children.find(n => n.id === node.id);
+                  const elkNode = flattenedNodes.find(n => n.id === node.id);
                   if (elkNode) {
+                    // Node was processed by ELK - use ELK position
                     node.position = {
                       x: elkNode.x,
                       y: elkNode.y
                     };
                     console.log(`Node ${node.id}: ELK(${elkNode.x}, ${elkNode.y}) vs Original(${originalPositions[node.id].x}, ${originalPositions[node.id].y})`);
+                  } else {
+                    // Isolated node - use simple React Flow positioning
+                    const isIsolated = isolatedNodes.find(n => n.id === node.id);
+                    if (isIsolated) {
+                      // Find the maximum Y position of all ELK-processed nodes
+                      let maxY = 0;
+                      flattenedNodes.forEach(elkNode => {
+                        maxY = Math.max(maxY, elkNode.y + 300); // Add node height buffer
+                      });
+                      
+                      // Position isolated nodes in a grid below all ELK nodes
+                      const isolatedIndex = isolatedNodes.findIndex(n => n.id === node.id);
+                      node.position = {
+                        x: 100 + (isolatedIndex % 4) * 350, // 4 columns starting from left
+                        y: maxY + 100 + Math.floor(isolatedIndex / 4) * 250 // Below ELK nodes with spacing
+                      };
+                      console.log(`Node ${node.id}: Isolated positioned at (${node.position.x}, ${node.position.y}) below ELK max Y: ${maxY}`);
+                    }
                   }
                 }
                 // Hidden nodes keep their original positions (for DOM stability)
               });
+              
+              // Match React Flow edges with ELK output edges - don't update IDs, keep them matching
+              const updatedReactFlowEdges = edges.map(edge => {
+                const rootNodeIds = rootNodes.map(n => n.id);
+                const sourceIsRoot = rootNodeIds.some(id => edge.source === id);
+                
+                if (sourceIsRoot && compoundRootNode) {
+                  // Keep the original edge ID to match ELK output, but ensure elkEdgeData is set
+                  console.log(`Keeping original edge ID for ELK matching: ${edge.id}`);
+                  return {
+                    ...edge,
+                    data: {
+                      ...edge.data,
+                      elkEdgeData: true // Ensure this edge uses ELK data
+                    }
+                    // Keep original ID and source for matching with ELK output
+                  };
+                }
+                return edge;
+              });
+              
+              // Use the updated edges instead of original edges
+              const finalEdges = compoundRootNode ? updatedReactFlowEdges : edges;
 
-              return { nodes, edges, elkGraph: layoutedGraph };
+              return { nodes, edges: finalEdges, elkGraph: layoutedGraph };
             } catch (error) {
               console.error('ELK layout failed:', error);
               // Fallback to simple grid layout (only for visible nodes)
@@ -1422,7 +1782,7 @@
               
               nodesToFit.forEach(n => {
                 const nodeWidth = 284; // Calculated width from earlier
-                const itemCount = n.data.type.fields?.length || n.data.type.enumValues?.length || 0;
+                const itemCount = n.data.type.fields?.length || n.data.type.inputFields?.length || n.data.type.enumValues?.length || 0;
                 const isRootType = n.data.isQueryType || n.data.isMutationType || n.data.isSubscriptionType;
                 const rootTypeHeaderHeight = isRootType ? 29 : 0; // Match the adjusted height
                 const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight);
@@ -1453,67 +1813,21 @@
 
           // Handle field click to center on target node
           const onFieldClick = React.useCallback((targetNodeId) => {
+            console.log('Field clicked:', targetNodeId, 'Focus mode:', focusedNodeId !== null);
+            
             if (reactFlowInstance && targetNodeId) {
               // Check if we're in focus mode
               const isInFocusMode = focusedNodeId !== null;
               
               if (isInFocusMode) {
-                // In focus mode - check if target is in the visible types set
-                const focusedTypeName = focusedNodeId.replace('type-', '');
-                const targetTypeName = targetNodeId.replace('type-', '');
+                console.log('In focus mode, checking if target is visible...');
+                // Always exit focus mode and navigate to target for now
+                console.log('Exiting focus mode and navigating to:', targetNodeId);
                 
-                // Get the visible types in focus mode (focused + downstream)
-                const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
-                const focusedType = allTypes.find(type => type.name === focusedTypeName);
-                let visibleTypeNames = new Set();
-                
-                if (focusedType) {
-                  visibleTypeNames.add(focusedTypeName);
-                  if (focusedType.fields) {
-                    focusedType.fields.forEach(field => {
-                      const coreTypeName = getCoreTypeName(field.type);
-                      if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
-                        visibleTypeNames.add(coreTypeName);
-                      }
-                    });
-                  }
-                }
-                
-                const isTargetVisible = visibleTypeNames.has(targetTypeName);
-                
-                console.log('Field click in focus mode:', {
-                  targetNodeId,
-                  targetTypeName,
-                  isTargetVisible,
-                  visibleTypes: Array.from(visibleTypeNames)
-                });
-                
-                if (!isTargetVisible) {
-                  // Target is not visible in focus mode - exit focus and navigate
-                  console.log('Target not visible, exiting focus mode and navigating...');
-                  setFocusedNodeId(null);
-                  
-                  // Use a longer timeout and set up the navigation as a callback
-                  setTimeout(() => {
-                    console.log('Navigating to target after focus exit...');
-                    const currentNodes = reactFlowInstance.getNodes();
-                    const targetNode = currentNodes.find(n => n.id === targetNodeId);
-                    
-                    if (targetNode && targetNode.position) {
-                      reactFlowInstance.fitBounds({
-                        x: targetNode.position.x,
-                        y: targetNode.position.y,
-                        width: 320,
-                        height: 200
-                      }, {
-                        padding: 0.2,
-                        duration: 600
-                      });
-                      setSelectedNodeId(targetNodeId);
-                    }
-                  }, 1200); // Longer wait for complete transition
-                  return; // Exit early to prevent immediate navigation
-                }
+                // Store the target for navigation after layout completes
+                window.pendingNavigation = targetNodeId;
+                setFocusedNodeId(null);
+                return; // Exit early to prevent immediate navigation
               }
               
               // Target is visible or we're in full view - navigate normally
@@ -1533,6 +1847,71 @@
             }
           }, [reactFlowInstance, focusedNodeId, nodes, schemaData, shouldDisplayAsNode, getCoreTypeName, isScalarType]);
 
+          // Helper functions for type ancestry analysis
+          const getTypeDescendants = (typeName, visited = new Set()) => {
+            if (!schemaData || visited.has(typeName)) return new Set();
+            visited.add(typeName);
+            
+            const descendants = new Set();
+            const type = schemaData.__schema.types.find(t => t.name === typeName);
+            
+            if (type && (type.fields || type.inputFields)) {
+              const fields = type.fields || type.inputFields;
+              fields.forEach(field => {
+                const coreTypeName = getCoreTypeName(field.type);
+                if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
+                  descendants.add(coreTypeName);
+                  // Recursively get descendants
+                  const nestedDescendants = getTypeDescendants(coreTypeName, visited);
+                  nestedDescendants.forEach(desc => descendants.add(desc));
+                }
+              });
+            }
+            
+            return descendants;
+          };
+
+          const classifyTypes = () => {
+            if (!schemaData) return { queryTypes: new Set(), mutableTypes: new Set(), sharedTypes: new Set() };
+            
+            const queryRootName = schemaData.__schema.queryType?.name;
+            const mutationRootName = schemaData.__schema.mutationType?.name;
+            const subscriptionRootName = schemaData.__schema.subscriptionType?.name;
+            
+            // Get all descendants of query root
+            const queryDescendants = queryRootName ? getTypeDescendants(queryRootName) : new Set();
+            if (queryRootName) queryDescendants.add(queryRootName);
+            
+            // Get all descendants of mutation root  
+            const mutationDescendants = mutationRootName ? getTypeDescendants(mutationRootName) : new Set();
+            if (mutationRootName) mutationDescendants.add(mutationRootName);
+            
+            // Add subscription root to query graph for now
+            if (subscriptionRootName) {
+              queryDescendants.add(subscriptionRootName);
+              const subscriptionDescendants = getTypeDescendants(subscriptionRootName);
+              subscriptionDescendants.forEach(desc => queryDescendants.add(desc));
+            }
+            
+            // Find shared types (appear in both graphs)
+            const sharedTypes = new Set();
+            mutationDescendants.forEach(type => {
+              if (queryDescendants.has(type)) {
+                sharedTypes.add(type);
+              }
+            });
+            
+            // Mutable types are those that belong to mutation but not query (excluding shared)
+            const mutableTypes = new Set();
+            mutationDescendants.forEach(type => {
+              if (!queryDescendants.has(type)) {
+                mutableTypes.add(type);
+              }
+            });
+            
+            return { queryTypes: queryDescendants, mutableTypes, sharedTypes };
+          };
+
           // Generate React Flow nodes and edges using table-like approach
           const generateCompleteFlowData = () => {
             if (!schemaData) return { nodes: [], edges: [] };
@@ -1542,6 +1921,9 @@
 
             // Get all types that should be displayed as nodes
             const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
+            
+            // Classify types into partitions
+            const { queryTypes, mutableTypes, sharedTypes } = classifyTypes();
 
             // Determine which types should be visible (but create nodes for ALL types)
             let visibleTypeNames = new Set();
@@ -1598,10 +1980,11 @@
               const y = viewportHeight / 2 + (Math.random() - 0.5) * 100;
 
               // Calculate field information for handles
-              const relationshipFields = type.fields ? type.fields.filter(field => {
+              const fields = type.fields || type.inputFields || [];
+              const relationshipFields = fields.filter(field => {
                 const coreTypeName = getCoreTypeName(field.type);
                 return coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName);
-              }) : [];
+              });
 
               const typeNodeId = `type-${type.name}`;
               const downstreamNodeIds = getDownstreamNodeIds(typeNodeId);
@@ -1610,6 +1993,12 @@
               const isDownstreamOfSelected = selectedNodeId && getDownstreamNodeIds(selectedNodeId).has(typeNodeId);
               const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected && !focusedNodeId;
               const isVisible = visibleTypeNames.has(type.name);
+              
+              // Determine partition membership
+              const isInQueryPartition = queryTypes.has(type.name);
+              const isInMutablePartition = mutableTypes.has(type.name);
+              const isSharedType = sharedTypes.has(type.name);
+              const partition = isInMutablePartition ? 'mutable' : 'query'; // Default to query partition
 
               nodes.push({
                 id: typeNodeId,
@@ -1623,6 +2012,10 @@
                   isQueryType,
                   isMutationType,
                   isSubscriptionType,
+                  partition,
+                  isInQueryPartition,
+                  isInMutablePartition,
+                  isSharedType,
                   getTypeString,
                   getCoreTypeName,
                   isScalarType,
@@ -1630,14 +2023,16 @@
                   onFocus: setFocusedNodeId,
                   shouldDim,
                   isSelected,
+                  isDownstreamOfSelected,
                   isTransitioning,
                   hidden: !isVisible // Add hidden property for DOM stability
                 }
               });
 
               // Create edges for field relationships
-              if (type.fields) {
-                type.fields.forEach((field, fieldIndex) => {
+              const typeFields = type.fields || type.inputFields;
+              if (typeFields) {
+                typeFields.forEach((field, fieldIndex) => {
                   const coreTypeName = getCoreTypeName(field.type);
                   
                   // Only create edges for non-scalar types that exist in our node set
@@ -1785,11 +2180,9 @@
               },
               onMouseEnter: (e) => {
                 e.target.style.background = 'rgba(225, 228, 232, 0.95)';
-                e.target.style.transform = 'scale(1.05)';
               },
               onMouseLeave: (e) => {
                 e.target.style.background = 'rgba(255, 255, 255, 0.95)';
-                e.target.style.transform = 'scale(1)';
               }
             }, [
               React.createElement('span', {
