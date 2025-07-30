@@ -702,6 +702,12 @@
                                 node.data.type.enumValues ? node.data.type.enumValues.length : 0;
               const nodeHeight = Math.max(100, 60 + (itemCount * 45));
               
+              // Calculate actual node width based on selection state
+              const isSelected = node.data.isSelected;
+              const borderWidth = isSelected ? 3 : 2;
+              const contentWidth = 280; // React Flow minWidth
+              const nodeWidth = contentWidth + (borderWidth * 2);
+              
               // Create ports for each field that has relationships
               const ports = [];
               
@@ -731,7 +737,7 @@
                     id: `${node.id}-field-${item.name}`,
                     width: 8,
                     height: 8,
-                    x: 316, // Position at right edge
+                    x: nodeWidth - borderWidth - 10, // Adjust by observed 10px gap
                     y: fieldY,
                     // Preserve metadata for debugging
                     isRelationship: isRelationship,
@@ -746,7 +752,7 @@
                     id: `${node.id}-enum-${item.name}`,
                     width: 8,
                     height: 8,
-                    x: 316, // Position at right edge
+                    x: nodeWidth - borderWidth - 10, // Adjust by observed 10px gap
                     y: enumY,
                     // Preserve metadata for debugging
                     isEnumValue: true,
@@ -757,7 +763,7 @@
               
               return {
                 id: node.id,
-                width: 320,
+                width: nodeWidth,
                 height: nodeHeight,
                 ports: ports,
                 layoutOptions: {
@@ -895,16 +901,29 @@
             return downstreamIds;
           };
 
+          // Track click timeout to distinguish single vs double click
+          const clickTimeoutRef = React.useRef(null);
+          
           // Handle node click
           const onNodeClick = React.useCallback((event, node) => {
-            console.log('Node clicked:', node.id);
-            if (selectedNodeId === node.id) {
-              console.log('Deselecting node');
-              setSelectedNodeId(null); // Deselect if clicking the same node
-            } else {
-              console.log('Selecting node:', node.id);
-              setSelectedNodeId(node.id);
+            // Clear any existing timeout
+            if (clickTimeoutRef.current) {
+              clearTimeout(clickTimeoutRef.current);
+              clickTimeoutRef.current = null;
             }
+            
+            // Set a timeout to handle single click
+            clickTimeoutRef.current = setTimeout(() => {
+              console.log('Node clicked:', node.id);
+              if (selectedNodeId === node.id) {
+                console.log('Deselecting node');
+                setSelectedNodeId(null); // Deselect if clicking the same node
+              } else {
+                console.log('Selecting node:', node.id);
+                setSelectedNodeId(node.id);
+              }
+              clickTimeoutRef.current = null;
+            }, 200); // 200ms delay to wait for potential double-click
           }, [selectedNodeId]);
 
           // Handle clicking on empty space to deselect
@@ -912,6 +931,58 @@
             console.log('Pane clicked - deselecting');
             setSelectedNodeId(null);
           }, []);
+          
+          // Handle node double-click to center and zoom to fit downstream nodes
+          const onNodeDoubleClick = React.useCallback((event, node) => {
+            // Cancel single click timeout
+            if (clickTimeoutRef.current) {
+              clearTimeout(clickTimeoutRef.current);
+              clickTimeoutRef.current = null;
+            }
+            
+            if (!reactFlowInstance) return;
+            
+            // Get all downstream nodes
+            const downstreamIds = getDownstreamNodeIds(node.id);
+            const nodesToFit = [node, ...layoutedData.nodes.filter(n => downstreamIds.has(n.id))];
+            
+            if (nodesToFit.length === 1) {
+              // If only the clicked node, center it
+              reactFlowInstance.setCenter(node.position.x + 150, node.position.y + 50, {
+                zoom: 1,
+                duration: 800
+              });
+            } else {
+              // Calculate bounds of all nodes to fit
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              
+              nodesToFit.forEach(n => {
+                const nodeWidth = 284; // Calculated width from earlier
+                const nodeHeight = Math.max(100, 60 + ((n.data.type.fields?.length || n.data.type.enumValues?.length || 0) * 45));
+                
+                minX = Math.min(minX, n.position.x);
+                minY = Math.min(minY, n.position.y);
+                maxX = Math.max(maxX, n.position.x + nodeWidth);
+                maxY = Math.max(maxY, n.position.y + nodeHeight);
+              });
+              
+              // Add padding
+              const padding = 100;
+              minX -= padding;
+              minY -= padding;
+              maxX += padding;
+              maxY += padding;
+              
+              // Fit to bounds
+              reactFlowInstance.fitBounds(
+                { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+                { duration: 800 }
+              );
+            }
+            
+            // Also select the node
+            setSelectedNodeId(node.id);
+          }, [reactFlowInstance, layoutedData.nodes, getDownstreamNodeIds]);
 
           // Handle field click to center on target node
           const onFieldClick = React.useCallback((targetNodeId) => {
@@ -1157,6 +1228,7 @@
               minZoom: 0.1,
               maxZoom: 1.5,
               onNodeClick: onNodeClick,
+              onNodeDoubleClick: onNodeDoubleClick,
               onPaneClick: onPaneClick,
               onInit: setReactFlowInstance
             }, [
