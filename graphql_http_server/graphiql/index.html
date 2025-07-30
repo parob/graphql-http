@@ -425,6 +425,7 @@
             // Find the ELK edge that matches this React Flow edge
             const elkEdge = elkDebugData.edges.find(e => e.id === id);
             
+            
             if (elkEdge && elkEdge.sections && elkEdge.sections.length > 0) {
               const section = elkEdge.sections[0];
               const startPoint = section.startPoint;
@@ -435,30 +436,53 @@
               let pathData = '';
               const radius = 500; // Corner radius - extra rounded corners for natural curves
               
-              const points = [startPoint, ...bendPoints, endPoint];
+              let points = [startPoint, ...bendPoints, endPoint];
+              
+              // Check if this edge comes from the compound root node
+              const isFromCompoundRoot = id.startsWith('type-HelloWorld');
+              
               
               if (points.length === 2) {
-                // Straight line, no bends - create smooth curves at start and end
-                const horizontalDistance = 7.5; // Distance to extend horizontally
-                const startX = points[0].x;
-                const startY = points[0].y;
-                const endX = points[1].x;
-                const endY = points[1].y;
-                
-                // Create control points for subtle curve on straight edges
-                const verticalOffset = 8; // Small vertical curve for straight edges
-                const cp1x = startX + horizontalDistance * 2; // Smaller horizontal extension
-                const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Small curve away from target
-                const cp2x = endX - horizontalDistance * 2; // Smaller horizontal pull back  
-                const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Small curve away from source
-                
-                pathData = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+                // Straight line, no bends
+                if (isFromCompoundRoot) {
+                  // Compound root straight edges: use bend point path logic with horizontal line + curve
+                  const horizontalDistance = 15;
+                  const startX = points[0].x;
+                  const startY = points[0].y;
+                  const endX = points[1].x;
+                  const endY = points[1].y;
+                  
+                  // Create horizontal line + smooth curve for compound root straight edges
+                  const cp1x = startX + horizontalDistance + 20; // Extend horizontally first
+                  const cp1y = startY;
+                  const cp2x = endX - 20;
+                  const cp2y = endY;
+                  
+                  pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+                } else {
+                  // Regular straight edges: create smooth curves at start and end
+                  const horizontalDistance = 7.5; // Distance to extend horizontally
+                  const startX = points[0].x;
+                  const startY = points[0].y;
+                  const endX = points[1].x;
+                  const endY = points[1].y;
+                  
+                  // Create control points for subtle curve on straight edges
+                  const verticalOffset = 8; // Small vertical curve for straight edges
+                  const cp1x = startX + horizontalDistance * 2; // Smaller horizontal extension
+                  const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Small curve away from target
+                  const cp2x = endX - horizontalDistance * 2; // Smaller horizontal pull back  
+                  const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Small curve away from source
+                  
+                  pathData = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+                }
               } else {
                 // Path with rounded corners - add horizontal section at start
-                const horizontalDistance = 7.5; // Distance to extend horizontally
+                const horizontalDistance = isFromCompoundRoot ? 15 : 7.5; // Longer horizontal section for compound root edges
                 const startX = points[0].x;
                 const startY = points[0].y;
                 pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY}`;
+                
                 
                 // Create modified points where the first and last bend points are adjusted
                 // to create smooth transitions from/to the horizontal sections
@@ -522,6 +546,21 @@
                   const cp2x = curr.x + (dx2 / len2) * r;
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
+                  // Special handling for first bend point after horizontal line (compound root edges)
+                  if (isFirstBendPoint && isFromCompoundRoot) {
+                    // Create smooth curve directly from horizontal line end to first bend point
+                    const horizontalEndX = workingPoints[0].x;
+                    const horizontalEndY = workingPoints[0].y;
+                    
+                    // Control points for smooth transition from horizontal line to the bend point curve
+                    const smoothCP1x = horizontalEndX + Math.min(25, Math.abs(curr.x - horizontalEndX) * 0.4);
+                    const smoothCP1y = horizontalEndY;
+                    
+                    // Instead of going directly to curr, go to cp1x to connect smoothly with the regular curve
+                    pathData += ` C ${smoothCP1x} ${smoothCP1y} ${cp1x} ${cp1y} ${cp1x} ${cp1y}`;
+                    // Don't continue - let the regular logic handle the rest of the curve
+                  }
+                  
                   // Use different smooth factor for first and last bend points
                   const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.75 : 0.9; // Bigger smooth factor for first and last bends, normal for others
                   const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
@@ -539,6 +578,7 @@
                 
                 // Simple straight line to target - the last bend point now provides the curve
                 pathData += ` L ${finalStartX} ${finalStartY} L ${endX} ${endY}`;
+                
               }
               
               
@@ -598,6 +638,7 @@
               ]);
             }
           }
+          
           
           // Fallback with subtle curves if no ELK data
           const horizontalDistance = 7.5;
@@ -1280,11 +1321,17 @@
               // Collect all ports from root nodes and move them to compound level
               ports: rootNodes.flatMap((node) => {
                 const position = rootTypePositions.get(node.id);
-                return node.ports.map(port => ({
-                  ...port,
-                  // Adjust port positions to account for actual stacked layout positions
-                  y: port.y + position.y
-                }));
+                return node.ports.map(port => {
+                  const updatedPortId = port.id.replace(node.id, 'compound-root');
+                  console.log(`Port ID update: ${port.id} -> ${updatedPortId}`);
+                  return {
+                    ...port,
+                    // Update port ID to use compound-root prefix to match updated edge sources
+                    id: updatedPortId,
+                    // Adjust port positions to account for actual stacked layout positions
+                    y: port.y + position.y
+                  };
+                });
               }),
               children: rootNodes.map((node) => {
                 const position = rootTypePositions.get(node.id);
@@ -1310,21 +1357,38 @@
             // Update edges to reference compound node instead of individual root nodes
             const updatedEdges = elkEdges.map(edge => {
               const rootNodeIds = rootNodes.map(n => n.id);
+              console.log(`Checking edge: ${edge.id}, sources: ${edge.sources}, rootNodeIds: ${rootNodeIds}`);
               const sourceIsRoot = rootNodeIds.some(id => edge.sources[0].startsWith(id));
               
               if (sourceIsRoot && compoundRootNode) {
                 // Replace root node reference with compound node reference
                 return {
                   ...edge,
-                  sources: edge.sources.map(source => 
-                    rootNodeIds.find(id => source.startsWith(id)) ? 
-                    source.replace(/^type-(Query|Mutation|Subscription)/, 'compound-root') : 
-                    source
-                  )
+                  sources: edge.sources.map(source => {
+                    console.log(`Processing source: ${source}, checking against rootNodeIds: ${rootNodeIds}`);
+                    // Find the longest matching root ID to avoid partial matches
+                    const matchingRootId = rootNodeIds
+                      .filter(id => source.startsWith(id))
+                      .sort((a, b) => b.length - a.length)[0]; // Get the longest match
+                    console.log(`Matching root ID found: ${matchingRootId}`);
+                    if (matchingRootId) {
+                      // Replace the entire root node ID with compound-root
+                      const updatedSource = source.replace(matchingRootId, 'compound-root');
+                      console.log(`Edge source update: ${source} -> ${updatedSource} (replaced ${matchingRootId})`);
+                      return updatedSource;
+                    }
+                    return source;
+                  })
                 };
               }
               return edge;
             });
+            
+            // Debug final compound node structure
+            if (compoundRootNode) {
+              console.log('Final compound node ports:', compoundRootNode.ports.map(p => ({ id: p.id, x: p.x, y: p.y })));
+              console.log('Final updated edges:', updatedEdges.map(e => ({ id: e.id, sources: e.sources, targets: e.targets })));
+            }
             
             const elkGraph = {
               id: 'root',
@@ -1479,6 +1543,7 @@
               // Update layoutedGraph with flattened nodes for React Flow
               layoutedGraph.children = flattenedNodes;
               
+              console.log('All ELK edge IDs:', layoutedGraph.edges.map(e => e.id));
               setElkDebugData(layoutedGraph);
               
               // Apply positions back to React Flow nodes (only for visible nodes)
@@ -1499,8 +1564,31 @@
                 }
                 // Hidden nodes keep their original positions (for DOM stability)
               });
+              
+              // Match React Flow edges with ELK output edges - don't update IDs, keep them matching
+              const updatedReactFlowEdges = edges.map(edge => {
+                const rootNodeIds = rootNodes.map(n => n.id);
+                const sourceIsRoot = rootNodeIds.some(id => edge.source === id);
+                
+                if (sourceIsRoot && compoundRootNode) {
+                  // Keep the original edge ID to match ELK output, but ensure elkEdgeData is set
+                  console.log(`Keeping original edge ID for ELK matching: ${edge.id}`);
+                  return {
+                    ...edge,
+                    data: {
+                      ...edge.data,
+                      elkEdgeData: true // Ensure this edge uses ELK data
+                    }
+                    // Keep original ID and source for matching with ELK output
+                  };
+                }
+                return edge;
+              });
+              
+              // Use the updated edges instead of original edges
+              const finalEdges = compoundRootNode ? updatedReactFlowEdges : edges;
 
-              return { nodes, edges, elkGraph: layoutedGraph };
+              return { nodes, edges: finalEdges, elkGraph: layoutedGraph };
             } catch (error) {
               console.error('ELK layout failed:', error);
               // Fallback to simple grid layout (only for visible nodes)
