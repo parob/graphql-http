@@ -1375,9 +1375,12 @@
               const isMutationType = type.name === schemaData.__schema.mutationType?.name;
               const isSubscriptionType = type.name === schemaData.__schema.subscriptionType?.name;
               
-              // Initial position - will be overridden by layout algorithm
-              const x = 0;
-              const y = 0;
+              // Initial position - start from center of viewport instead of top-left
+              // This creates a nicer animation effect when nodes move to their final positions
+              const viewportWidth = window.innerWidth || 1200;
+              const viewportHeight = window.innerHeight || 800;
+              const x = viewportWidth / 2 + (Math.random() - 0.5) * 100; // Small random offset to prevent overlap
+              const y = viewportHeight / 2 + (Math.random() - 0.5) * 100;
 
               // Calculate field information for handles
               const relationshipFields = type.fields ? type.fields.filter(field => {
