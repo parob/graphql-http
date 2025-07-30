@@ -1024,6 +1024,12 @@
                 'elk.portConstraints': 'FIXED_POS'
               };
               
+              // If this is the focused node, fix its position
+              if (focusedNodeId && node.id === focusedNodeId) {
+                layoutOptions['elk.nodeConstraints'] = 'FIXED_POS';
+                layoutOptions['elk.position'] = `(${node.position.x}, ${node.position.y})`;
+              }
+              
               // Set fixed positions and constraints for root types
               if (isRootType) {
                 layoutOptions['elk.nodeConstraints'] = 'FIXED_POS';
