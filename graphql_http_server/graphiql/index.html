@@ -53,9 +53,9 @@
         z-index: 2;
       }
 
-      /* Smooth node position transitions */
+      /* Smooth node position transitions - disabled to prevent blur/movement */
       .smooth-node-transition {
-        transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+        /* transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important; */
       }
 
       /* Smooth edge transitions */
@@ -669,7 +669,7 @@
 
       // Custom GraphQL Type Node Component
       const GraphQLTypeNode = ({ data }) => {
-        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected } = data;
+        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected, isDownstreamOfSelected } = data;
         const isQueryType = data.isQueryType;
         const isMutationType = data.isMutationType;
         const isSubscriptionType = data.isSubscriptionType;
@@ -678,20 +678,24 @@
         
         const nodeContent = React.createElement('div', {
           style: {
-            background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 'white',
-            border: isSelected ? '3px solid #0366d6' : shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
+            background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 
+                       isDownstreamOfSelected ? 'linear-gradient(135deg, #f8f9ff 0%, #f4f6ff 100%)' : 'white',
+            border: isSelected ? '3px solid #0366d6' : 
+                   isDownstreamOfSelected ? '2px solid #0366d6' :
+                   shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
             borderRadius: '8px',
             minWidth: '280px',
             maxWidth: '320px',
             boxShadow: isSelected ? '0 8px 24px rgba(3,102,214,0.4), 0 0 0 1px rgba(3,102,214,0.1)' : 
+                       isDownstreamOfSelected ? '0 4px 12px rgba(3,102,214,0.2), 0 0 0 1px rgba(3,102,214,0.05)' :
                        shouldDim ? '0 1px 3px rgba(0,0,0,0.05)' : '0 2px 8px rgba(0,0,0,0.1)',
             position: 'relative',
             opacity: data.hidden ? 0 : (shouldDim ? 0.25 : 1), // Hide with opacity for DOM stability
             visibility: data.hidden ? 'hidden' : 'visible', // Also use visibility for better performance
             pointerEvents: data.hidden ? 'none' : 'auto', // Disable interaction for hidden nodes
-            transform: isSelected ? 'scale(1.02)' : 'scale(1)',
-            zIndex: isSelected ? 10 : shouldDim ? 1 : 5,
-            transition: 'all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+            transform: 'scale(1)',
+            zIndex: isSelected ? 10 : isDownstreamOfSelected ? 8 : shouldDim ? 1 : 5,
+            transition: 'border 0.2s ease, box-shadow 0.2s ease, background 0.2s ease'
           }
         }, [
           // Root type label (subtle header row)
@@ -779,12 +783,10 @@
                 onMouseEnter: (e) => {
                   e.target.style.background = '#e1e4e8';
                   e.target.style.color = '#24292e';
-                  e.target.style.transform = 'scale(1.05)';
                 },
                 onMouseLeave: (e) => {
                   e.target.style.background = '#f6f8fa';
                   e.target.style.color = '#656d76';
-                  e.target.style.transform = 'scale(1)';
                 }
               }, React.createElement('svg', {
                 width: '40',
@@ -980,7 +982,45 @@
             };
             
             applyLayout();
-          }, [schemaData, showOnlyRootTypes, selectedNodeId, focusedNodeId]);
+          }, [schemaData, showOnlyRootTypes, focusedNodeId]);
+
+          // Update node and edge highlighting when selection changes (without triggering layout)
+          React.useEffect(() => {
+            if (!schemaData || !layoutedData.nodes.length) return;
+            
+            // Regenerate both nodes and edges with updated highlighting
+            const { nodes: newNodes, edges: newEdges } = generateCompleteFlowData();
+            
+            // Keep the existing positions from layoutedData but update the data
+            const updatedNodes = layoutedData.nodes.map(layoutedNode => {
+              const newNodeData = newNodes.find(n => n.id === layoutedNode.id);
+              if (newNodeData) {
+                return {
+                  ...layoutedNode,
+                  data: newNodeData.data
+                };
+              }
+              return layoutedNode;
+            });
+            
+            // Keep the existing edge paths from layoutedData but update the styling
+            const updatedEdges = layoutedData.edges.map(layoutedEdge => {
+              const newEdgeData = newEdges.find(e => e.id === layoutedEdge.id);
+              if (newEdgeData) {
+                return {
+                  ...layoutedEdge,
+                  style: newEdgeData.style,
+                  animated: newEdgeData.animated,
+                  markerEnd: newEdgeData.markerEnd,
+                  labelStyle: newEdgeData.labelStyle
+                };
+              }
+              return layoutedEdge;
+            });
+            
+            setNodes(updatedNodes);
+            setEdges(updatedEdges);
+          }, [selectedNodeId]);
 
           // Handle smooth animations when focusing/unfocusing
           React.useEffect(() => {
@@ -1965,6 +2005,7 @@
                   onFocus: setFocusedNodeId,
                   shouldDim,
                   isSelected,
+                  isDownstreamOfSelected,
                   isTransitioning,
                   hidden: !isVisible // Add hidden property for DOM stability
                 }
@@ -2120,11 +2161,9 @@
               },
               onMouseEnter: (e) => {
                 e.target.style.background = 'rgba(225, 228, 232, 0.95)';
-                e.target.style.transform = 'scale(1.05)';
               },
               onMouseLeave: (e) => {
                 e.target.style.background = 'rgba(255, 255, 255, 0.95)';
-                e.target.style.transform = 'scale(1)';
               }
             }, [
               React.createElement('span', {
