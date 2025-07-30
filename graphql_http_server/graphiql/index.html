@@ -433,7 +433,7 @@
               
               // Create path using ELK coordinates with rounded corners
               let pathData = '';
-              const radius = 50; // Corner radius - very rounded corners
+              const radius = 80; // Corner radius - extra rounded corners for natural curves
               
               const points = [startPoint, ...bendPoints, endPoint];
               
@@ -462,14 +462,21 @@
                   // Use smaller radius if segments are short
                   const r = Math.min(radius, len1 / 2, len2 / 2);
                   
-                  // Calculate control points
+                  // Calculate control points for smooth cubic bezier curves
                   const cp1x = curr.x - (dx1 / len1) * r;
                   const cp1y = curr.y - (dy1 / len1) * r;
                   const cp2x = curr.x + (dx2 / len2) * r;
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
-                  // Draw line to first control point, then curve to second control point
-                  pathData += ` L ${cp1x} ${cp1y} Q ${curr.x} ${curr.y} ${cp2x} ${cp2y}`;
+                  // Create smooth cubic bezier curve with enhanced control points
+                  const smoothFactor = 0.6; // Controls how smooth the curve is
+                  const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
+                  const ctrl1y = cp1y + (curr.y - cp1y) * smoothFactor;
+                  const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
+                  const ctrl2y = cp2y + (curr.y - cp2y) * smoothFactor;
+                  
+                  // Draw line to first control point, then smooth cubic curve to second control point
+                  pathData += ` L ${cp1x} ${cp1y} C ${ctrl1x} ${ctrl1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
                 }
                 
                 // Final line to end point
