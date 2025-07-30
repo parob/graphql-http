@@ -10,7 +10,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GraphiQL 5 with React 19 and GraphiQL Explorer</title>
+    <title>GraphiQL</title>
     <style>
       body {
         margin: 0;
@@ -443,39 +443,19 @@
               
               
               if (points.length === 2) {
-                // Straight line, no bends
-                if (isFromCompoundRoot) {
-                  // Compound root straight edges: use bend point path logic with horizontal line + curve
-                  const horizontalDistance = 15;
-                  const startX = points[0].x;
-                  const startY = points[0].y;
-                  const endX = points[1].x;
-                  const endY = points[1].y;
-                  
-                  // Create horizontal line + smooth curve for compound root straight edges
-                  const cp1x = startX + horizontalDistance + 20; // Extend horizontally first
-                  const cp1y = startY;
-                  const cp2x = endX - 20;
-                  const cp2y = endY;
-                  
-                  pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
-                } else {
-                  // Regular straight edges: create smooth curves at start and end
-                  const horizontalDistance = 7.5; // Distance to extend horizontally
-                  const startX = points[0].x;
-                  const startY = points[0].y;
-                  const endX = points[1].x;
-                  const endY = points[1].y;
-                  
-                  // Create control points for subtle curve on straight edges
-                  const verticalOffset = 8; // Small vertical curve for straight edges
-                  const cp1x = startX + horizontalDistance * 2; // Smaller horizontal extension
-                  const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Small curve away from target
-                  const cp2x = endX - horizontalDistance * 2; // Smaller horizontal pull back  
-                  const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Small curve away from source
-                  
-                  pathData = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
-                }
+                const horizontalDistance = 15;
+                const startX = points[0].x;
+                const startY = points[0].y;
+                const endX = points[1].x;
+                const endY = points[1].y;
+                
+                const cp1x = startX + horizontalDistance + 20; // Extend horizontally first
+                const cp1y = startY;
+                const cp2x = endX - 20;
+                const cp2y = endY;
+                
+                pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
+                
               } else {
                 // Path with rounded corners - add horizontal section at start
                 const horizontalDistance = isFromCompoundRoot ? 15 : 7.5; // Longer horizontal section for compound root edges
