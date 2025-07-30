@@ -1288,17 +1288,35 @@
           // Handle field click to center on target node
           const onFieldClick = React.useCallback((targetNodeId) => {
             if (reactFlowInstance && targetNodeId) {
-              const targetNode = layoutedData.nodes.find(n => n.id === targetNodeId);
-              if (targetNode) {
-                // Smooth animation to target node without aggressive zoom
-                reactFlowInstance.setCenter(targetNode.position.x + 160, targetNode.position.y + 100, { 
-                  zoom: 0.8,
+              // Get the current React Flow nodes directly from the instance
+              const rfNodes = reactFlowInstance.getNodes();
+              const targetNode = rfNodes.find(n => n.id === targetNodeId);
+              
+              console.log('Field click navigation:', {
+                targetNodeId,
+                targetNode,
+                allNodes: rfNodes.map(n => ({ id: n.id, position: n.position }))
+              });
+              
+              if (targetNode && targetNode.position) {
+                // Use fitBounds to ensure we're navigating to the right place
+                const nodeWidth = 320;
+                const nodeHeight = 200; // Approximate height
+                
+                reactFlowInstance.fitBounds({
+                  x: targetNode.position.x,
+                  y: targetNode.position.y,
+                  width: nodeWidth,
+                  height: nodeHeight
+                }, {
+                  padding: 0.2,
                   duration: 600
                 });
+                
                 setSelectedNodeId(targetNodeId);
               }
             }
-          }, [reactFlowInstance, layoutedData.nodes]);
+          }, [reactFlowInstance]);
 
           // Generate React Flow nodes and edges using table-like approach
           const generateCompleteFlowData = () => {
@@ -1637,7 +1655,7 @@
               edges,
               nodeTypes,
               edgeTypes,
-              fitView: true,
+              fitView: false, // Disable auto fitView to prevent viewport jumping
               attributionPosition: 'bottom-left',
               className: edgesFading ? 'edges-fading' : '',
               style: {
