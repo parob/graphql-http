@@ -46,10 +46,31 @@
       /* Ensure edges render behind nodes */
       .react-flow__edges {
         z-index: 1;
+        transition: opacity 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
       }
       
       .react-flow__nodes {
         z-index: 2;
+      }
+
+      /* Smooth node position transitions */
+      .smooth-node-transition {
+        transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+      }
+
+      /* Smooth edge transitions */
+      .react-flow__edge {
+        transition: opacity 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
+                    stroke 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+      }
+
+      /* Fade animation classes */
+      .edges-fading .react-flow__edges {
+        opacity: 0.2;
+      }
+
+      .edges-fading .react-flow__edge {
+        opacity: 0.3;
       }
 
       /* Style the bezier curves */
@@ -492,7 +513,7 @@
             opacity: shouldDim ? 0.25 : 1,
             transform: isSelected ? 'scale(1.02)' : 'scale(1)',
             zIndex: isSelected ? 10 : shouldDim ? 1 : 5,
-            transition: 'all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+            transition: 'all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
           }
         }, [
           // Root type label (subtle header row)
@@ -560,26 +581,28 @@
                   data.onFocus && data.onFocus(data.nodeId);
                 },
                 style: {
-                  background: '#0366d6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  padding: '8px',
+                  background: '#f6f8fa',
+                  color: '#656d76',
+                  border: '1px solid #d1d5da',
+                  borderRadius: '4px',
+                  padding: '6px',
                   cursor: 'pointer',
                   marginLeft: '8px',
                   transition: 'all 0.2s ease',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  width: '32px',
-                  height: '32px'
+                  width: '28px',
+                  height: '28px'
                 },
                 onMouseEnter: (e) => {
-                  e.target.style.background = '#0256cc';
-                  e.target.style.transform = 'scale(1.1)';
+                  e.target.style.background = '#e1e4e8';
+                  e.target.style.color = '#24292e';
+                  e.target.style.transform = 'scale(1.05)';
                 },
                 onMouseLeave: (e) => {
-                  e.target.style.background = '#0366d6';
+                  e.target.style.background = '#f6f8fa';
+                  e.target.style.color = '#656d76';
                   e.target.style.transform = 'scale(1)';
                 }
               }, React.createElement('svg', {
@@ -617,18 +640,10 @@
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 backgroundColor: isRelationship ? '#f8f9ff' : 'white',
-                cursor: isRelationship ? 'pointer' : 'default',
+                cursor: 'default',
                 position: 'relative',
                 height: '45px'
               },
-              onClick: isRelationship ? (e) => {
-                e.stopPropagation();
-                const targetTypeId = `type-${coreTypeName}`;
-                if (onFieldClick) {
-                  console.log('Field clicked:', field.name, '-> target:', targetTypeId);
-                  onFieldClick(targetTypeId);
-                }
-              } : undefined
             }, [
               React.createElement('span', {
                 key: 'name',
@@ -644,8 +659,17 @@
                   color: isRelationship ? '#0366d6' : '#656d76',
                   fontWeight: isRelationship ? '600' : '400',
                   fontSize: '12px',
-                  fontFamily: 'SFMono-Regular, Consolas, monospace'
-                }
+                  fontFamily: 'SFMono-Regular, Consolas, monospace',
+                  cursor: isRelationship ? 'pointer' : 'default'
+                },
+                onClick: isRelationship ? (e) => {
+                  e.stopPropagation();
+                  const targetTypeId = `type-${coreTypeName}`;
+                  if (onFieldClick) {
+                    console.log('Field type clicked:', field.name, '-> target:', targetTypeId);
+                    onFieldClick(targetTypeId);
+                  }
+                } : undefined
               }, fieldTypeString),
               
               // Source handle for ALL fields (visible for relationships, invisible for scalars/others) - but not for enum values
@@ -725,6 +749,7 @@
           const [reactFlowInstance, setReactFlowInstance] = React.useState(null);
           const [nodes, setNodes] = React.useState([]);
           const [edges, setEdges] = React.useState([]);
+          const [edgesFading, setEdgesFading] = React.useState(false);
           const lastFocusedNodeRef = React.useRef(null);
           
           // Fetch schema data
@@ -769,20 +794,58 @@
 
           // Handle smooth animations when focusing/unfocusing
           React.useEffect(() => {
-            if (reactFlowInstance && layoutedData.nodes.length > 0 && lastFocusedNodeRef.current !== focusedNodeId) {
-              lastFocusedNodeRef.current = focusedNodeId;
-              
-              // Only animate fitView for actual focus changes
-              const animateTimeout = setTimeout(() => {
-                reactFlowInstance.fitView({
-                  duration: 800,
-                  padding: 0.1
-                });
-              }, 200);
-              
-              return () => clearTimeout(animateTimeout);
+            if (reactFlowInstance && layoutedData.nodes.length > 0) {
+              // Check if focus state actually changed
+              if (lastFocusedNodeRef.current !== focusedNodeId) {
+                const previousFocus = lastFocusedNodeRef.current;
+                lastFocusedNodeRef.current = focusedNodeId;
+                
+                // Start edge fade out immediately
+                setEdgesFading(true);
+                
+                // Smooth transition with proper centering
+                const animateTimeout = setTimeout(() => {
+                  if (focusedNodeId) {
+                    // Entering focus mode - center on the focused node first, then fit all focused nodes
+                    const focusedNode = layoutedData.nodes.find(n => n.id === focusedNodeId);
+                    if (focusedNode) {
+                      // First, smoothly pan to the focused node
+                      reactFlowInstance.setCenter(focusedNode.position.x + 140, focusedNode.position.y + 100, {
+                        zoom: 0.9,
+                        duration: 400
+                      });
+                      
+                      // Fade edges back in after nodes start moving
+                      setTimeout(() => {
+                        setEdgesFading(false);
+                      }, 200);
+                      
+                      // Then, after a brief pause, fit all focused nodes into view
+                      setTimeout(() => {
+                        reactFlowInstance.fitView({
+                          duration: 600,
+                          padding: 0.15
+                        });
+                      }, 500);
+                    }
+                  } else {
+                    // Exiting focus mode - smooth fit to show all nodes
+                    reactFlowInstance.fitView({
+                      duration: 800,
+                      padding: 0.1
+                    });
+                    
+                    // Fade edges back in after transition starts
+                    setTimeout(() => {
+                      setEdgesFading(false);
+                    }, 300);
+                  }
+                }, 50);
+                
+                return () => clearTimeout(animateTimeout);
+              }
             }
-          }, [focusedNodeId, reactFlowInstance, layoutedData.nodes]);
+          }, [focusedNodeId, reactFlowInstance, layoutedData]);
 
           // Helper function to get clean type string
           const getTypeString = (type) => {
@@ -1256,6 +1319,7 @@
                 id: typeNodeId,
                 type: 'graphqlType',
                 position: { x, y },
+                className: 'smooth-node-transition',
                 data: {
                   nodeId: typeNodeId,
                   type,
@@ -1501,6 +1565,7 @@
               edgeTypes,
               fitView: true,
               attributionPosition: 'bottom-left',
+              className: edgesFading ? 'edges-fading' : '',
               style: {
                 background: '#fafbfc',
                 width: '100%',
