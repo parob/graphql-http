@@ -94,6 +94,13 @@
         background: white;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       }
+      
+      /* Hide nodes that have opacity 0 and visibility hidden */
+      .react-flow__node[style*="opacity: 0"] {
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
+      }
     </style>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.4/dist/style.css">
     <!--
@@ -1367,6 +1374,7 @@
                 type: 'graphqlType',
                 position: { x, y },
                 className: 'smooth-node-transition',
+                style: !isVisible ? { opacity: 0, visibility: 'hidden', pointerEvents: 'none' } : {},
                 data: {
                   nodeId: typeNodeId,
                   type,
