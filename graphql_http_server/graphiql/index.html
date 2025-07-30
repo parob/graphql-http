@@ -428,7 +428,7 @@
               
               // Create path using ELK coordinates with rounded corners
               let pathData = '';
-              const radius = 10; // Corner radius
+              const radius = 50; // Corner radius - very rounded corners
               
               const points = [startPoint, ...bendPoints, endPoint];
               
@@ -1288,35 +1288,84 @@
           // Handle field click to center on target node
           const onFieldClick = React.useCallback((targetNodeId) => {
             if (reactFlowInstance && targetNodeId) {
-              // Get the current React Flow nodes directly from the instance
-              const rfNodes = reactFlowInstance.getNodes();
-              const targetNode = rfNodes.find(n => n.id === targetNodeId);
+              // Check if we're in focus mode
+              const isInFocusMode = focusedNodeId !== null;
               
-              console.log('Field click navigation:', {
-                targetNodeId,
-                targetNode,
-                allNodes: rfNodes.map(n => ({ id: n.id, position: n.position }))
-              });
-              
-              if (targetNode && targetNode.position) {
-                // Use fitBounds to ensure we're navigating to the right place
-                const nodeWidth = 320;
-                const nodeHeight = 200; // Approximate height
+              if (isInFocusMode) {
+                // In focus mode - check if target is in the visible types set
+                const focusedTypeName = focusedNodeId.replace('type-', '');
+                const targetTypeName = targetNodeId.replace('type-', '');
                 
+                // Get the visible types in focus mode (focused + downstream)
+                const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
+                const focusedType = allTypes.find(type => type.name === focusedTypeName);
+                let visibleTypeNames = new Set();
+                
+                if (focusedType) {
+                  visibleTypeNames.add(focusedTypeName);
+                  if (focusedType.fields) {
+                    focusedType.fields.forEach(field => {
+                      const coreTypeName = getCoreTypeName(field.type);
+                      if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
+                        visibleTypeNames.add(coreTypeName);
+                      }
+                    });
+                  }
+                }
+                
+                const isTargetVisible = visibleTypeNames.has(targetTypeName);
+                
+                console.log('Field click in focus mode:', {
+                  targetNodeId,
+                  targetTypeName,
+                  isTargetVisible,
+                  visibleTypes: Array.from(visibleTypeNames)
+                });
+                
+                if (!isTargetVisible) {
+                  // Target is not visible in focus mode - exit focus and navigate
+                  console.log('Target not visible, exiting focus mode and navigating...');
+                  setFocusedNodeId(null);
+                  
+                  // Use a longer timeout and set up the navigation as a callback
+                  setTimeout(() => {
+                    console.log('Navigating to target after focus exit...');
+                    const currentNodes = reactFlowInstance.getNodes();
+                    const targetNode = currentNodes.find(n => n.id === targetNodeId);
+                    
+                    if (targetNode && targetNode.position) {
+                      reactFlowInstance.fitBounds({
+                        x: targetNode.position.x,
+                        y: targetNode.position.y,
+                        width: 320,
+                        height: 200
+                      }, {
+                        padding: 0.2,
+                        duration: 600
+                      });
+                      setSelectedNodeId(targetNodeId);
+                    }
+                  }, 1200); // Longer wait for complete transition
+                  return; // Exit early to prevent immediate navigation
+                }
+              }
+              
+              // Target is visible or we're in full view - navigate normally
+              const targetNode = nodes.find(n => n.id === targetNodeId);
+              if (targetNode && targetNode.position) {
                 reactFlowInstance.fitBounds({
                   x: targetNode.position.x,
                   y: targetNode.position.y,
-                  width: nodeWidth,
-                  height: nodeHeight
+                  width: 320,
+                  height: 200
                 }, {
                   padding: 0.2,
                   duration: 600
                 });
-                
                 setSelectedNodeId(targetNodeId);
               }
             }
-          }, [reactFlowInstance]);
+          }, [reactFlowInstance, focusedNodeId, nodes, schemaData, shouldDisplayAsNode, getCoreTypeName, isScalarType]);
 
           // Generate React Flow nodes and edges using table-like approach
           const generateCompleteFlowData = () => {
@@ -1659,10 +1708,14 @@
               onPaneClick: onPaneClick,
               onInit: (instance) => {
                 setReactFlowInstance(instance);
-                // Fit view once on initial load
+                // Fit view once on initial load with more padding at top and longer delay
                 setTimeout(() => {
-                  instance.fitView({ padding: 0.08 });
-                }, 100);
+                  instance.fitView({ 
+                    padding: 0.12, // Increased padding
+                    minZoom: 0.1,
+                    maxZoom: 1.0
+                  });
+                }, 300); // Longer delay to ensure nodes are positioned
               },
               // Removed node/edge change handlers since dragging is disabled
             }, [
