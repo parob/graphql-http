@@ -101,6 +101,11 @@
         box-shadow: none !important;
         border: none !important;
       }
+
+      /* Hide ReactFlow attribution text only */
+      .react-flow__attribution {
+        display: none !important;
+      }
     </style>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.4/dist/style.css">
     <!--
@@ -1756,6 +1761,7 @@
               
               React.createElement(Controls, {
                 key: 'controls',
+                showInteractive: false, // Hide lock/unlock button
                 style: {
                   button: {
                     backgroundColor: 'white',
