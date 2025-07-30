@@ -979,6 +979,40 @@
               setLayoutedData(layouted);
               setNodes(layouted.nodes);
               setEdges(layouted.edges);
+              
+              // Handle pending navigation after layout completes
+              if (window.pendingNavigation) {
+                const targetNodeId = window.pendingNavigation;
+                window.pendingNavigation = null;
+                
+                console.log('Handling pending navigation to:', targetNodeId);
+                console.log('ReactFlow instance available:', !!reactFlowInstance);
+                console.log('Target node found:', !!layouted.nodes.find(n => n.id === targetNodeId));
+                
+                // Delay for 1 second to let user see the full view first
+                setTimeout(() => {
+                  const targetNode = layouted.nodes.find(n => n.id === targetNodeId);
+                  if (targetNode && targetNode.position && reactFlowInstance) {
+                    console.log('Navigating to target node:', targetNode.id, 'at position:', targetNode.position);
+                    reactFlowInstance.fitBounds({
+                      x: targetNode.position.x,
+                      y: targetNode.position.y,
+                      width: 320,
+                      height: 200
+                    }, {
+                      padding: 0.2,
+                      duration: 600
+                    });
+                    setSelectedNodeId(targetNodeId);
+                  } else {
+                    console.log('Failed to navigate - missing:', {
+                      targetNode: !!targetNode,
+                      position: targetNode?.position,
+                      reactFlowInstance: !!reactFlowInstance
+                    });
+                  }
+                }, 1000); // 1 second delay to let user see the full view
+              }
             };
             
             applyLayout();
@@ -1751,67 +1785,21 @@
 
           // Handle field click to center on target node
           const onFieldClick = React.useCallback((targetNodeId) => {
+            console.log('Field clicked:', targetNodeId, 'Focus mode:', focusedNodeId !== null);
+            
             if (reactFlowInstance && targetNodeId) {
               // Check if we're in focus mode
               const isInFocusMode = focusedNodeId !== null;
               
               if (isInFocusMode) {
-                // In focus mode - check if target is in the visible types set
-                const focusedTypeName = focusedNodeId.replace('type-', '');
-                const targetTypeName = targetNodeId.replace('type-', '');
+                console.log('In focus mode, checking if target is visible...');
+                // Always exit focus mode and navigate to target for now
+                console.log('Exiting focus mode and navigating to:', targetNodeId);
                 
-                // Get the visible types in focus mode (focused + downstream)
-                const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
-                const focusedType = allTypes.find(type => type.name === focusedTypeName);
-                let visibleTypeNames = new Set();
-                
-                if (focusedType) {
-                  visibleTypeNames.add(focusedTypeName);
-                  if (focusedType.fields) {
-                    focusedType.fields.forEach(field => {
-                      const coreTypeName = getCoreTypeName(field.type);
-                      if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
-                        visibleTypeNames.add(coreTypeName);
-                      }
-                    });
-                  }
-                }
-                
-                const isTargetVisible = visibleTypeNames.has(targetTypeName);
-                
-                console.log('Field click in focus mode:', {
-                  targetNodeId,
-                  targetTypeName,
-                  isTargetVisible,
-                  visibleTypes: Array.from(visibleTypeNames)
-                });
-                
-                if (!isTargetVisible) {
-                  // Target is not visible in focus mode - exit focus and navigate
-                  console.log('Target not visible, exiting focus mode and navigating...');
-                  setFocusedNodeId(null);
-                  
-                  // Use a longer timeout and set up the navigation as a callback
-                  setTimeout(() => {
-                    console.log('Navigating to target after focus exit...');
-                    const currentNodes = reactFlowInstance.getNodes();
-                    const targetNode = currentNodes.find(n => n.id === targetNodeId);
-                    
-                    if (targetNode && targetNode.position) {
-                      reactFlowInstance.fitBounds({
-                        x: targetNode.position.x,
-                        y: targetNode.position.y,
-                        width: 320,
-                        height: 200
-                      }, {
-                        padding: 0.2,
-                        duration: 600
-                      });
-                      setSelectedNodeId(targetNodeId);
-                    }
-                  }, 1200); // Longer wait for complete transition
-                  return; // Exit early to prevent immediate navigation
-                }
+                // Store the target for navigation after layout completes
+                window.pendingNavigation = targetNodeId;
+                setFocusedNodeId(null);
+                return; // Exit early to prevent immediate navigation
               }
               
               // Target is visible or we're in full view - navigate normally
