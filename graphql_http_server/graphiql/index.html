@@ -800,10 +800,10 @@
           ]),
           
           // Fields with handles (for objects, interfaces, inputs) OR enum values (for enums)
-          (type.fields || type.enumValues) && React.createElement('div', {
+          (type.fields || type.inputFields || type.enumValues) && React.createElement('div', {
             key: 'fields',
             style: { padding: '0', position: 'relative' }
-          }, (type.fields || type.enumValues).map((field, fieldIndex) => {
+          }, (type.fields || type.inputFields || type.enumValues).map((field, fieldIndex) => {
             // Handle both fields and enum values
             const isEnumValue = !field.type; // Enum values don't have a type property
             const fieldTypeString = isEnumValue ? '' : getTypeString(field.type);
@@ -812,7 +812,7 @@
             
             // Calculate handle position - accounting for header height (60px) and field position
             const handleTop = 60 + (fieldIndex * 45) + 22; // 22px is half the field height to center the handle
-            const totalItems = (type.fields || type.enumValues).length;
+            const totalItems = (type.fields || type.inputFields || type.enumValues).length;
             
             return React.createElement('div', {
               key: field.name,
@@ -1229,8 +1229,9 @@
             
             // Convert React Flow format to ELK format with port information
             const elkNodes = visibleNodes.map((node, nodeIndex) => {
-              // Count fields OR enum values
+              // Count fields, inputFields, OR enum values
               const itemCount = node.data.type.fields ? node.data.type.fields.length : 
+                                node.data.type.inputFields ? node.data.type.inputFields.length :
                                 node.data.type.enumValues ? node.data.type.enumValues.length : 0;
               
               // Check if this is a root type (has extra header)
@@ -1259,8 +1260,8 @@
                 y: 30 + rootTypeHeaderHeight + targetOffset // Account for root type header
               });
               
-              // Add source ports for ALL fields OR enum values to maintain correct ordering
-              const items = node.data.type.fields || node.data.type.enumValues || [];
+              // Add source ports for ALL fields, inputFields, OR enum values to maintain correct ordering
+              const items = node.data.type.fields || node.data.type.inputFields || node.data.type.enumValues || [];
               items.forEach((item, itemIndex) => {
                 const isEnumValue = !item.type; // Enum values don't have a type property
                 
@@ -1363,8 +1364,19 @@
               };
             });
 
-            // Separate root nodes from regular nodes for ELK compound node approach
-            const rootNodes = elkNodes.filter(node => {
+            // Identify isolated nodes (no incoming or outgoing edges)
+            const connectedNodeIds = new Set();
+            visibleEdges.forEach(edge => {
+              connectedNodeIds.add(edge.source);
+              connectedNodeIds.add(edge.target);
+            });
+            
+            // Separate nodes into ELK-processed and React Flow-only
+            const isolatedNodes = elkNodes.filter(node => !connectedNodeIds.has(node.id));
+            const connectedElkNodes = elkNodes.filter(node => connectedNodeIds.has(node.id));
+            
+            // Separate root nodes from regular nodes for ELK compound node approach (only among connected nodes)
+            const rootNodes = connectedElkNodes.filter(node => {
               const originalNode = visibleNodes.find(n => n.id === node.id);
               return originalNode && (originalNode.data.isQueryType || originalNode.data.isMutationType || originalNode.data.isSubscriptionType);
             }).sort((a, b) => {
@@ -1379,7 +1391,7 @@
               return getOrder(a) - getOrder(b);
             });
             
-            const regularNodes = elkNodes.filter(node => {
+            const regularNodes = connectedElkNodes.filter(node => {
               const originalNode = visibleNodes.find(n => n.id === node.id);
               return originalNode && !(originalNode.data.isQueryType || originalNode.data.isMutationType || originalNode.data.isSubscriptionType);
             });
@@ -1404,8 +1416,8 @@
               currentY += nodeHeight + 50; // 50px spacing between root types
             });
             
-            // Calculate total compound height
-            const totalCompoundHeight = currentY - 50; // Remove last spacing
+            // Calculate total compound height with extra buffer for ELK port positioning
+            const totalCompoundHeight = currentY - 50 + 50; // Remove last spacing, add 50px buffer for bottom ports
             
             // Create a compound node that ELK treats as a single unit  
             const compoundRootNode = rootNodes.length > 0 ? {
@@ -1645,15 +1657,34 @@
               nodes.forEach(node => {
                 originalPositions[node.id] = { ...node.position };
                 
-                // Only update positions for visible nodes that were processed by ELK
+                // Only update positions for visible nodes
                 if (!node.data.hidden) {
                   const elkNode = flattenedNodes.find(n => n.id === node.id);
                   if (elkNode) {
+                    // Node was processed by ELK - use ELK position
                     node.position = {
                       x: elkNode.x,
                       y: elkNode.y
                     };
                     console.log(`Node ${node.id}: ELK(${elkNode.x}, ${elkNode.y}) vs Original(${originalPositions[node.id].x}, ${originalPositions[node.id].y})`);
+                  } else {
+                    // Isolated node - use simple React Flow positioning
+                    const isIsolated = isolatedNodes.find(n => n.id === node.id);
+                    if (isIsolated) {
+                      // Find the maximum Y position of all ELK-processed nodes
+                      let maxY = 0;
+                      flattenedNodes.forEach(elkNode => {
+                        maxY = Math.max(maxY, elkNode.y + 300); // Add node height buffer
+                      });
+                      
+                      // Position isolated nodes in a grid below all ELK nodes
+                      const isolatedIndex = isolatedNodes.findIndex(n => n.id === node.id);
+                      node.position = {
+                        x: 100 + (isolatedIndex % 4) * 350, // 4 columns starting from left
+                        y: maxY + 100 + Math.floor(isolatedIndex / 4) * 250 // Below ELK nodes with spacing
+                      };
+                      console.log(`Node ${node.id}: Isolated positioned at (${node.position.x}, ${node.position.y}) below ELK max Y: ${maxY}`);
+                    }
                   }
                 }
                 // Hidden nodes keep their original positions (for DOM stability)
@@ -1771,7 +1802,7 @@
               
               nodesToFit.forEach(n => {
                 const nodeWidth = 284; // Calculated width from earlier
-                const itemCount = n.data.type.fields?.length || n.data.type.enumValues?.length || 0;
+                const itemCount = n.data.type.fields?.length || n.data.type.inputFields?.length || n.data.type.enumValues?.length || 0;
                 const isRootType = n.data.isQueryType || n.data.isMutationType || n.data.isSubscriptionType;
                 const rootTypeHeaderHeight = isRootType ? 29 : 0; // Match the adjusted height
                 const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight);
@@ -1844,8 +1875,9 @@
             const descendants = new Set();
             const type = schemaData.__schema.types.find(t => t.name === typeName);
             
-            if (type && type.fields) {
-              type.fields.forEach(field => {
+            if (type && (type.fields || type.inputFields)) {
+              const fields = type.fields || type.inputFields;
+              fields.forEach(field => {
                 const coreTypeName = getCoreTypeName(field.type);
                 if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
                   descendants.add(coreTypeName);
@@ -1968,10 +2000,11 @@
               const y = viewportHeight / 2 + (Math.random() - 0.5) * 100;
 
               // Calculate field information for handles
-              const relationshipFields = type.fields ? type.fields.filter(field => {
+              const fields = type.fields || type.inputFields || [];
+              const relationshipFields = fields.filter(field => {
                 const coreTypeName = getCoreTypeName(field.type);
                 return coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName);
-              }) : [];
+              });
 
               const typeNodeId = `type-${type.name}`;
               const downstreamNodeIds = getDownstreamNodeIds(typeNodeId);
@@ -2017,8 +2050,9 @@
               });
 
               // Create edges for field relationships
-              if (type.fields) {
-                type.fields.forEach((field, fieldIndex) => {
+              const typeFields = type.fields || type.inputFields;
+              if (typeFields) {
+                typeFields.forEach((field, fieldIndex) => {
                   const coreTypeName = getCoreTypeName(field.type);
                   
                   // Only create edges for non-scalar types that exist in our node set
