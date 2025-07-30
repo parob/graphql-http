@@ -588,7 +588,7 @@
                   cx: endPoint.x + 2, // 2 pixels to the right
                   cy: endPoint.y,
                   r: animated ? 12 : 10, // Larger when selected
-                  fill: animated ? '#0366d6' : '#9e9e9e', // Blue when selected, gray otherwise
+                  fill: animated ? '#0366d6' : '#d0d0d0', // Blue when selected, even lighter gray otherwise
                   stroke: animated ? 'white' : 'none', // White border when selected for better visibility
                   strokeWidth: animated ? 1 : 0,
                   style: {
@@ -1670,14 +1670,14 @@
                       type: 'elk', // Use ELK-calculated edge paths
                       animated: isDownstreamEdge,
                       style: {
-                        stroke: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#8b949e',
+                        stroke: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#d0d0d0',
                         strokeWidth: isDownstreamEdge ? 3 : shouldDimEdge ? 1 : 2,
                         strokeDasharray: '0',
                         opacity: shouldDimEdge ? 0.3 : 1
                       },
                       markerEnd: {
                         type: 'arrowclosed',
-                        color: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#8b949e',
+                        color: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#d0d0d0',
                         width: isDownstreamEdge ? 16 : 12,
                         height: isDownstreamEdge ? 16 : 12
                       },
@@ -1865,7 +1865,7 @@
                     React.createElement('path', {
                       key: 'arrow-path',
                       d: 'M0,0 L0,6 L9,3 z',
-                      fill: '#8b949e'
+                      fill: '#d0d0d0'
                     })
                   ])
                 ])
