@@ -33,6 +33,48 @@
       rel="stylesheet"
       href="https://esm.sh/@graphiql/plugin-explorer/dist/style.css"
     />
+    <style>
+      /* Custom GraphQL Schema Visualizer */
+      .schema-visualizer {
+        height: 100%;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: #fafbfc;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      /* Ensure edges render behind nodes */
+      .react-flow__edges {
+        z-index: 1;
+      }
+      
+      .react-flow__nodes {
+        z-index: 2;
+      }
+
+      /* Style the bezier curves */
+      .react-flow__edge-path {
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .react-flow__edge.selected .react-flow__edge-path {
+        stroke: #0366d6;
+        stroke-width: 3;
+      }
+
+      /* Force edges to render behind everything */
+      .react-flow__edge {
+        z-index: -1 !important;
+      }
+
+      .react-flow__node {
+        z-index: 10 !important;
+        background: white;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      }
+    </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reactflow@11.10.4/dist/style.css">
     <!--
      * Note:
      * The ?standalone flag bundles the module along with all of its `dependencies`, excluding `peerDependencies`, into a single JavaScript file.
@@ -54,7 +96,9 @@
 
           "@graphiql/toolkit": "https://esm.sh/@graphiql/toolkit?standalone&external=graphql",
           "graphql": "https://esm.sh/graphql@16.11.0",
-          "@emotion/is-prop-valid": "data:text/javascript,"
+          "@emotion/is-prop-valid": "data:text/javascript,",
+          "reactflow": "https://esm.sh/reactflow@11.10.4?external=react,react-dom",
+          "elkjs": "https://esm.sh/elkjs@0.8.2"
         }
       }
     </script>
@@ -66,6 +110,8 @@
       import { explorerPlugin } from '@graphiql/plugin-explorer';
       import { buildClientSchema, printSchema, getIntrospectionQuery } from 'graphql';
       import 'graphiql/setup-workers/esm.sh';
+      import ReactFlow, { Controls, MiniMap, Handle, Position, getStraightPath, getBezierPath } from 'reactflow';
+      import ELK from 'elkjs';
 
       // SDL Download Plugin
       const sdlDownloadPlugin = {
@@ -274,8 +320,272 @@
         }
       };
 
-      // UML Diagram Plugin
-      const umlDiagramPlugin = {
+      // Custom Edge Component that avoids nodes
+      const CustomAvoidingEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label, labelStyle }) => {
+        // Calculate control points that avoid going through the middle area
+        const edgePath = React.useMemo(() => {
+          const xDiff = targetX - sourceX;
+          const yDiff = targetY - sourceY;
+          
+          // If nodes are on the same vertical level, route around them
+          const routeAround = Math.abs(yDiff) < 100;
+          
+          if (routeAround) {
+            // Route around nodes by adding a large vertical offset
+            const midX = sourceX + xDiff * 0.5;
+            const offsetY = yDiff > 0 ? -150 : 150; // Route above or below
+            const controlY1 = sourceY + offsetY;
+            const controlY2 = targetY + offsetY;
+            
+            return `M ${sourceX},${sourceY} C ${sourceX + 20},${controlY1} ${targetX - 20},${controlY2} ${targetX},${targetY}`;
+          } else {
+            // Use standard bezier curve for normal cases with reduced curvature
+            const [path] = getBezierPath({
+              sourceX,
+              sourceY,
+              sourcePosition,
+              targetX,
+              targetY,
+              targetPosition,
+              curvature: 0.1 // Much less curved (default is 0.25)
+            });
+            return path;
+          }
+        }, [sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition]);
+
+        return React.createElement('g', {}, [
+          React.createElement('path', {
+            key: 'path',
+            id,
+            style,
+            className: 'react-flow__edge-path',
+            d: edgePath,
+            markerEnd
+          }),
+          label && React.createElement('text', {
+            key: 'label',
+            style: {
+              ...labelStyle,
+              dominantBaseline: 'middle',
+              textAnchor: 'middle'
+            },
+            x: sourceX + (targetX - sourceX) * 0.5,
+            y: sourceY + (targetY - sourceY) * 0.5 - 10
+          }, [
+            React.createElement('textPath', {
+              key: 'textPath',
+              href: `#${id}`,
+              startOffset: '50%'
+            }, label)
+          ])
+        ]);
+      };
+
+      // Create ELK Edge Component factory that has access to elkDebugData
+      const createELKEdge = (elkDebugData) => {
+        return ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, data, markerEnd, animated }) => {
+          // Get ELK edge data if available
+          const elkEdgeData = data?.elkEdgeData;
+          
+          if (elkDebugData && elkDebugData.edges && elkEdgeData) {
+            // Find the ELK edge that matches this React Flow edge
+            const elkEdge = elkDebugData.edges.find(e => e.id === id);
+            
+            if (elkEdge && elkEdge.sections && elkEdge.sections.length > 0) {
+              const section = elkEdge.sections[0];
+              const startPoint = section.startPoint;
+              const endPoint = section.endPoint;
+              const bendPoints = section.bendPoints || [];
+              
+              // Create path using ELK coordinates
+              let pathData = `M ${startPoint.x} ${startPoint.y}`;
+              bendPoints.forEach(bp => {
+                pathData += ` L ${bp.x} ${bp.y}`;
+              });
+              pathData += ` L ${endPoint.x} ${endPoint.y}`;
+              
+              return React.createElement('g', {}, [
+                React.createElement('path', {
+                  key: 'elk-path',
+                  d: pathData,
+                  style: {
+                    ...style,
+                    fill: 'none'
+                  },
+                  markerEnd: markerEnd ? `url(#${markerEnd.type})` : undefined,
+                  className: animated ? 'react-flow__edge-path animated' : 'react-flow__edge-path'
+                })
+              ]);
+            }
+          }
+          
+          // Fallback to straight line if no ELK data
+          return React.createElement('path', {
+            d: `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`,
+            style: {
+              ...style,
+              fill: 'none'
+            },
+            markerEnd: markerEnd ? `url(#${markerEnd.type})` : undefined,
+            className: animated ? 'react-flow__edge-path animated' : 'react-flow__edge-path'
+          });
+        };
+      };
+
+      // Custom GraphQL Type Node Component
+      const GraphQLTypeNode = ({ data }) => {
+        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected } = data;
+        const isQueryType = data.isQueryType;
+        const isMutationType = data.isMutationType;
+        const isSubscriptionType = data.isSubscriptionType;
+
+        return React.createElement('div', {
+          style: {
+            background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 'white',
+            border: isSelected ? '3px solid #0366d6' : shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
+            borderRadius: '8px',
+            minWidth: '280px',
+            maxWidth: '320px',
+            boxShadow: isSelected ? '0 8px 24px rgba(3,102,214,0.4), 0 0 0 1px rgba(3,102,214,0.1)' : 
+                       shouldDim ? '0 1px 3px rgba(0,0,0,0.05)' : '0 2px 8px rgba(0,0,0,0.1)',
+            position: 'relative',
+            opacity: shouldDim ? 0.25 : 1,
+            transform: isSelected ? 'scale(1.02)' : 'scale(1)',
+            zIndex: isSelected ? 10 : shouldDim ? 1 : 5,
+            transition: 'all 0.3s ease'
+          }
+        }, [
+          // Header
+          React.createElement('div', {
+            key: 'header',
+            style: {
+              padding: '12px 16px',
+              background: isQueryType ? '#e6f3ff' : isMutationType ? '#fff5f5' : isSubscriptionType ? '#f0fff4' : '#f6f8fa',
+              color: '#24292e',
+              borderRadius: '6px 6px 0 0',
+              borderBottom: '1px solid #d1d5da'
+            }
+          }, [
+            React.createElement('div', {
+              key: 'title',
+              style: {
+                fontWeight: 'bold',
+                fontSize: '16px'
+              }
+            }, type.name),
+            React.createElement('div', {
+              key: 'kind',
+              style: {
+                fontSize: '11px',
+                opacity: 0.9,
+                textTransform: 'uppercase',
+                fontWeight: '500',
+                marginTop: '2px'
+              }
+            }, type.kind)
+          ]),
+          
+          // Fields with handles (for objects, interfaces, inputs) OR enum values (for enums)
+          (type.fields || type.enumValues) && React.createElement('div', {
+            key: 'fields',
+            style: { padding: '0', position: 'relative' }
+          }, (type.fields || type.enumValues).map((field, fieldIndex) => {
+            // Handle both fields and enum values
+            const isEnumValue = !field.type; // Enum values don't have a type property
+            const fieldTypeString = isEnumValue ? '' : getTypeString(field.type);
+            const coreTypeName = isEnumValue ? null : getCoreTypeName(field.type);
+            const isRelationship = !isEnumValue && coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName);
+            
+            // Calculate handle position - accounting for header height (60px) and field position
+            const handleTop = 60 + (fieldIndex * 45) + 22; // 22px is half the field height to center the handle
+            const totalItems = (type.fields || type.enumValues).length;
+            
+            return React.createElement('div', {
+              key: field.name,
+              style: {
+                padding: '8px 16px',
+                borderBottom: fieldIndex < totalItems - 1 ? '1px solid #f1f3f4' : 'none',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: isRelationship ? '#f8f9ff' : 'white',
+                cursor: isRelationship ? 'pointer' : 'default',
+                position: 'relative',
+                height: '45px'
+              },
+              onClick: isRelationship ? (e) => {
+                e.stopPropagation();
+                const targetTypeId = `type-${coreTypeName}`;
+                if (onFieldClick) {
+                  console.log('Field clicked:', field.name, '-> target:', targetTypeId);
+                  onFieldClick(targetTypeId);
+                }
+              } : undefined
+            }, [
+              React.createElement('span', {
+                key: 'name',
+                style: { 
+                  color: '#24292e',
+                  fontWeight: '500',
+                  fontSize: '13px'
+                }
+              }, field.name),
+              !isEnumValue && React.createElement('span', {
+                key: 'type',
+                style: { 
+                  color: isRelationship ? '#0366d6' : '#656d76',
+                  fontWeight: isRelationship ? '600' : '400',
+                  fontSize: '12px',
+                  fontFamily: 'SFMono-Regular, Consolas, monospace'
+                }
+              }, fieldTypeString),
+              
+              // Source handle for ALL fields (visible for relationships, invisible for scalars/others) - but not for enum values
+              !isEnumValue && React.createElement(Handle, {
+                key: 'handle',
+                type: 'source',
+                position: Position.Right,
+                id: `${data.nodeId}-field-${field.name}`,
+                style: {
+                  right: '-6px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: '8px',
+                  height: '8px',
+                  backgroundColor: 'transparent',
+                  borderRadius: '50%',
+                  border: 'none',
+                  boxShadow: 'none',
+                  opacity: 0,
+                  pointerEvents: isRelationship ? 'auto' : 'none' // Only relationship handles are interactive
+                }
+              })
+            ]);
+          })),
+
+          // Target handle for the whole node (left side)
+          React.createElement(Handle, {
+            key: 'target-handle',
+            type: 'target',
+            position: Position.Left,
+            id: `${data.nodeId}-target`,
+            style: {
+              left: '-6px',
+              top: '30px', // Position at the header
+              width: '8px',
+              height: '8px',
+              backgroundColor: 'transparent',
+              borderRadius: '50%',
+              border: 'none',
+              boxShadow: 'none',
+              opacity: 0
+            }
+          })
+        ]);
+      };
+
+      // Complete GraphQL Schema Visualizer Plugin using React Flow
+      const schemaVisualizerPlugin = {
         title: 'Graph',
         icon: () => React.createElement('svg', {
           width: '16',
@@ -293,345 +603,485 @@
           React.createElement('line', { key: 'line4', x1: '18', y1: '8', x2: '18', y2: '16', stroke: 'currentColor', strokeWidth: '1.5' })
         ]),
         content: () => {
-          const [schemaData, setSchemaData] = React.useState(null);
-          const [loading, setLoading] = React.useState(false);
+          const [loading, setLoading] = React.useState(true);
           const [error, setError] = React.useState(null);
-          const svgRef = React.useRef(null);
-          const [transform, setTransform] = React.useState({ x: 0, y: 0, scale: 1 });
-          const [isDragging, setIsDragging] = React.useState(false);
-          const [dragStart, setDragStart] = React.useState({ x: 0, y: 0 });
-
-          const loadSchema = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-              const introspectionQuery = `
-                query IntrospectionQuery {
-                  __schema {
-                    queryType { name }
-                    mutationType { name }
-                    subscriptionType { name }
-                    types {
-                      ...FullType
-                    }
-                  }
+          const [schemaData, setSchemaData] = React.useState(null);
+          const [showOnlyRootTypes, setShowOnlyRootTypes] = React.useState(false);
+          const [layoutedData, setLayoutedData] = React.useState({ nodes: [], edges: [] });
+          const [showELKDebug, setShowELKDebug] = React.useState(true);
+          const [elkDebugData, setElkDebugData] = React.useState(null);
+          const [selectedNodeId, setSelectedNodeId] = React.useState(null);
+          const [reactFlowInstance, setReactFlowInstance] = React.useState(null);
+          
+          // Fetch schema data
+          React.useEffect(() => {
+            const fetchSchema = async () => {
+              try {
+                const introspectionQuery = getIntrospectionQuery();
+                const result = await fetcher({
+                  query: introspectionQuery,
+                  operationName: 'IntrospectionQuery'
+                });
+                
+                if (result.errors) {
+                  throw new Error(result.errors[0].message);
                 }
                 
-                fragment FullType on __Type {
-                  kind
-                  name
-                  description
-                  fields(includeDeprecated: true) {
-                    name
-                    description
-                    args {
-                      ...InputValue
-                    }
-                    type {
-                      ...TypeRef
-                    }
-                    isDeprecated
-                    deprecationReason
-                  }
-                  inputFields {
-                    ...InputValue
-                  }
-                  interfaces {
-                    ...TypeRef
-                  }
-                  enumValues(includeDeprecated: true) {
-                    name
-                    description
-                    isDeprecated
-                    deprecationReason
-                  }
-                  possibleTypes {
-                    ...TypeRef
-                  }
-                }
-                
-                fragment InputValue on __InputValue {
-                  name
-                  description
-                  type { ...TypeRef }
-                  defaultValue
-                }
-                
-                fragment TypeRef on __Type {
-                  kind
-                  name
-                  ofType {
-                    kind
-                    name
-                    ofType {
-                      kind
-                      name
-                      ofType {
-                        kind
-                        name
-                        ofType {
-                          kind
-                          name
-                          ofType {
-                            kind
-                            name
-                            ofType {
-                              kind
-                              name
-                              ofType {
-                                kind
-                                name
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `;
-              
-              const result = await fetcher({
-                query: introspectionQuery,
-                operationName: 'IntrospectionQuery'
-              });
-              if (result.errors) {
-                throw new Error(result.errors[0].message);
+                setSchemaData(result.data);
+                setLoading(false);
+              } catch (err) {
+                setError(err.message);
+                setLoading(false);
               }
-              setSchemaData(result.data);
-            } catch (err) {
-              setError(err.message);
-            } finally {
-              setLoading(false);
+            };
+            
+            fetchSchema();
+          }, []);
+
+          // Apply layout when schema data changes
+          React.useEffect(() => {
+            if (!schemaData) return;
+            
+            const applyLayout = async () => {
+              const { nodes, edges } = generateCompleteFlowData();
+              const layouted = await getLayoutedElements(nodes, edges);
+              setLayoutedData(layouted);
+            };
+            
+            applyLayout();
+          }, [schemaData, showOnlyRootTypes, selectedNodeId]);
+
+          // Helper function to get clean type string
+          const getTypeString = (type) => {
+            if (type.kind === 'NON_NULL') {
+              return getTypeString(type.ofType) + '!';
+            } else if (type.kind === 'LIST') {
+              return '[' + getTypeString(type.ofType) + ']';
+            } else {
+              return type.name || 'Unknown';
             }
           };
 
-          const getTypeName = (type) => {
+          // Helper function to get the core type name from a wrapped type
+          const getCoreTypeName = (type) => {
             if (type.kind === 'NON_NULL' || type.kind === 'LIST') {
-              return getTypeName(type.ofType);
+              let innerType = type.ofType;
+              while (innerType && (innerType.kind === 'NON_NULL' || innerType.kind === 'LIST')) {
+                innerType = innerType.ofType;
+              }
+              return innerType?.name;
             }
             return type.name;
           };
 
-          const generateDiagram = (data) => {
-            if (!data || !data.__schema) return null;
+          // Check if a type should be displayed as a node
+          const shouldDisplayAsNode = (type) => {
+            // Don't show introspection types
+            if (type.name.startsWith('__')) return false;
+            
+            // Don't show built-in scalars
+            if (['String', 'Int', 'Float', 'Boolean', 'ID'].includes(type.name)) return false;
+            
+            // Show enums, objects, interfaces, unions, and input types
+            return ['ENUM', 'OBJECT', 'INTERFACE', 'UNION', 'INPUT_OBJECT'].includes(type.kind);
+          };
 
-            const schema = data.__schema;
-            const queryTypeName = schema.queryType?.name;
-            const mutationTypeName = schema.mutationType?.name;
-            const subscriptionTypeName = schema.subscriptionType?.name;
+          // Check if a type is a scalar/built-in type
+          const isScalarType = (typeName) => {
+            return ['String', 'Int', 'Float', 'Boolean', 'ID'].includes(typeName);
+          };
 
-            const types = schema.types.filter(type => 
-              !type.name.startsWith('__') && 
-              ['OBJECT', 'INTERFACE', 'ENUM', 'INPUT_OBJECT'].includes(type.kind)
-            );
-
-            // Separate root types and regular types
-            const rootTypes = types.filter(type => 
-              type.name === queryTypeName || 
-              type.name === mutationTypeName || 
-              type.name === subscriptionTypeName
-            );
-            const regularTypes = types.filter(type => 
-              type.name !== queryTypeName && 
-              type.name !== mutationTypeName && 
-              type.name !== subscriptionTypeName
-            );
-
-            const typePositions = {};
-            const connections = [];
-            let y = 50;
-
-            // Position root types first (top row)
-            rootTypes.forEach((type, index) => {
-              const x = 50 + index * 280;
-              typePositions[type.name] = { x, y };
+          // ELK layout with debugging
+          const getLayoutedElements = async (nodes, edges) => {
+            const elk = new ELK();
+            
+            // Convert React Flow format to ELK format with port information
+            const elkNodes = nodes.map((node, nodeIndex) => {
+              const fieldCount = node.data.type.fields ? node.data.type.fields.length : 0;
+              const nodeHeight = Math.max(100, 60 + (fieldCount * 45));
+              
+              // Create ports for each field that has relationships
+              const ports = [];
+              
+              // Add target port on the left side of the node
+              ports.push({
+                id: `${node.id}-target`,
+                width: 8,
+                height: 8,
+                x: -4,
+                y: 30
+              });
+              
+              // Add source ports for ALL fields to maintain correct ordering
+              if (node.data.type.fields) {
+                node.data.type.fields.forEach((field, fieldIndex) => {
+                  const coreTypeName = getCoreTypeName(field.type);
+                  const isRelationship = coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName);
+                  const isScalar = isScalarType(coreTypeName);
+                  
+                  // Create a port for EVERY field: relationships, scalars, and other types
+                  const fieldY = 60 + (fieldIndex * 45) + 22; // Center of field - matches React Flow
+                  ports.push({
+                    id: `${node.id}-field-${field.name}`,
+                    width: 8,
+                    height: 8,
+                    x: 316, // Position at right edge
+                    y: fieldY
+                  });
+                });
+              }
+              
+              return {
+                id: node.id,
+                width: 320,
+                height: nodeHeight,
+                ports: ports,
+                layoutOptions: {}
+              };
             });
 
-            // Position regular types below
-            y += 220;
-            regularTypes.forEach((type, index) => {
-              const x = 50 + (index % 3) * 250;
-              if (index % 3 === 0 && index > 0) y += 200;
-              typePositions[type.name] = { x, y };
+            // Convert edges with proper port references
+            const elkEdges = edges.map(edge => {
+              return {
+                id: edge.id,
+                sources: [edge.sourceHandle], // sourceHandle is already the full port ID
+                targets: [edge.targetHandle] // targetHandle is already the full port ID
+              };
             });
 
-            // Collect field relationships for all types
-            types.forEach(type => {
+            const elkGraph = {
+              id: 'root',
+              children: elkNodes,
+              edges: elkEdges,
+              layoutOptions: {
+                'elk.algorithm': 'layered',
+                'elk.direction': 'RIGHT',
+                'elk.spacing.nodeNode': '80',
+                'elk.layered.spacing.nodeNodeBetweenLayers': '150',
+                'elk.spacing.edgeNode': '50',
+                'elk.edgeRouting': 'ORTHOGONAL',
+                'elk.padding': '[top=50,left=50,bottom=50,right=50]'
+              }
+            };
+
+            try {
+              console.log('ELK Input:', elkGraph);
+              
+              // Debug port information
+              console.log('Node order in ELK input:', elkGraph.children.map(n => n.id));
+              elkGraph.children.forEach((node, nodeIndex) => {
+                console.log(`Node ${nodeIndex}: ${node.id}:`, {
+                  priority: node.layoutOptions?.['elk.priority'],
+                  position: node.layoutOptions?.['elk.position'],
+                  totalPorts: node.ports.length,
+                  relationships: node.ports.filter(p => p.isRelationship).length,
+                  scalars: node.ports.filter(p => p.isScalar).length,
+                  others: node.ports.filter(p => !p.isRelationship && !p.isScalar && !p.id.includes('-target')).length,
+                  portOrder: node.ports.map(p => ({
+                    index: p.layoutOptions?.['elk.port.index'],
+                    side: p.layoutOptions?.['elk.port.side'],
+                    fieldName: p.id.split('-field-')[1] || 'target',
+                    type: p.isRelationship ? 'REL' : p.isScalar ? 'SCALAR' : p.id.includes('-target') ? 'TARGET' : 'OTHER',
+                    y: p.y
+                  }))
+                });
+              });
+              
+              const layoutedGraph = await elk.layout(elkGraph);
+              console.log('ELK Output:', layoutedGraph);
+              
+              // Debug ELK output port positioning
+              layoutedGraph.children.forEach((elkNode, nodeIndex) => {
+                console.log(`ELK Output Node ${nodeIndex}: ${elkNode.id}:`, {
+                  position: `(${elkNode.x}, ${elkNode.y})`,
+                  size: `${elkNode.width}x${elkNode.height}`,
+                  portPositions: (elkNode.ports || []).map(port => ({
+                    id: port.id,
+                    position: `(${elkNode.x + port.x}, ${elkNode.y + port.y})`,
+                    originalX: port.x,
+                    originalY: port.y,
+                    side: port.layoutOptions?.['elk.port.side'] || 'unknown'
+                  }))
+                });
+              });
+              
+              // Store ELK debug data - preserve our custom port properties
+              layoutedGraph.children.forEach(elkNode => {
+                if (elkNode.ports) {
+                  elkNode.ports.forEach(elkPort => {
+                    // Find the original port to preserve our custom properties
+                    const originalNode = elkGraph.children.find(n => n.id === elkNode.id);
+                    const originalPort = originalNode?.ports.find(p => p.id === elkPort.id);
+                    if (originalPort) {
+                      elkPort.isRelationship = originalPort.isRelationship;
+                      elkPort.isScalar = originalPort.isScalar;
+                      elkPort.fieldType = originalPort.fieldType;
+                    }
+                  });
+                }
+              });
+              
+              setElkDebugData(layoutedGraph);
+              
+              // Apply positions back to React Flow nodes
+              const originalPositions = {};
+              nodes.forEach(node => {
+                originalPositions[node.id] = { ...node.position };
+                const elkNode = layoutedGraph.children.find(n => n.id === node.id);
+                if (elkNode) {
+                  node.position = {
+                    x: elkNode.x,
+                    y: elkNode.y
+                  };
+                  console.log(`Node ${node.id}: ELK(${elkNode.x}, ${elkNode.y}) vs Original(${originalPositions[node.id].x}, ${originalPositions[node.id].y})`);
+                }
+              });
+
+              return { nodes, edges, elkGraph: layoutedGraph };
+            } catch (error) {
+              console.error('ELK layout failed:', error);
+              // Fallback to simple grid layout
+              nodes.forEach((node, index) => {
+                const cols = Math.ceil(Math.sqrt(nodes.length));
+                const row = Math.floor(index / cols);
+                const col = index % cols;
+                node.position = {
+                  x: col * 400 + 50,
+                  y: row * 300 + 50
+                };
+              });
+              return { nodes, edges };
+            }
+          };
+
+          // Get downstream node IDs for a given node (only nodes this node points to)
+          const getDownstreamNodeIds = (nodeId) => {
+            if (!layoutedData.edges) return new Set();
+            const downstreamIds = new Set();
+            
+            layoutedData.edges.forEach(edge => {
+              if (edge.source === nodeId) {
+                downstreamIds.add(edge.target); // Only add targets, not sources
+              }
+            });
+            
+            return downstreamIds;
+          };
+
+          // Handle node click
+          const onNodeClick = React.useCallback((event, node) => {
+            console.log('Node clicked:', node.id);
+            if (selectedNodeId === node.id) {
+              console.log('Deselecting node');
+              setSelectedNodeId(null); // Deselect if clicking the same node
+            } else {
+              console.log('Selecting node:', node.id);
+              setSelectedNodeId(node.id);
+            }
+          }, [selectedNodeId]);
+
+          // Handle clicking on empty space to deselect
+          const onPaneClick = React.useCallback(() => {
+            console.log('Pane clicked - deselecting');
+            setSelectedNodeId(null);
+          }, []);
+
+          // Handle field click to center on target node
+          const onFieldClick = React.useCallback((targetNodeId) => {
+            if (reactFlowInstance && targetNodeId) {
+              const targetNode = layoutedData.nodes.find(n => n.id === targetNodeId);
+              if (targetNode) {
+                reactFlowInstance.setCenter(targetNode.position.x + 160, targetNode.position.y + 100, { zoom: 1 });
+                setSelectedNodeId(targetNodeId);
+              }
+            }
+          }, [reactFlowInstance, layoutedData.nodes]);
+
+          // Generate React Flow nodes and edges using table-like approach
+          const generateCompleteFlowData = () => {
+            if (!schemaData) return { nodes: [], edges: [] };
+
+            const nodes = [];
+            const edges = [];
+
+            // Get all types that should be displayed as nodes
+            const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
+
+            // Filter types based on showOnlyRootTypes
+            const typesToShow = showOnlyRootTypes 
+              ? allTypes.filter(type => {
+                  const isQueryType = type.name === schemaData.__schema.queryType?.name;
+                  const isMutationType = type.name === schemaData.__schema.mutationType?.name;
+                  const isSubscriptionType = type.name === schemaData.__schema.subscriptionType?.name;
+                  return isQueryType || isMutationType || isSubscriptionType;
+                })
+              : allTypes;
+
+            // Create table-like nodes for each type
+            typesToShow.forEach((type, typeIndex) => {
+              const isQueryType = type.name === schemaData.__schema.queryType?.name;
+              const isMutationType = type.name === schemaData.__schema.mutationType?.name;
+              const isSubscriptionType = type.name === schemaData.__schema.subscriptionType?.name;
+              
+              // Initial position - will be overridden by layout algorithm
+              const x = 0;
+              const y = 0;
+
+              // Calculate field information for handles
+              const relationshipFields = type.fields ? type.fields.filter(field => {
+                const coreTypeName = getCoreTypeName(field.type);
+                return coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName);
+              }) : [];
+
+              const typeNodeId = `type-${type.name}`;
+              const downstreamNodeIds = getDownstreamNodeIds(typeNodeId);
+              const isSelected = selectedNodeId === typeNodeId;
+              const isSelectedDownstream = selectedNodeId && downstreamNodeIds.has(selectedNodeId);
+              const isDownstreamOfSelected = selectedNodeId && getDownstreamNodeIds(selectedNodeId).has(typeNodeId);
+              const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected;
+
+              nodes.push({
+                id: typeNodeId,
+                type: 'graphqlType',
+                position: { x, y },
+                data: {
+                  nodeId: typeNodeId,
+                  type,
+                  isQueryType,
+                  isMutationType,
+                  isSubscriptionType,
+                  getTypeString,
+                  getCoreTypeName,
+                  isScalarType,
+                  onFieldClick,
+                  shouldDim,
+                  isSelected
+                }
+              });
+
+              // Create edges for field relationships
               if (type.fields) {
-                type.fields.forEach(field => {
-                  const fieldTypeName = getTypeName(field.type);
-                  if (types.find(t => t.name === fieldTypeName)) {
-                    connections.push({
-                      from: type.name,
-                      to: fieldTypeName,
-                      label: field.name
+                type.fields.forEach((field, fieldIndex) => {
+                  const coreTypeName = getCoreTypeName(field.type);
+                  
+                  // Only create edges for non-scalar types that exist in our node set
+                  if (coreTypeName && 
+                      !coreTypeName.startsWith('__') && 
+                      !isScalarType(coreTypeName) &&
+                      typesToShow.some(t => t.name === coreTypeName)) {
+                    
+                    const targetTypeId = `type-${coreTypeName}`;
+                    const edgeId = `${typeNodeId}-${field.name}-${targetTypeId}`;
+                    
+                    // Determine edge highlighting state - only highlight downstream edges
+                    const isSourceSelected = selectedNodeId === typeNodeId;
+                    const isTargetSelected = selectedNodeId === targetTypeId;
+                    const isDownstreamEdge = isSourceSelected; // Only edges FROM the selected node
+                    const isUpstreamEdge = isTargetSelected; // Edges TO the selected node (should be dimmed)
+                    const shouldDimEdge = selectedNodeId && !isDownstreamEdge;
+                    
+                    edges.push({
+                      id: edgeId,
+                      source: typeNodeId,
+                      target: targetTypeId,
+                      sourceHandle: `${typeNodeId}-field-${field.name}`,
+                      targetHandle: `${targetTypeId}-target`,
+                      type: 'elk', // Use ELK-calculated edge paths
+                      animated: isDownstreamEdge,
+                      style: {
+                        stroke: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#8b949e',
+                        strokeWidth: isDownstreamEdge ? 3 : shouldDimEdge ? 1 : 2,
+                        strokeDasharray: '0',
+                        opacity: shouldDimEdge ? 0.3 : 1
+                      },
+                      markerEnd: {
+                        type: 'arrowclosed',
+                        color: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#8b949e',
+                        width: isDownstreamEdge ? 16 : 12,
+                        height: isDownstreamEdge ? 16 : 12
+                      },
+                      label: field.name,
+                      labelStyle: {
+                        fontSize: '10px',
+                        color: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#656d76' : '#24292e',
+                        background: isDownstreamEdge ? 'rgba(3, 102, 214, 0.1)' : 'rgba(255, 255, 255, 0.95)',
+                        padding: '2px 6px',
+                        borderRadius: '3px',
+                        border: isDownstreamEdge ? '1px solid #0366d6' : '1px solid #d1d5da',
+                        boxShadow: isDownstreamEdge ? '0 2px 6px rgba(3,102,214,0.2)' : '0 1px 3px rgba(0,0,0,0.1)',
+                        opacity: shouldDimEdge ? 0.6 : 1
+                      },
+                      labelBgPadding: [4, 2],
+                      labelBgBorderRadius: 3,
+                      data: {
+                        elkEdgeData: true // Mark this edge for ELK path lookup
+                      }
                     });
                   }
                 });
               }
             });
 
-            return { 
-              types, 
-              typePositions, 
-              connections, 
-              queryTypeName, 
-              mutationTypeName, 
-              subscriptionTypeName 
-            };
+            return { nodes, edges };
           };
 
-          const handleMouseDown = (e) => {
-            setIsDragging(true);
-            setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
-          };
-
-          const handleMouseMove = (e) => {
-            if (!isDragging) return;
-            setTransform(prev => ({
-              ...prev,
-              x: e.clientX - dragStart.x,
-              y: e.clientY - dragStart.y
-            }));
-          };
-
-          const handleMouseUp = () => {
-            setIsDragging(false);
-          };
-
-          const handleWheel = (e) => {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            setTransform(prev => ({
-              ...prev,
-              scale: Math.max(0.1, Math.min(3, prev.scale * delta))
-            }));
-          };
-
-          const resetView = () => {
-            setTransform({ x: 0, y: 0, scale: 1 });
-          };
-
-          const zoomIn = () => {
-            setTransform(prev => ({
-              ...prev,
-              scale: Math.min(3, prev.scale * 1.2)
-            }));
-          };
-
-          const zoomOut = () => {
-            setTransform(prev => ({
-              ...prev,
-              scale: Math.max(0.1, prev.scale / 1.2)
-            }));
-          };
-
-          React.useEffect(() => {
-            loadSchema();
-          }, []);
-
-          React.useEffect(() => {
-            if (isDragging) {
-              document.addEventListener('mousemove', handleMouseMove);
-              document.addEventListener('mouseup', handleMouseUp);
-              return () => {
-                document.removeEventListener('mousemove', handleMouseMove);
-                document.removeEventListener('mouseup', handleMouseUp);
-              };
-            }
-          }, [isDragging, dragStart]);
-
-          const diagram = schemaData ? generateDiagram(schemaData) : null;
-
-          return React.createElement('div', {
-            style: {
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden'
-            }
-          }, [
-            // Header
-            React.createElement('div', {
-              key: 'header',
+          if (loading) {
+            return React.createElement('div', {
               style: {
-                padding: '0px',
-                borderRadius: '8px 8px 0 0',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }
-            }, [
-              React.createElement('h3', { 
-                key: 'title',
-                style: { margin: 0, fontSize: '29px', fontWeight: '500' } 
-              }, 'Graph'),
-              React.createElement('div', { 
-                key: 'controls',
-                style: { display: 'flex', gap: '4px' }
-              }, [
-                React.createElement('button', {
-                  key: 'zoom-out',
-                  onClick: zoomOut,
-                  title: 'Zoom Out',
-                  style: {
-                    padding: '4px 6px',
-                    backgroundColor: '#f0f0f0',
-                    border: '1px solid #ccc',
-                    borderRadius: '3px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }
-                }, '−'),
-                React.createElement('button', {
-                  key: 'zoom-in',
-                  onClick: zoomIn,
-                  title: 'Zoom In',
-                  style: {
-                    padding: '4px 6px',
-                    backgroundColor: '#f0f0f0',
-                    border: '1px solid #ccc',
-                    borderRadius: '3px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }
-                }, '+'),
-                React.createElement('button', {
-                  key: 'reset',
-                  onClick: resetView,
-                  title: 'Reset View',
-                  style: {
-                    padding: '4px 8px',
-                    backgroundColor: '#f0f0f0',
-                    border: '1px solid #ccc',
-                    borderRadius: '3px',
-                    fontSize: '11px',
-                    cursor: 'pointer'
-                  }
-                }, '⌂')
-              ])
-            ]),
-            
-            // Content
-            loading ? React.createElement('div', {
-              key: 'loading',
-              style: {
-                flex: 1,
+                height: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '14px',
                 color: '#666'
               }
-            }, 'Loading schema...') :
-            
-            error ? React.createElement('div', {
-              key: 'error',
+            }, [
+              React.createElement('div', { key: 'loading-text' }, 'Loading schema...'),
+              // Debug controls even during loading
+              React.createElement('div', {
+                key: 'debug-controls',
+                style: {
+                  position: 'fixed',
+                  top: '10px',
+                  right: '10px',
+                  zIndex: 9999,
+                  display: 'flex',
+                  gap: '8px',
+                  background: 'white',
+                  padding: '8px',
+                  borderRadius: '4px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                }
+              }, [
+                React.createElement('button', {
+                  key: 'debug-toggle',
+                  onClick: () => setShowELKDebug(!showELKDebug),
+                  style: {
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    background: showELKDebug ? '#0366d6' : '#f6f8fa',
+                    color: showELKDebug ? 'white' : '#24292e',
+                    border: '1px solid #d1d5da',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }
+                }, 'ELK Debug'),
+                React.createElement('span', {
+                  key: 'debug-info',
+                  style: {
+                    fontSize: '11px',
+                    color: '#666',
+                    alignSelf: 'center'
+                  }
+                }, 'LOADING')
+              ])
+            ]);
+          }
+
+          if (error) {
+            return React.createElement('div', {
               style: {
-                flex: 1,
+                height: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -640,176 +1090,293 @@
                 textAlign: 'center',
                 padding: '20px'
               }
-            }, `Error: ${error}`) :
-            
-            diagram ? React.createElement('div', {
-              key: 'diagram',
+            }, `Error: ${error}`);
+          }
+
+          const { nodes, edges } = layoutedData;
+
+          // Define custom node and edge types
+          const nodeTypes = {
+            graphqlType: GraphQLTypeNode
+          };
+
+          const edgeTypes = {
+            avoiding: CustomAvoidingEdge,
+            elk: createELKEdge(elkDebugData)
+          };
+
+          return React.createElement('div', {
+            className: 'schema-visualizer',
+            style: {
+              position: 'relative',
+              width: '100%',
+              height: '100%'
+            }
+          }, [
+            React.createElement(ReactFlow, {
+              key: 'reactflow',
+              nodes,
+              edges,
+              nodeTypes,
+              edgeTypes,
+              fitView: true,
+              attributionPosition: 'bottom-left',
               style: {
-                flex: 1,
-                overflow: 'hidden',
-                cursor: isDragging ? 'grabbing' : 'grab',
-                position: 'relative'
+                background: '#fafbfc',
+                width: '100%',
+                height: '100%'
               },
-              onMouseDown: handleMouseDown,
-              onWheel: handleWheel
+              defaultViewport: { x: 0, y: 0, zoom: 0.6 },
+              minZoom: 0.1,
+              maxZoom: 1.5,
+              onNodeClick: onNodeClick,
+              onPaneClick: onPaneClick,
+              onInit: setReactFlowInstance
             }, [
-              React.createElement('svg', {
-                key: 'svg',
-                ref: svgRef,
+              React.createElement(Controls, {
+                key: 'controls',
                 style: {
-                  width: '100%',
-                  height: '100%',
-                  transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`
+                  button: {
+                    backgroundColor: 'white',
+                    border: '1px solid #d1d5da',
+                    color: '#24292e'
+                  }
+                }
+              }),
+              React.createElement(MiniMap, {
+                key: 'minimap',
+                style: {
+                  backgroundColor: '#f6f8fa'
+                },
+                maskColor: 'rgba(0, 0, 0, 0.1)'
+              })
+            ]),
+            // Debug toggle button - AFTER ReactFlow so it renders on top
+            React.createElement('div', {
+              key: 'debug-controls',
+              style: {
+                position: 'fixed',
+                top: '10px',
+                right: '10px',
+                zIndex: 9999,
+                display: 'flex',
+                gap: '8px',
+                background: 'white',
+                padding: '8px',
+                borderRadius: '4px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+              }
+            }, [
+              React.createElement('button', {
+                key: 'debug-toggle',
+                onClick: () => setShowELKDebug(!showELKDebug),
+                style: {
+                  padding: '4px 8px',
+                  fontSize: '11px',
+                  background: showELKDebug ? '#0366d6' : '#f6f8fa',
+                  color: showELKDebug ? 'white' : '#24292e',
+                  border: '1px solid #d1d5da',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }
+              }, 'ELK Debug'),
+              React.createElement('span', {
+                key: 'debug-info',
+                style: {
+                  fontSize: '11px',
+                  color: '#586069',
+                  padding: '4px 8px',
+                  background: '#f6f8fa',
+                  border: '1px solid #d1d5da',
+                  borderRadius: '4px'
+                }
+              }, elkDebugData ? `${elkDebugData.children?.length || 0} nodes` : 'No ELK data')
+            ]),
+
+            // ELK Debug overlay
+            showELKDebug && elkDebugData && React.createElement('div', {
+              key: 'elk-debug-overlay',
+              style: {
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+                zIndex: 5,
+                overflow: 'visible' // Allow content to be visible outside bounds
+              }
+            }, [
+              // Debug legend
+              React.createElement('div', {
+                key: 'elk-legend',
+                style: {
+                  position: 'absolute',
+                  top: '10px',
+                  left: '10px',
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  border: '2px solid #ff0000',
+                  borderRadius: '4px',
+                  padding: '8px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  fontWeight: 'bold',
+                  pointerEvents: 'auto',
+                  zIndex: 10
                 }
               }, [
-                // Clean background
-                React.createElement('rect', {
-                  key: 'background',
-                  x: '0',
-                  y: '0',
-                  width: '100%',
-                  height: '100%',
-                  fill: '#ffffff'
-                }),
-                
-                // Connections
-                ...diagram.connections.map((conn, i) => {
-                  const fromPos = diagram.typePositions[conn.from];
-                  const toPos = diagram.typePositions[conn.to];
-                  if (!fromPos || !toPos) return null;
+                React.createElement('div', { key: 'title', style: { marginBottom: '4px', color: '#ff0000' } }, 'ELK DEBUG OVERLAY'),
+                React.createElement('div', { key: 'nodes', style: { color: '#ff0000' } }, '🟥 Red dashed: ELK nodes'),
+                React.createElement('div', { key: 'edges', style: { color: '#00ff00' } }, '🟢 Green dashed: ELK edges'),
+                React.createElement('div', { key: 'target', style: { color: '#0066ff' } }, '🔵 Blue: TARGET ports'),
+                React.createElement('div', { key: 'rel', style: { color: '#ff6600' } }, '🟠 Orange: REL ports'),
+                React.createElement('div', { key: 'scalar', style: { color: '#9966ff' } }, '🟣 Purple: SCALAR ports'),
+                React.createElement('div', { key: 'other', style: { color: '#cccccc' } }, '⚪ Gray: OTHER ports')
+              ]),
+              React.createElement('svg', {
+                key: 'debug-svg',
+                viewBox: '-500 -500 4000 4000', // Zoomed out view to show more content
+                style: {
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  width: '100vw',
+                  height: '100vh',
+                  background: 'rgba(0, 0, 0, 0.1)',
+                  zIndex: 1000,
+                  pointerEvents: 'none'
+                }
+              }, [
+                // Draw ELK-proposed node positions
+                ...(elkDebugData.children || []).map(elkNode => [
+                  // Node rectangle
+                  React.createElement('rect', {
+                    key: `elk-${elkNode.id}`,
+                    x: elkNode.x,
+                    y: elkNode.y,
+                    width: elkNode.width,
+                    height: elkNode.height,
+                    fill: 'none',
+                    stroke: '#ff0000',
+                    strokeWidth: 2,
+                    strokeDasharray: '5,5',
+                    opacity: 0.8
+                  }),
+                  // Node label
+                  React.createElement('text', {
+                    key: `elk-label-${elkNode.id}`,
+                    x: elkNode.x + 5,
+                    y: elkNode.y - 5,
+                    fontSize: '12px',
+                    fill: '#ff0000',
+                    fontWeight: 'bold',
+                    fontFamily: 'monospace'
+                  }, `ELK: ${elkNode.id}`),
+                  // Draw ELK-proposed port positions with labels
+                  ...(elkNode.ports || []).map(port => {
+                    const cx = elkNode.x + port.x + port.width / 2;
+                    const cy = elkNode.y + port.y + port.height / 2;
+                    const portType = port.id.includes('-target') ? 'TARGET' :
+                                   port.isRelationship ? 'REL' :
+                                   port.isScalar ? 'SCALAR' : 'OTHER';
+                    const fieldName = port.id.split('-field-')[1] || 'target';
+                    
+                    return [
+                      // Port circle
+                      React.createElement('circle', {
+                        key: `elk-port-${elkNode.id}-${port.id}`,
+                        cx: cx,
+                        cy: cy,
+                        r: 4,
+                        // Different colors for different port types
+                        fill: port.id.includes('-target') ? '#0066ff' :       // Blue for target ports
+                              port.isRelationship ? '#ff6600' :              // Orange for relationship ports  
+                              port.isScalar ? '#9966ff' :                    // Purple for scalar fields
+                              '#cccccc',                                      // Gray for other types
+                        stroke: '#ff0000',
+                        strokeWidth: 1,
+                        opacity: port.id.includes('-target') || port.isRelationship || port.isScalar ? 0.9 : 0.5
+                      }),
+                      // Port label
+                      React.createElement('text', {
+                        key: `elk-port-label-${elkNode.id}-${port.id}`,
+                        x: cx + 8,
+                        y: cy + 4,
+                        fontSize: '10px',
+                        fill: port.id.includes('-target') ? '#0066ff' :
+                              port.isRelationship ? '#ff6600' :
+                              port.isScalar ? '#9966ff' : '#666666',
+                        fontWeight: 'bold',
+                        fontFamily: 'monospace'
+                      }, `${portType}:${fieldName}`)
+                    ];
+                  }).flat()
+                ]).flat(),
+                // Draw ELK-proposed edges
+                ...(elkDebugData.edges || []).map(elkEdge => {
+                  if (!elkEdge.sections || elkEdge.sections.length === 0) return null;
                   
-                  return React.createElement('g', { key: `conn-${i}` }, [
-                    React.createElement('line', {
-                      key: 'line',
-                      x1: fromPos.x + 120,
-                      y1: fromPos.y + 50,
-                      x2: toPos.x,
-                      y2: toPos.y + 50,
-                      stroke: '#666',
-                      strokeWidth: '1',
-                      markerEnd: 'url(#arrowhead)'
+                  const section = elkEdge.sections[0];
+                  const startPoint = section.startPoint;
+                  const endPoint = section.endPoint;
+                  const bendPoints = section.bendPoints || [];
+                  
+                  let pathData = `M ${startPoint.x} ${startPoint.y}`;
+                  bendPoints.forEach(bp => {
+                    pathData += ` L ${bp.x} ${bp.y}`;
+                  });
+                  pathData += ` L ${endPoint.x} ${endPoint.y}`;
+                  
+                  // Calculate midpoint for label
+                  const midX = (startPoint.x + endPoint.x) / 2;
+                  const midY = (startPoint.y + endPoint.y) / 2;
+                  
+                  return [
+                    // Edge path
+                    React.createElement('path', {
+                      key: `elk-edge-${elkEdge.id}`,
+                      d: pathData,
+                      fill: 'none',
+                      stroke: '#00ff00',
+                      strokeWidth: 3,
+                      strokeDasharray: '10,5',
+                      opacity: 0.6,
+                      markerEnd: 'url(#elk-arrow)'
                     }),
+                    // Edge label
                     React.createElement('text', {
-                      key: 'label',
-                      x: (fromPos.x + toPos.x + 120) / 2,
-                      y: (fromPos.y + toPos.y + 100) / 2,
-                      fill: '#666',
-                      fontSize: '10',
+                      key: `elk-edge-label-${elkEdge.id}`,
+                      x: midX,
+                      y: midY - 5,
+                      fontSize: '10px',
+                      fill: '#00ff00',
+                      fontWeight: 'bold',
+                      fontFamily: 'monospace',
                       textAnchor: 'middle'
-                    }, conn.label)
-                  ]);
-                }),
-                
-                // Arrow marker
-                React.createElement('defs', { key: 'arrow-defs' }, [
+                    }, `ELK-EDGE: ${elkEdge.id}`)
+                  ];
+                }).filter(Boolean).flat(),
+                // Arrow marker for ELK edges
+                React.createElement('defs', { key: 'elk-defs' }, [
                   React.createElement('marker', {
-                    key: 'arrowhead',
-                    id: 'arrowhead',
-                    markerWidth: '10',
-                    markerHeight: '7',
-                    refX: '9',
-                    refY: '3.5',
+                    key: 'elk-arrow',
+                    id: 'elk-arrow',
+                    viewBox: '0 0 10 10',
+                    refX: 8,
+                    refY: 5,
+                    markerWidth: 6,
+                    markerHeight: 6,
                     orient: 'auto'
                   }, [
-                    React.createElement('polygon', {
-                      key: 'arrow-poly',
-                      points: '0 0, 10 3.5, 0 7',
-                      fill: '#666'
+                    React.createElement('path', {
+                      key: 'elk-arrow-path',
+                      d: 'M 0 0 L 10 5 L 0 10 z',
+                      fill: '#00ff00'
                     })
                   ])
-                ]),
-                
-                // Type boxes
-                ...diagram.types.map((type, i) => {
-                  const pos = diagram.typePositions[type.name];
-                  const height = 60 + (type.fields ? Math.min(type.fields.length * 16, 120) : 0);
-                  const isQuery = type.name === diagram.queryTypeName;
-                  const isMutation = type.name === diagram.mutationTypeName;
-                  const isSubscription = type.name === diagram.subscriptionTypeName;
-                  const isRootType = isQuery || isMutation || isSubscription;
-                  
-                  return React.createElement('g', { key: `type-${i}` }, [
-                    // Box
-                    React.createElement('rect', {
-                      key: 'box',
-                      x: pos.x,
-                      y: pos.y,
-                      width: '200',
-                      height: height,
-                      fill: isQuery ? '#e8f5e8' :
-                            isMutation ? '#fff3e0' :
-                            isSubscription ? '#f3e5f5' :
-                            type.kind === 'OBJECT' ? '#e3f2fd' : 
-                            type.kind === 'INTERFACE' ? '#f3e5f5' :
-                            type.kind === 'ENUM' ? '#fff3e0' : '#e8f5e8',
-                      stroke: isQuery ? '#4caf50' :
-                              isMutation ? '#ff9800' :
-                              isSubscription ? '#9c27b0' :
-                              type.kind === 'OBJECT' ? '#2196f3' :
-                              type.kind === 'INTERFACE' ? '#9c27b0' :
-                              type.kind === 'ENUM' ? '#ff9800' : '#4caf50',
-                      strokeWidth: isRootType ? '3' : '2',
-                      rx: '4'
-                    }),
-                    
-                    // Type name
-                    React.createElement('text', {
-                      key: 'name',
-                      x: pos.x + 10,
-                      y: pos.y + 18,
-                      fill: '#333',
-                      fontSize: '14',
-                      fontWeight: 'bold'
-                    }, type.name),
-                    
-                    // Type kind/root label
-                    React.createElement('text', {
-                      key: 'kind',
-                      x: pos.x + 10,
-                      y: pos.y + 35,
-                      fill: isRootType ? '#d73a49' : '#666',
-                      fontSize: '10',
-                      fontWeight: isRootType ? 'bold' : 'normal'
-                    }, isQuery ? '🔍 ROOT QUERY' :
-                        isMutation ? '✏️  ROOT MUTATION' :
-                        isSubscription ? '📡 ROOT SUBSCRIPTION' :
-                        `(${type.kind})`),
-                    
-                    // Fields
-                    ...(type.fields || []).slice(0, 7).map((field, j) => [
-                      React.createElement('text', {
-                        key: `field-${j}`,
-                        x: pos.x + 10,
-                        y: pos.y + 55 + j * 16,
-                        fill: '#555',
-                        fontSize: '11'
-                      }, `${field.name}: ${getTypeName(field.type)}`)
-                    ]).flat(),
-                    
-                    // "..." if more fields
-                    type.fields && type.fields.length > 7 ? 
-                    React.createElement('text', {
-                      key: 'more',
-                      x: pos.x + 10,
-                      y: pos.y + 55 + 7 * 16,
-                      fill: '#999',
-                      fontSize: '11',
-                      fontStyle: 'italic'
-                    }, `... ${type.fields.length - 7} more`) : null
-                  ]);
-                })
+                ])
               ])
-            ]) : React.createElement('div', {
-              key: 'no-data',
-              style: {
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '14px',
-                color: '#666'
-              }
-            }, 'No schema data available')
+            ])
           ]);
         }
       };
@@ -821,7 +1388,7 @@
       const fetcher = createGraphiQLFetcher({
         url: fetchURL
       });
-      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, umlDiagramPlugin];
+      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin];
 
       function App() {
         return React.createElement(GraphiQL, {
