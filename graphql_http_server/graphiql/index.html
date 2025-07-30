@@ -1201,9 +1201,9 @@
                 if (node.data.isQueryType) {
                   layoutOptions['elk.position'] = '(50, 50)';
                 } else if (node.data.isMutationType) {
-                  layoutOptions['elk.position'] = '(50, 400)'; // Below Query
+                  layoutOptions['elk.position'] = '(50, 600)'; // Below Query, on the left
                 } else if (node.data.isSubscriptionType) {
-                  layoutOptions['elk.position'] = '(50, 750)'; // Below Mutation
+                  layoutOptions['elk.position'] = '(50, 400)'; // Between Query and Mutation
                 }
               } else {
                 layoutOptions['elk.priority'] = priority.toString();
@@ -1228,10 +1228,107 @@
               };
             });
 
+            // Separate root nodes from regular nodes for ELK compound node approach
+            const rootNodes = elkNodes.filter(node => {
+              const originalNode = visibleNodes.find(n => n.id === node.id);
+              return originalNode && (originalNode.data.isQueryType || originalNode.data.isMutationType || originalNode.data.isSubscriptionType);
+            }).sort((a, b) => {
+              // Sort to ensure consistent order: Query, Mutation, Subscription
+              const getOrder = (node) => {
+                const originalNode = visibleNodes.find(n => n.id === node.id);
+                if (originalNode.data.isQueryType) return 0;
+                if (originalNode.data.isMutationType) return 1;
+                if (originalNode.data.isSubscriptionType) return 2;
+                return 3;
+              };
+              return getOrder(a) - getOrder(b);
+            });
+            
+            const regularNodes = elkNodes.filter(node => {
+              const originalNode = visibleNodes.find(n => n.id === node.id);
+              return originalNode && !(originalNode.data.isQueryType || originalNode.data.isMutationType || originalNode.data.isSubscriptionType);
+            });
+            
+            // Calculate positions for each root type within the compound
+            const rootTypePositions = new Map();
+            let currentY = 0;
+            
+            rootNodes.forEach((node, index) => {
+              const originalNode = visibleNodes.find(n => n.id === node.id);
+              const itemCount = originalNode.data.type.fields ? originalNode.data.type.fields.length : 0;
+              const rootTypeHeaderHeight = 29; // Extra height for root type header
+              const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight + 20);
+              
+              rootTypePositions.set(node.id, {
+                x: 0,
+                y: currentY,
+                height: nodeHeight
+              });
+              
+              currentY += nodeHeight + 50; // 50px spacing between root types
+            });
+            
+            // Calculate total compound height
+            const totalCompoundHeight = currentY - 50; // Remove last spacing
+            
+            // Create a compound node that ELK treats as a single unit
+            const compoundRootNode = rootNodes.length > 0 ? {
+              id: 'compound-root',
+              width: 320, // Width of the compound node
+              height: totalCompoundHeight,
+              // Collect all ports from root nodes and move them to compound level
+              ports: rootNodes.flatMap((node) => {
+                const position = rootTypePositions.get(node.id);
+                return node.ports.map(port => ({
+                  ...port,
+                  // Adjust port positions to account for actual stacked layout positions
+                  y: port.y + position.y
+                }));
+              }),
+              children: rootNodes.map((node) => {
+                const position = rootTypePositions.get(node.id);
+                return {
+                  ...node,
+                  ports: [], // Remove ports from children since they're now on compound
+                  layoutOptions: {},
+                  // Use calculated positions
+                  x: position.x,
+                  y: position.y,
+                  width: node.width,
+                  height: position.height
+                };
+              }),
+              edges: [], // No edges within the compound
+              layoutOptions: {
+                'elk.algorithm': 'fixed', // Use fixed algorithm to respect child positions
+                'elk.padding': '[top=0,left=0,bottom=0,right=0]',
+                'elk.portConstraints': 'FIXED_POS'
+              }
+            } : null;
+            
+            // Update edges to reference compound node instead of individual root nodes
+            const updatedEdges = elkEdges.map(edge => {
+              const rootNodeIds = rootNodes.map(n => n.id);
+              const sourceIsRoot = rootNodeIds.some(id => edge.sources[0].startsWith(id));
+              
+              if (sourceIsRoot && compoundRootNode) {
+                // Replace root node reference with compound node reference
+                return {
+                  ...edge,
+                  sources: edge.sources.map(source => 
+                    rootNodeIds.find(id => source.startsWith(id)) ? 
+                    source.replace(/^type-(Query|Mutation|Subscription)/, 'compound-root') : 
+                    source
+                  )
+                };
+              }
+              return edge;
+            });
+            
             const elkGraph = {
               id: 'root',
-              children: elkNodes,
-              edges: elkEdges,
+              children: compoundRootNode ? [compoundRootNode, ...regularNodes] : elkNodes,
+              edges: compoundRootNode ? updatedEdges : elkEdges,
               layoutOptions: {
                 'elk.algorithm': 'layered',
                 'elk.direction': 'RIGHT',
@@ -1261,28 +1358,78 @@
               // Debug port information
               console.log('Node order in ELK input:', elkGraph.children.map(n => n.id));
               elkGraph.children.forEach((node, nodeIndex) => {
-                console.log(`Node ${nodeIndex}: ${node.id}:`, {
-                  priority: node.layoutOptions?.['elk.priority'],
-                  position: node.layoutOptions?.['elk.position'],
-                  totalPorts: node.ports.length,
-                  relationships: node.ports.filter(p => p.isRelationship).length,
-                  scalars: node.ports.filter(p => p.isScalar).length,
-                  others: node.ports.filter(p => !p.isRelationship && !p.isScalar && !p.id.includes('-target')).length,
-                  portOrder: node.ports.map(p => ({
-                    index: p.layoutOptions?.['elk.port.index'],
-                    side: p.layoutOptions?.['elk.port.side'],
-                    fieldName: p.id.split('-field-')[1] || 'target',
-                    type: p.isRelationship ? 'REL' : p.isScalar ? 'SCALAR' : p.id.includes('-target') ? 'TARGET' : 'OTHER',
-                    y: p.y
-                  }))
-                });
+                if (node.id === 'compound-root') {
+                  console.log(`Compound Node ${nodeIndex}: ${node.id}:`, {
+                    width: node.width,
+                    height: node.height,
+                    childCount: node.children ? node.children.length : 0,
+                    totalPorts: node.ports ? node.ports.length : 0,
+                    algorithm: node.layoutOptions?.['elk.algorithm'],
+                    portConstraints: node.layoutOptions?.['elk.portConstraints']
+                  });
+                  if (node.ports) {
+                    console.log(`  Compound ports:`, node.ports.map(p => ({
+                      id: p.id,
+                      x: p.x,
+                      y: p.y,
+                      isRelationship: p.isRelationship
+                    })));
+                  }
+                  if (node.children) {
+                    node.children.forEach((child, childIndex) => {
+                      console.log(`  Child ${childIndex}: ${child.id}:`, {
+                        x: child.x,
+                        y: child.y,
+                        totalPorts: child.ports ? child.ports.length : 0
+                      });
+                    });
+                  }
+                } else if (node.ports) {
+                  console.log(`Node ${nodeIndex}: ${node.id}:`, {
+                    priority: node.layoutOptions?.['elk.priority'],
+                    position: node.layoutOptions?.['elk.position'],
+                    totalPorts: node.ports.length,
+                    relationships: node.ports.filter(p => p.isRelationship).length,
+                    scalars: node.ports.filter(p => p.isScalar).length,
+                    others: node.ports.filter(p => !p.isRelationship && !p.isScalar && !p.id.includes('-target')).length,
+                    portOrder: node.ports.map(p => ({
+                      index: p.layoutOptions?.['elk.port.index'],
+                      side: p.layoutOptions?.['elk.port.side'],
+                      fieldName: p.id.split('-field-')[1] || 'target',
+                      type: p.isRelationship ? 'REL' : p.isScalar ? 'SCALAR' : p.id.includes('-target') ? 'TARGET' : 'OTHER',
+                      y: p.y
+                    }))
+                  });
+                } else {
+                  console.log(`Node ${nodeIndex}: ${node.id}:`, {
+                    priority: node.layoutOptions?.['elk.priority'],
+                    position: node.layoutOptions?.['elk.position'],
+                    totalPorts: 0,
+                    note: 'No ports'
+                  });
+                }
               });
               
               const layoutedGraph = await elk.layout(elkGraph);
               console.log('ELK Output:', layoutedGraph);
               
+              // Flatten compound node structure and adjust positions
+              let flattenedNodes = [];
+              layoutedGraph.children.forEach(child => {
+                if (child.id === 'compound-root' && child.children) {
+                  // Extract nodes from compound and adjust their positions relative to compound position
+                  child.children.forEach(rootNode => {
+                    rootNode.x += child.x;
+                    rootNode.y += child.y;
+                    flattenedNodes.push(rootNode);
+                  });
+                } else {
+                  flattenedNodes.push(child);
+                }
+              });
+              
               // Debug ELK output port positioning
-              layoutedGraph.children.forEach((elkNode, nodeIndex) => {
+              flattenedNodes.forEach((elkNode, nodeIndex) => {
                 console.log(`ELK Output Node ${nodeIndex}: ${elkNode.id}:`, {
                   position: `(${elkNode.x}, ${elkNode.y})`,
                   size: `${elkNode.width}x${elkNode.height}`,
@@ -1297,12 +1444,21 @@
               });
               
               // Store ELK debug data - preserve our custom port properties
-              layoutedGraph.children.forEach(elkNode => {
+              flattenedNodes.forEach(elkNode => {
                 if (elkNode.ports) {
                   elkNode.ports.forEach(elkPort => {
-                    // Find the original port to preserve our custom properties
-                    const originalNode = elkGraph.children.find(n => n.id === elkNode.id);
-                    const originalPort = originalNode?.ports.find(p => p.id === elkPort.id);
+                    // Find the original port - for compound node, look in the compound's ports
+                    let originalPort;
+                    if (elkNode.id === 'compound-root') {
+                      // Find original port in the compound node's port collection
+                      const compound = layoutedGraph.children.find(n => n.id === 'compound-root');
+                      originalPort = compoundRootNode?.ports.find(p => p.id === elkPort.id);
+                    } else {
+                      // Regular node - find in original elkNodes
+                      let originalNode = elkNodes.find(n => n.id === elkNode.id);
+                      originalPort = originalNode?.ports.find(p => p.id === elkPort.id);
+                    }
+                    
                     if (originalPort) {
                       elkPort.isRelationship = originalPort.isRelationship;
                       elkPort.isScalar = originalPort.isScalar;
@@ -1311,6 +1467,9 @@
                   });
                 }
               });
+              
+              // Update layoutedGraph with flattened nodes for React Flow
+              layoutedGraph.children = flattenedNodes;
               
               setElkDebugData(layoutedGraph);
               
@@ -1321,7 +1480,7 @@
                 
                 // Only update positions for visible nodes that were processed by ELK
                 if (!node.data.hidden) {
-                  const elkNode = layoutedGraph.children.find(n => n.id === node.id);
+                  const elkNode = flattenedNodes.find(n => n.id === node.id);
                   if (elkNode) {
                     node.position = {
                       x: elkNode.x,
@@ -1533,6 +1692,70 @@
             }
           }, [reactFlowInstance, focusedNodeId, nodes, schemaData, shouldDisplayAsNode, getCoreTypeName, isScalarType]);
 
+          // Helper functions for type ancestry analysis
+          const getTypeDescendants = (typeName, visited = new Set()) => {
+            if (!schemaData || visited.has(typeName)) return new Set();
+            visited.add(typeName);
+            
+            const descendants = new Set();
+            const type = schemaData.__schema.types.find(t => t.name === typeName);
+            
+            if (type && type.fields) {
+              type.fields.forEach(field => {
+                const coreTypeName = getCoreTypeName(field.type);
+                if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
+                  descendants.add(coreTypeName);
+                  // Recursively get descendants
+                  const nestedDescendants = getTypeDescendants(coreTypeName, visited);
+                  nestedDescendants.forEach(desc => descendants.add(desc));
+                }
+              });
+            }
+            
+            return descendants;
+          };
+
+          const classifyTypes = () => {
+            if (!schemaData) return { queryTypes: new Set(), mutableTypes: new Set(), sharedTypes: new Set() };
+            
+            const queryRootName = schemaData.__schema.queryType?.name;
+            const mutationRootName = schemaData.__schema.mutationType?.name;
+            const subscriptionRootName = schemaData.__schema.subscriptionType?.name;
+            
+            // Get all descendants of query root
+            const queryDescendants = queryRootName ? getTypeDescendants(queryRootName) : new Set();
+            if (queryRootName) queryDescendants.add(queryRootName);
+            
+            // Get all descendants of mutation root  
+            const mutationDescendants = mutationRootName ? getTypeDescendants(mutationRootName) : new Set();
+            if (mutationRootName) mutationDescendants.add(mutationRootName);
+            
+            // Add subscription root to query graph for now
+            if (subscriptionRootName) {
+              queryDescendants.add(subscriptionRootName);
+              const subscriptionDescendants = getTypeDescendants(subscriptionRootName);
+              subscriptionDescendants.forEach(desc => queryDescendants.add(desc));
+            }
+            
+            // Find shared types (appear in both graphs)
+            const sharedTypes = new Set();
+            mutationDescendants.forEach(type => {
+              if (queryDescendants.has(type)) {
+                sharedTypes.add(type);
+              }
+            });
+            
+            // Mutable types are those that belong to mutation but not query (excluding shared)
+            const mutableTypes = new Set();
+            mutationDescendants.forEach(type => {
+              if (!queryDescendants.has(type)) {
+                mutableTypes.add(type);
+              }
+            });
+            
+            return { queryTypes: queryDescendants, mutableTypes, sharedTypes };
+          };
+
           // Generate React Flow nodes and edges using table-like approach
           const generateCompleteFlowData = () => {
             if (!schemaData) return { nodes: [], edges: [] };
@@ -1542,6 +1765,9 @@
 
             // Get all types that should be displayed as nodes
             const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
+            
+            // Classify types into partitions
+            const { queryTypes, mutableTypes, sharedTypes } = classifyTypes();
 
             // Determine which types should be visible (but create nodes for ALL types)
             let visibleTypeNames = new Set();
@@ -1610,6 +1836,12 @@
               const isDownstreamOfSelected = selectedNodeId && getDownstreamNodeIds(selectedNodeId).has(typeNodeId);
               const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected && !focusedNodeId;
               const isVisible = visibleTypeNames.has(type.name);
+              
+              // Determine partition membership
+              const isInQueryPartition = queryTypes.has(type.name);
+              const isInMutablePartition = mutableTypes.has(type.name);
+              const isSharedType = sharedTypes.has(type.name);
+              const partition = isInMutablePartition ? 'mutable' : 'query'; // Default to query partition
 
               nodes.push({
                 id: typeNodeId,
@@ -1623,6 +1855,10 @@
                   isQueryType,
                   isMutationType,
                   isSubscriptionType,
+                  partition,
+                  isInQueryPartition,
+                  isInMutablePartition,
+                  isSharedType,
                   getTypeString,
                   getCoreTypeName,
                   isScalarType,
