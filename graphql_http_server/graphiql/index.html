@@ -445,12 +445,12 @@
                 const endX = points[1].x;
                 const endY = points[1].y;
                 
-                // Create control points that actually curve by adding vertical offset
-                const verticalOffset = 20; // Add some vertical curve
-                const cp1x = startX + horizontalDistance * 4; // Control point 1 extends horizontally
-                const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Curve away from target
-                const cp2x = endX - horizontalDistance * 4; // Control point 2 pulls back horizontally  
-                const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Curve away from source
+                // Create control points for subtle curve on straight edges
+                const verticalOffset = 8; // Small vertical curve for straight edges
+                const cp1x = startX + horizontalDistance * 2; // Smaller horizontal extension
+                const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Small curve away from target
+                const cp2x = endX - horizontalDistance * 2; // Smaller horizontal pull back  
+                const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Small curve away from source
                 
                 pathData = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
               } else {
@@ -510,9 +510,10 @@
                   const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
                   const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
                   
-                  // Use different settings for first bend point (bigger curve)
+                  // Use different settings for first and last bend points (bigger curves)
                   const isFirstBendPoint = (i === 1);
-                  const bendRadius = isFirstBendPoint ? radius * 1.5 : radius; // 1.5x bigger radius for first bend
+                  const isLastBendPoint = (i === workingPoints.length - 2);
+                  const bendRadius = (isFirstBendPoint || isLastBendPoint) ? radius * 1.5 : radius; // 1.5x bigger radius for first and last bends
                   const r = Math.min(bendRadius, len1 / 2, len2 / 2);
                   
                   // Calculate control points for smooth cubic bezier curves
@@ -521,8 +522,8 @@
                   const cp2x = curr.x + (dx2 / len2) * r;
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
-                  // Use different smooth factor for first bend point
-                  const smoothFactor = isFirstBendPoint ? 0.75 : 0.9; // Bigger smooth factor for first bend, normal for others
+                  // Use different smooth factor for first and last bend points
+                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.75 : 0.9; // Bigger smooth factor for first and last bends, normal for others
                   const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
                   const ctrl1y = cp1y + (curr.y - cp1y) * smoothFactor;
                   const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
@@ -532,22 +533,12 @@
                   pathData += ` L ${cp1x} ${cp1y} C ${ctrl1x} ${ctrl1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
                 }
                 
-                // Final section: mirror the start curve - curve to horizontal approach, then straight in
+                // Final section: straight line to end (last bend point now handles the curve)
                 const finalStartX = workingPoints[workingPoints.length - 1].x;
                 const finalStartY = workingPoints[workingPoints.length - 1].y;
                 
-                // Create the horizontal approach point (mirror of start)
-                const horizontalApproachX = endX - horizontalDistance;
-                const horizontalApproachY = endY;
-                
-                // Create control points for smooth curve to horizontal approach (mirror the start logic)
-                const cp1x = finalStartX + horizontalDistance * 8; // Much bigger curve radius
-                const cp1y = finalStartY; // Keep at current Y initially
-                const cp2x = horizontalApproachX - horizontalDistance * 8; // Much bigger curve radius
-                const cp2y = horizontalApproachY; // At target Y level
-                
-                // Mirror the start: curve to horizontal approach, then straight line to target
-                pathData += ` L ${finalStartX} ${finalStartY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${horizontalApproachX} ${horizontalApproachY} L ${endX} ${endY}`;
+                // Simple straight line to target - the last bend point now provides the curve
+                pathData += ` L ${finalStartX} ${finalStartY} L ${endX} ${endY}`;
               }
               
               
@@ -572,12 +563,12 @@
             }
           }
           
-          // Fallback with curves if no ELK data
+          // Fallback with subtle curves if no ELK data
           const horizontalDistance = 7.5;
-          const verticalOffset = 20;
-          const cp1x = sourceX + horizontalDistance * 4;
+          const verticalOffset = 8;
+          const cp1x = sourceX + horizontalDistance * 2;
           const cp1y = sourceY + (sourceY < targetY ? -verticalOffset : verticalOffset);
-          const cp2x = targetX - horizontalDistance * 4;
+          const cp2x = targetX - horizontalDistance * 2;
           const cp2y = targetY + (targetY < sourceY ? -verticalOffset : verticalOffset);
           const fallbackPath = `M ${sourceX} ${sourceY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${targetX} ${targetY}`;
           
@@ -2021,11 +2012,11 @@
                   let pathData;
                   
                   if (bendPoints.length === 0) {
-                    // Simple curved line for straight edges with vertical offset
-                    const verticalOffset = 20;
-                    const cp1x = startPoint.x + horizontalDistance * 4;
+                    // Simple curved line for straight edges with subtle vertical offset
+                    const verticalOffset = 8;
+                    const cp1x = startPoint.x + horizontalDistance * 2;
                     const cp1y = startPoint.y + (startPoint.y < endPoint.y ? -verticalOffset : verticalOffset);
-                    const cp2x = endPoint.x - horizontalDistance * 4;
+                    const cp2x = endPoint.x - horizontalDistance * 2;
                     const cp2y = endPoint.y + (endPoint.y < startPoint.y ? -verticalOffset : verticalOffset);
                     pathData = `M ${startPoint.x} ${startPoint.y} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endPoint.x} ${endPoint.y}`;
                   } else {
