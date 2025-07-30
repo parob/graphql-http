@@ -547,7 +547,7 @@
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
                   // Calculate smooth factor first (needed for special handling)
-                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.75 : 0.9; // Bigger smooth factor for first and last bends, normal for others
+                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.6 : 0.9; // Smaller smooth factor for first and last bends to make them less curvy
                   
                   // Special handling for first bend point after horizontal line (compound root edges)
                   if (isFirstBendPoint && isFromCompoundRoot) {
@@ -1494,15 +1494,15 @@
                 'elk.spacing.nodeNode': '60',
                 'elk.layered.spacing.nodeNodeBetweenLayers': '120',
                 'elk.spacing.edgeNode': '80',
-                'elk.spacing.edgeEdge': '20',
+                'elk.spacing.edgeEdge': '30',
                 'elk.edgeRouting': 'POLYLINE',
                 'elk.layered.mergeEdges': 'false',
                 'elk.layered.unnecessaryBendpoints': 'false',
                 'elk.layered.edgeRouting.polyline.sloppyRouting': 'false',
-                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '2',
-                'elk.spacing.portPort': '15',
+                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '4',
+                'elk.spacing.portPort': '18',
                 'elk.portAlignment.default': 'DISTRIBUTED',
-                'elk.layered.edgeRouting.multiEdgeSpacing': '20',
+                'elk.layered.edgeRouting.multiEdgeSpacing': '30',
                 'elk.layered.edgeRouting.sloppySplineRouting': 'false',
                 'elk.separateConnectedComponents': 'false',
                 'elk.padding': '[top=30,left=30,bottom=30,right=30]',
