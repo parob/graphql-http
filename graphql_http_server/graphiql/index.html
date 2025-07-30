@@ -546,23 +546,26 @@
                   const cp2x = curr.x + (dx2 / len2) * r;
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
+                  // Calculate smooth factor first (needed for special handling)
+                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.75 : 0.9; // Bigger smooth factor for first and last bends, normal for others
+                  
                   // Special handling for first bend point after horizontal line (compound root edges)
                   if (isFirstBendPoint && isFromCompoundRoot) {
-                    // Create smooth curve directly from horizontal line end to first bend point
+                    // Create one seamless curve from horizontal line end through the bend point
                     const horizontalEndX = workingPoints[0].x;
                     const horizontalEndY = workingPoints[0].y;
                     
-                    // Control points for smooth transition from horizontal line to the bend point curve
-                    const smoothCP1x = horizontalEndX + Math.min(25, Math.abs(curr.x - horizontalEndX) * 0.4);
+                    // Control points for seamless transition from horizontal line through bend point
+                    const smoothCP1x = horizontalEndX + Math.min(30, Math.abs(curr.x - horizontalEndX) * 0.5);
                     const smoothCP1y = horizontalEndY;
                     
-                    // Instead of going directly to curr, go to cp1x to connect smoothly with the regular curve
-                    pathData += ` C ${smoothCP1x} ${smoothCP1y} ${cp1x} ${cp1y} ${cp1x} ${cp1y}`;
-                    // Don't continue - let the regular logic handle the rest of the curve
+                    // Use the regular curve's second control point for seamless continuation
+                    const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
+                    const ctrl2y = cp2y + (curr.y - cp2y) * smoothFactor;
+                    
+                    pathData += ` C ${smoothCP1x} ${smoothCP1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
+                    continue; // Skip the regular bend point logic for this point
                   }
-                  
-                  // Use different smooth factor for first and last bend points
-                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.75 : 0.9; // Bigger smooth factor for first and last bends, normal for others
                   const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
                   const ctrl1y = cp1y + (curr.y - cp1y) * smoothFactor;
                   const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
