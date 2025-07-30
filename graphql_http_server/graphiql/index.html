@@ -715,8 +715,8 @@
                   right: '-6px',
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  width: '8px',
-                  height: '8px',
+                  width: '4px',
+                  height: '4px',
                   backgroundColor: 'transparent',
                   borderRadius: '50%',
                   border: 'none',
@@ -737,8 +737,8 @@
             style: {
               left: '-6px',
               top: '30px', // Position at the header
-              width: '8px',
-              height: '8px',
+              width: '4px',
+              height: '4px',
               backgroundColor: 'transparent',
               borderRadius: '50%',
               border: 'none',
@@ -962,7 +962,7 @@
               const isRootType = node.data.isQueryType || node.data.isMutationType || node.data.isSubscriptionType;
               const rootTypeHeaderHeight = isRootType ? 29 : 0; // Extra height for root type header (25 + 4px adjustment)
               
-              const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight);
+              const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight + 20); // Add 20px bottom padding for ports
               
               // Calculate actual node width based on selection state
               const isSelected = node.data.isSelected;
@@ -978,8 +978,8 @@
               const targetOffset = (nodeIndex % 5) * 4; // 0, 4, 8, 12, 16 pixel offset
               ports.push({
                 id: `${node.id}-target`,
-                width: 8,
-                height: 8,
+                width: 4,
+                height: 4,
                 x: -4,
                 y: 30 + rootTypeHeaderHeight + targetOffset // Account for root type header
               });
@@ -997,13 +997,13 @@
                   
                   // Create a port for EVERY field: relationships, scalars, and other types
                   // Account for root type header offset
-                  const fieldY = 60 + rootTypeHeaderHeight + (itemIndex * 45) + 22; // Center of field - matches React Flow
+                  const fieldY = 60 + rootTypeHeaderHeight + (itemIndex * 45) + 22 + 22.5; // Center of field - adjusted up by half a row for header
                   // Add slight vertical offset based on field index to prevent edge overlap
                   const portOffset = (itemIndex % 3) * 3; // 0, 3, 6 pixel offset pattern
                   ports.push({
                     id: `${node.id}-field-${item.name}`,
-                    width: 8,
-                    height: 8,
+                    width: 4,
+                    height: 4,
                     x: nodeWidth - borderWidth - 10, // Adjust by observed 10px gap
                     y: fieldY + portOffset,
                     // Preserve metadata for debugging
@@ -1014,13 +1014,13 @@
                   });
                 } else {
                   // It's an enum value - create a dummy port for layout purposes
-                  const enumY = 60 + (itemIndex * 45) + 22; // Center position - matches React Flow
+                  const enumY = 60 + (itemIndex * 45) + 22 + 22.5; // Center position - adjusted up by half a row for header
                   // Add slight vertical offset for enum ports too
                   const enumPortOffset = (itemIndex % 3) * 3; // 0, 3, 6 pixel offset pattern
                   ports.push({
                     id: `${node.id}-enum-${item.name}`,
-                    width: 8,
-                    height: 8,
+                    width: 4,
+                    height: 4,
                     x: nodeWidth - borderWidth - 10, // Adjust by observed 10px gap
                     y: enumY + enumPortOffset,
                     // Preserve metadata for debugging
