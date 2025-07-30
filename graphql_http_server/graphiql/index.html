@@ -1675,7 +1675,13 @@
               onNodeClick: onNodeClick,
               onNodeDoubleClick: onNodeDoubleClick,
               onPaneClick: onPaneClick,
-              onInit: setReactFlowInstance,
+              onInit: (instance) => {
+                setReactFlowInstance(instance);
+                // Fit view once on initial load
+                setTimeout(() => {
+                  instance.fitView({ padding: 0.08 });
+                }, 100);
+              },
               // Removed node/edge change handlers since dragging is disabled
             }, [
               React.createElement(Controls, {
