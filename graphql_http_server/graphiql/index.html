@@ -1254,15 +1254,16 @@
             let currentY = 0;
             
             rootNodes.forEach((node, index) => {
-              const originalNode = visibleNodes.find(n => n.id === node.id);
-              const itemCount = originalNode.data.type.fields ? originalNode.data.type.fields.length : 0;
-              const rootTypeHeaderHeight = 29; // Extra height for root type header
-              const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight + 20);
+              // Use the exact same dimensions that were calculated for the original ELK node
+              const originalElkNode = elkNodes.find(n => n.id === node.id);
+              const nodeHeight = originalElkNode.height;
+              const nodeWidth = originalElkNode.width;
               
               rootTypePositions.set(node.id, {
                 x: 0,
                 y: currentY,
-                height: nodeHeight
+                height: nodeHeight,
+                width: nodeWidth
               });
               
               currentY += nodeHeight + 50; // 50px spacing between root types
@@ -1271,10 +1272,10 @@
             // Calculate total compound height
             const totalCompoundHeight = currentY - 50; // Remove last spacing
             
-            // Create a compound node that ELK treats as a single unit
+            // Create a compound node that ELK treats as a single unit  
             const compoundRootNode = rootNodes.length > 0 ? {
               id: 'compound-root',
-              width: 320, // Width of the compound node
+              width: rootNodes.length > 0 ? rootTypePositions.get(rootNodes[0].id).width : 320, // Use same width as root nodes
               height: totalCompoundHeight,
               // Collect all ports from root nodes and move them to compound level
               ports: rootNodes.flatMap((node) => {
@@ -1291,10 +1292,10 @@
                   ...node,
                   ports: [], // Remove ports from children since they're now on compound
                   layoutOptions: {},
-                  // Use calculated positions
+                  // Use exact calculated positions and dimensions
                   x: position.x,
                   y: position.y,
-                  width: node.width,
+                  width: position.width,
                   height: position.height
                 };
               }),
@@ -1368,11 +1369,13 @@
                     portConstraints: node.layoutOptions?.['elk.portConstraints']
                   });
                   if (node.ports) {
-                    console.log(`  Compound ports:`, node.ports.map(p => ({
+                    console.log(`  Compound ports (${node.ports.length}):`, node.ports.map(p => ({
                       id: p.id,
                       x: p.x,
                       y: p.y,
-                      isRelationship: p.isRelationship
+                      isRelationship: p.isRelationship,
+                      isScalar: p.isScalar,
+                      fieldType: p.fieldType
                     })));
                   }
                   if (node.children) {
@@ -1417,10 +1420,15 @@
               let flattenedNodes = [];
               layoutedGraph.children.forEach(child => {
                 if (child.id === 'compound-root' && child.children) {
-                  // Extract nodes from compound and adjust their positions relative to compound position
+                  // Extract individual nodes from compound and adjust their positions relative to compound position
                   child.children.forEach(rootNode => {
+                    // Restore ports to the individual root nodes for proper edge routing
+                    const position = rootTypePositions.get(rootNode.id);
+                    const originalNode = rootNodes.find(n => n.id === rootNode.id);
+                    
                     rootNode.x += child.x;
                     rootNode.y += child.y;
+                    rootNode.ports = originalNode.ports; // Restore original ports
                     flattenedNodes.push(rootNode);
                   });
                 } else {
