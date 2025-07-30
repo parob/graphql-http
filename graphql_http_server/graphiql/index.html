@@ -980,6 +980,18 @@
               setNodes(layouted.nodes);
               setEdges(layouted.edges);
               
+              // Center single node if only one is visible
+              const visibleNodes = layouted.nodes.filter(node => !node.data?.hidden);
+              if (visibleNodes.length === 1 && reactFlowInstance) {
+                const singleNode = visibleNodes[0];
+                setTimeout(() => {
+                  reactFlowInstance.setCenter(singleNode.position.x + 142, singleNode.position.y + 150, {
+                    zoom: 1,
+                    duration: 600
+                  });
+                }, 200); // Much shorter delay - just enough for layout to settle
+              }
+              
               // Handle pending navigation after layout completes
               if (window.pendingNavigation) {
                 const targetNodeId = window.pendingNavigation;
@@ -1089,10 +1101,15 @@
                     
                     // Now smoothly animate to the target state
                     setTimeout(() => {
-                      reactFlowInstance.fitView({
-                        duration: 700,
-                        padding: focusedNodeId ? 0.15 : 0.12 // Increased padding for full view to prevent top cutoff
-                      });
+                      // Check if only one node is visible - if so, let the centering logic handle it
+                      const visibleNodes = layoutedData.nodes.filter(node => !node.data?.hidden);
+                      if (visibleNodes.length > 1 || !focusedNodeId) {
+                        // Run fitView for multiple nodes OR when going back to full view
+                        reactFlowInstance.fitView({
+                          duration: 700,
+                          padding: focusedNodeId ? 0.15 : 0.12 // Increased padding for full view to prevent top cutoff
+                        });
+                      }
                       
                       setTimeout(() => {
                         if (!focusedNodeId) {
