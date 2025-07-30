@@ -477,7 +477,9 @@
         const isMutationType = data.isMutationType;
         const isSubscriptionType = data.isSubscriptionType;
 
-        return React.createElement('div', {
+        const isRootType = isQueryType || isMutationType || isSubscriptionType;
+        
+        const nodeContent = React.createElement('div', {
           style: {
             background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 'white',
             border: isSelected ? '3px solid #0366d6' : shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
@@ -493,6 +495,22 @@
             transition: 'all 0.3s ease'
           }
         }, [
+          // Root type label (subtle header row)
+          isRootType && React.createElement('div', {
+            key: 'root-type-label',
+            style: {
+              padding: '6px 16px',
+              background: isQueryType ? '#f0f8ff' : isMutationType ? '#fff5f5' : isSubscriptionType ? '#f8f0ff' : '#f6f8fa',
+              color: isQueryType ? '#0969da' : isMutationType ? '#d1242f' : '#8250df',
+              fontSize: '10px',
+              fontWeight: '600',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              borderRadius: '6px 6px 0 0',
+              borderBottom: '1px solid #e1e4e8'
+            }
+          }, isQueryType ? 'Query Root Type' : isMutationType ? 'Mutation Root Type' : 'Subscription Root Type'),
+          
           // Header
           React.createElement('div', {
             key: 'header',
@@ -500,7 +518,7 @@
               padding: '12px 16px',
               background: isQueryType ? '#e6f3ff' : isMutationType ? '#fff5f5' : isSubscriptionType ? '#f0fff4' : '#f6f8fa',
               color: '#24292e',
-              borderRadius: '6px 6px 0 0',
+              borderRadius: isRootType ? '0' : '6px 6px 0 0',
               borderBottom: '1px solid #d1d5da'
             }
           }, [
@@ -620,6 +638,8 @@
             }
           })
         ]);
+        
+        return nodeContent;
       };
 
       // Complete GraphQL Schema Visualizer Plugin using React Flow
@@ -803,14 +823,46 @@
                 }
               });
               
+              // Give root types fixed positions on the left with specific ordering
+              const isRootType = node.data.isQueryType || node.data.isMutationType || node.data.isSubscriptionType;
+              let priority;
+              if (node.data.isQueryType) {
+                priority = 2000; // Highest priority - top position
+              } else if (node.data.isMutationType) {
+                priority = 1999; // Second highest - middle position  
+              } else if (node.data.isSubscriptionType) {
+                priority = 1998; // Third highest - bottom position
+              } else {
+                priority = 1000 - nodeIndex; // Regular nodes get lower priority
+              }
+              
+              const layoutOptions = {
+                'elk.portConstraints': 'FIXED_POS'
+              };
+              
+              // Set fixed positions and constraints for root types
+              if (isRootType) {
+                layoutOptions['elk.nodeConstraints'] = 'FIXED_POS';
+                layoutOptions['elk.priority'] = priority.toString();
+                
+                if (node.data.isQueryType) {
+                  layoutOptions['elk.position'] = '(50, 50)';
+                } else if (node.data.isMutationType) {
+                  layoutOptions['elk.position'] = '(50, 400)'; // Below Query
+                } else if (node.data.isSubscriptionType) {
+                  layoutOptions['elk.position'] = '(50, 750)'; // Below Mutation
+                }
+              } else {
+                layoutOptions['elk.priority'] = priority.toString();
+                layoutOptions['elk.layered.priority'] = priority.toString();
+              }
+              
               return {
                 id: node.id,
                 width: nodeWidth,
                 height: nodeHeight,
                 ports: ports,
-                layoutOptions: {
-                  'elk.portConstraints': 'FIXED_POS'
-                }
+                layoutOptions: layoutOptions
               };
             });
 
@@ -838,7 +890,8 @@
                 'elk.layered.mergeEdges': 'false',
                 'elk.layered.unnecessaryBendpoints': 'true',
                 'elk.padding': '[top=50,left=50,bottom=50,right=50]',
-                'elk.portConstraints': 'FIXED_POS'
+                'elk.portConstraints': 'FIXED_POS',
+                'elk.nodeConstraints': 'LAYER_CONSTRAINT'
               }
             };
 
