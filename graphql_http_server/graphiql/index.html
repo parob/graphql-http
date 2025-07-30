@@ -697,8 +697,10 @@
             
             // Convert React Flow format to ELK format with port information
             const elkNodes = nodes.map((node, nodeIndex) => {
-              const fieldCount = node.data.type.fields ? node.data.type.fields.length : 0;
-              const nodeHeight = Math.max(100, 60 + (fieldCount * 45));
+              // Count fields OR enum values
+              const itemCount = node.data.type.fields ? node.data.type.fields.length : 
+                                node.data.type.enumValues ? node.data.type.enumValues.length : 0;
+              const nodeHeight = Math.max(100, 60 + (itemCount * 45));
               
               // Create ports for each field that has relationships
               const ports = [];
@@ -712,31 +714,55 @@
                 y: 30
               });
               
-              // Add source ports for ALL fields to maintain correct ordering
-              if (node.data.type.fields) {
-                node.data.type.fields.forEach((field, fieldIndex) => {
-                  const coreTypeName = getCoreTypeName(field.type);
+              // Add source ports for ALL fields OR enum values to maintain correct ordering
+              const items = node.data.type.fields || node.data.type.enumValues || [];
+              items.forEach((item, itemIndex) => {
+                const isEnumValue = !item.type; // Enum values don't have a type property
+                
+                if (!isEnumValue) {
+                  // It's a field - create a port
+                  const coreTypeName = getCoreTypeName(item.type);
                   const isRelationship = coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName);
                   const isScalar = isScalarType(coreTypeName);
                   
                   // Create a port for EVERY field: relationships, scalars, and other types
-                  const fieldY = 60 + (fieldIndex * 45) + 22; // Center of field - matches React Flow
+                  const fieldY = 60 + (itemIndex * 45) + 22; // Center of field - matches React Flow
                   ports.push({
-                    id: `${node.id}-field-${field.name}`,
+                    id: `${node.id}-field-${item.name}`,
                     width: 8,
                     height: 8,
                     x: 316, // Position at right edge
-                    y: fieldY
+                    y: fieldY,
+                    // Preserve metadata for debugging
+                    isRelationship: isRelationship,
+                    isScalar: isScalar,
+                    fieldType: coreTypeName,
+                    fieldIndex: itemIndex
                   });
-                });
-              }
+                } else {
+                  // It's an enum value - create a dummy port for layout purposes
+                  const enumY = 60 + (itemIndex * 45) + 22; // Center position - matches React Flow
+                  ports.push({
+                    id: `${node.id}-enum-${item.name}`,
+                    width: 8,
+                    height: 8,
+                    x: 316, // Position at right edge
+                    y: enumY,
+                    // Preserve metadata for debugging
+                    isEnumValue: true,
+                    fieldIndex: itemIndex
+                  });
+                }
+              });
               
               return {
                 id: node.id,
                 width: 320,
                 height: nodeHeight,
                 ports: ports,
-                layoutOptions: {}
+                layoutOptions: {
+                  'elk.portConstraints': 'FIXED_POS'
+                }
               };
             });
 
@@ -760,7 +786,8 @@
                 'elk.layered.spacing.nodeNodeBetweenLayers': '150',
                 'elk.spacing.edgeNode': '50',
                 'elk.edgeRouting': 'ORTHOGONAL',
-                'elk.padding': '[top=50,left=50,bottom=50,right=50]'
+                'elk.padding': '[top=50,left=50,bottom=50,right=50]',
+                'elk.portConstraints': 'FIXED_POS'
               }
             };
 
@@ -1235,16 +1262,40 @@
               ]),
               React.createElement('svg', {
                 key: 'debug-svg',
-                viewBox: '-500 -500 4000 4000', // Zoomed out view to show more content
+                viewBox: '-250 -250 2000 2000', // 2x more zoomed in
                 style: {
                   position: 'fixed',
                   top: 0,
                   left: 0,
                   width: '100vw',
                   height: '100vh',
-                  background: 'rgba(0, 0, 0, 0.1)',
+                  background: 'white',
                   zIndex: 1000,
-                  pointerEvents: 'none'
+                  pointerEvents: 'auto',
+                  cursor: 'move'
+                },
+                onMouseDown: (e) => {
+                  const svg = e.currentTarget;
+                  const startX = e.clientX;
+                  const startY = e.clientY;
+                  const viewBox = svg.viewBox.baseVal;
+                  const startViewX = viewBox.x;
+                  const startViewY = viewBox.y;
+                  
+                  const handleMouseMove = (e) => {
+                    const dx = (startX - e.clientX) * 2; // Scale movement
+                    const dy = (startY - e.clientY) * 2;
+                    viewBox.x = startViewX + dx;
+                    viewBox.y = startViewY + dy;
+                  };
+                  
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+                  
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
                 }
               }, [
                 // Draw ELK-proposed node positions
