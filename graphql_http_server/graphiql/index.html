@@ -851,7 +851,7 @@
                     setTimeout(() => {
                       reactFlowInstance.fitView({
                         duration: 700,
-                        padding: focusedNodeId ? 0.15 : 0.08
+                        padding: focusedNodeId ? 0.15 : 0.12 // Increased padding for full view to prevent top cutoff
                       });
                       
                       setTimeout(() => {
@@ -940,7 +940,12 @@
               // Count fields OR enum values
               const itemCount = node.data.type.fields ? node.data.type.fields.length : 
                                 node.data.type.enumValues ? node.data.type.enumValues.length : 0;
-              const nodeHeight = Math.max(100, 60 + (itemCount * 45));
+              
+              // Check if this is a root type (has extra header)
+              const isRootType = node.data.isQueryType || node.data.isMutationType || node.data.isSubscriptionType;
+              const rootTypeHeaderHeight = isRootType ? 29 : 0; // Extra height for root type header (25 + 4px adjustment)
+              
+              const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight);
               
               // Calculate actual node width based on selection state
               const isSelected = node.data.isSelected;
@@ -959,7 +964,7 @@
                 width: 8,
                 height: 8,
                 x: -4,
-                y: 30 + targetOffset
+                y: 30 + rootTypeHeaderHeight + targetOffset // Account for root type header
               });
               
               // Add source ports for ALL fields OR enum values to maintain correct ordering
@@ -974,7 +979,8 @@
                   const isScalar = isScalarType(coreTypeName);
                   
                   // Create a port for EVERY field: relationships, scalars, and other types
-                  const fieldY = 60 + (itemIndex * 45) + 22; // Center of field - matches React Flow
+                  // Account for root type header offset
+                  const fieldY = 60 + rootTypeHeaderHeight + (itemIndex * 45) + 22; // Center of field - matches React Flow
                   // Add slight vertical offset based on field index to prevent edge overlap
                   const portOffset = (itemIndex % 3) * 3; // 0, 3, 6 pixel offset pattern
                   ports.push({
@@ -1008,7 +1014,7 @@
               });
               
               // Give root types fixed positions on the left with specific ordering
-              const isRootType = node.data.isQueryType || node.data.isMutationType || node.data.isSubscriptionType;
+              // isRootType already declared above
               let priority;
               if (node.data.isQueryType) {
                 priority = 2000; // Highest priority - top position
@@ -1259,7 +1265,10 @@
               
               nodesToFit.forEach(n => {
                 const nodeWidth = 284; // Calculated width from earlier
-                const nodeHeight = Math.max(100, 60 + ((n.data.type.fields?.length || n.data.type.enumValues?.length || 0) * 45));
+                const itemCount = n.data.type.fields?.length || n.data.type.enumValues?.length || 0;
+                const isRootType = n.data.isQueryType || n.data.isMutationType || n.data.isSubscriptionType;
+                const rootTypeHeaderHeight = isRootType ? 29 : 0; // Match the adjusted height
+                const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight);
                 
                 minX = Math.min(minX, n.position.x);
                 minY = Math.min(minY, n.position.y);
@@ -1708,17 +1717,43 @@
               onPaneClick: onPaneClick,
               onInit: (instance) => {
                 setReactFlowInstance(instance);
-                // Fit view once on initial load with more padding at top and longer delay
+                // Wait longer for ELK layout and CSS transitions to complete
                 setTimeout(() => {
                   instance.fitView({ 
-                    padding: 0.12, // Increased padding
+                    padding: 0.12,
                     minZoom: 0.1,
-                    maxZoom: 1.0
+                    maxZoom: 1.0,
+                    duration: 800 // Smooth transition to final view
                   });
-                }, 300); // Longer delay to ensure nodes are positioned
+                }, 1000); // Wait for ELK layout and node animations to complete
               },
               // Removed node/edge change handlers since dragging is disabled
             }, [
+              // Arrow marker definitions for edges
+              React.createElement('svg', {
+                key: 'arrow-markers',
+                style: { position: 'absolute', width: 0, height: 0 }
+              }, [
+                React.createElement('defs', { key: 'defs' }, [
+                  React.createElement('marker', {
+                    key: 'arrowclosed',
+                    id: 'arrowclosed',
+                    markerWidth: 12,
+                    markerHeight: 12,
+                    refX: 9,
+                    refY: 3,
+                    orient: 'auto',
+                    markerUnits: 'strokeWidth'
+                  }, [
+                    React.createElement('path', {
+                      key: 'arrow-path',
+                      d: 'M0,0 L0,6 L9,3 z',
+                      fill: '#8b949e'
+                    })
+                  ])
+                ])
+              ]),
+              
               React.createElement(Controls, {
                 key: 'controls',
                 style: {
