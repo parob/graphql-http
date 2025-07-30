@@ -46,7 +46,7 @@
       /* Ensure edges render behind nodes */
       .react-flow__edges {
         z-index: 1;
-        transition: opacity 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
       }
       
       .react-flow__nodes {
@@ -60,8 +60,8 @@
 
       /* Smooth edge transitions */
       .react-flow__edge {
-        transition: opacity 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
-                    stroke 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+        transition: opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94), 
+                    stroke 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
       }
 
       /* Fade animation classes */
@@ -578,7 +578,9 @@
                 key: 'focus-button',
                 onClick: (e) => {
                   e.stopPropagation();
-                  data.onFocus && data.onFocus(data.nodeId);
+                  if (!data.isTransitioning) {
+                    data.onFocus && data.onFocus(data.nodeId);
+                  }
                 },
                 style: {
                   background: '#f6f8fa',
@@ -750,7 +752,9 @@
           const [nodes, setNodes] = React.useState([]);
           const [edges, setEdges] = React.useState([]);
           const [edgesFading, setEdgesFading] = React.useState(false);
+          const [isTransitioning, setIsTransitioning] = React.useState(false);
           const lastFocusedNodeRef = React.useRef(null);
+          const transitionTimeoutRef = React.useRef(null);
           
           // Fetch schema data
           React.useEffect(() => {
@@ -800,52 +804,68 @@
                 const previousFocus = lastFocusedNodeRef.current;
                 lastFocusedNodeRef.current = focusedNodeId;
                 
-                // Start edge fade out immediately
+                // Clear any existing transition
+                if (transitionTimeoutRef.current) {
+                  clearTimeout(transitionTimeoutRef.current);
+                }
+                
+                // Set transitioning state
+                setIsTransitioning(true);
                 setEdgesFading(true);
                 
-                // Smooth transition with proper centering
-                const animateTimeout = setTimeout(() => {
+                transitionTimeoutRef.current = setTimeout(() => {
                   if (focusedNodeId) {
-                    // Entering focus mode - center on the focused node first, then fit all focused nodes
-                    const focusedNode = layoutedData.nodes.find(n => n.id === focusedNodeId);
-                    if (focusedNode) {
-                      // First, smoothly pan to the focused node
-                      reactFlowInstance.setCenter(focusedNode.position.x + 140, focusedNode.position.y + 100, {
-                        zoom: 0.9,
-                        duration: 400
-                      });
-                      
-                      // Fade edges back in after nodes start moving
-                      setTimeout(() => {
-                        setEdgesFading(false);
-                      }, 200);
-                      
-                      // Then, after a brief pause, fit all focused nodes into view
-                      setTimeout(() => {
-                        reactFlowInstance.fitView({
-                          duration: 600,
-                          padding: 0.15
-                        });
-                      }, 500);
-                    }
-                  } else {
-                    // Exiting focus mode - smooth fit to show all nodes
-                    reactFlowInstance.fitView({
-                      duration: 800,
-                      padding: 0.1
-                    });
-                    
-                    // Fade edges back in after transition starts
+                    // Entering focus mode - wait for layout to complete, then animate
                     setTimeout(() => {
                       setEdgesFading(false);
-                    }, 300);
+                      reactFlowInstance.fitView({
+                        duration: 800,
+                        padding: 0.15
+                      });
+                      
+                      setTimeout(() => {
+                        setIsTransitioning(false);
+                      }, 800);
+                    }, 200);
+                  } else {
+                    // Exiting focus mode - wait for layout to complete, then animate
+                    setTimeout(() => {
+                      setEdgesFading(false);
+                      reactFlowInstance.fitView({
+                        duration: 800,
+                        padding: 0.08
+                      });
+                      
+                      setTimeout(() => {
+                        setSelectedNodeId(null);
+                        setIsTransitioning(false);
+                      }, 800);
+                    }, 200);
                   }
-                }, 50);
-                
-                return () => clearTimeout(animateTimeout);
+                }, 100);
               }
             }
           }, [focusedNodeId, reactFlowInstance, layoutedData]);
+
+          // Cleanup transition timeouts on unmount
+          React.useEffect(() => {
+            return () => {
+              if (transitionTimeoutRef.current) {
+                clearTimeout(transitionTimeoutRef.current);
+              }
+            };
+          }, []);
+
+          // Safety: ensure edges always fade back in after transitions
+          React.useEffect(() => {
+            const safetyTimeout = setTimeout(() => {
+              if (edgesFading) {
+                setEdgesFading(false);
+              }
+            }, 2000); // Safety timeout after 2 seconds
+            
+            return () => clearTimeout(safetyTimeout);
+          }, [edgesFading]);
 
           // Helper function to get clean type string
           const getTypeString = (type) => {
@@ -1313,7 +1333,7 @@
               const isSelected = selectedNodeId === typeNodeId;
               const isSelectedDownstream = selectedNodeId && downstreamNodeIds.has(selectedNodeId);
               const isDownstreamOfSelected = selectedNodeId && getDownstreamNodeIds(selectedNodeId).has(typeNodeId);
-              const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected;
+              const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected && !focusedNodeId;
 
               nodes.push({
                 id: typeNodeId,
@@ -1332,7 +1352,8 @@
                   onFieldClick,
                   onFocus: setFocusedNodeId,
                   shouldDim,
-                  isSelected
+                  isSelected,
+                  isTransitioning
                 }
               });
 
@@ -1355,7 +1376,7 @@
                     const isTargetSelected = selectedNodeId === targetTypeId;
                     const isDownstreamEdge = isSourceSelected; // Only edges FROM the selected node
                     const isUpstreamEdge = isTargetSelected; // Edges TO the selected node (should be dimmed)
-                    const shouldDimEdge = selectedNodeId && !isDownstreamEdge;
+                    const shouldDimEdge = selectedNodeId && !isDownstreamEdge && !focusedNodeId;
                     
                     edges.push({
                       id: edgeId,
@@ -1514,7 +1535,12 @@
             }, [
               React.createElement('button', {
                 key: 'back-button',
-                onClick: () => setFocusedNodeId(null),
+                onClick: () => {
+                  if (!isTransitioning) {
+                    setFocusedNodeId(null);
+                    setSelectedNodeId(null);
+                  }
+                },
                 style: {
                   background: '#f6f8fa',
                   border: '1px solid #d1d5da',
