@@ -433,18 +433,26 @@
               
               // Create path using ELK coordinates with rounded corners
               let pathData = '';
-              const radius = 120; // Corner radius - extra rounded corners for natural curves
+              const radius = 500; // Corner radius - extra rounded corners for natural curves
               
               const points = [startPoint, ...bendPoints, endPoint];
               
               if (points.length === 2) {
-                // Straight line, no bends - add horizontal sections at start and end
+                // Straight line, no bends - create smooth curves at start and end
                 const horizontalDistance = 7.5; // Distance to extend horizontally
                 const startX = points[0].x;
                 const startY = points[0].y;
                 const endX = points[1].x;
                 const endY = points[1].y;
-                pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY} L ${endX - horizontalDistance} ${endY} L ${endX} ${endY}`;
+                
+                // Create control points that actually curve by adding vertical offset
+                const verticalOffset = 20; // Add some vertical curve
+                const cp1x = startX + horizontalDistance * 4; // Control point 1 extends horizontally
+                const cp1y = startY + (startY < endY ? -verticalOffset : verticalOffset); // Curve away from target
+                const cp2x = endX - horizontalDistance * 4; // Control point 2 pulls back horizontally  
+                const cp2y = endY + (endY < startY ? -verticalOffset : verticalOffset); // Curve away from source
+                
+                pathData = `M ${startX} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
               } else {
                 // Path with rounded corners - add horizontal section at start
                 const horizontalDistance = 7.5; // Distance to extend horizontally
@@ -462,9 +470,9 @@
                   // If there are bend points, adjust the first one to be further right
                   // to avoid sharp curves back
                   const firstBend = modifiedPoints[1];
-                  if (firstBend.x < startX + horizontalDistance + 20) {
+                  if (firstBend.x < startX + horizontalDistance + 50) {
                     modifiedPoints[1] = {
-                      x: Math.max(firstBend.x, startX + horizontalDistance + 20),
+                      x: Math.max(firstBend.x, startX + horizontalDistance + 50),
                       y: firstBend.y
                     };
                   }
@@ -472,9 +480,9 @@
                   // Adjust the last bend point to be further left for smooth end transition
                   const lastBendIndex = modifiedPoints.length - 2;
                   const lastBend = modifiedPoints[lastBendIndex];
-                  if (lastBend.x > endX - horizontalDistance - 20) {
+                  if (lastBend.x > endX - horizontalDistance - 50) {
                     modifiedPoints[lastBendIndex] = {
-                      x: Math.min(lastBend.x, endX - horizontalDistance - 20),
+                      x: Math.min(lastBend.x, endX - horizontalDistance - 50),
                       y: lastBend.y
                     };
                   }
@@ -502,8 +510,10 @@
                   const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
                   const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
                   
-                  // Use smaller radius if segments are short
-                  const r = Math.min(radius, len1 / 2, len2 / 2);
+                  // Use different settings for first bend point (bigger curve)
+                  const isFirstBendPoint = (i === 1);
+                  const bendRadius = isFirstBendPoint ? radius * 1.5 : radius; // 1.5x bigger radius for first bend
+                  const r = Math.min(bendRadius, len1 / 2, len2 / 2);
                   
                   // Calculate control points for smooth cubic bezier curves
                   const cp1x = curr.x - (dx1 / len1) * r;
@@ -511,8 +521,8 @@
                   const cp2x = curr.x + (dx2 / len2) * r;
                   const cp2y = curr.y + (dy2 / len2) * r;
                   
-                  // Create smooth cubic bezier curve with enhanced control points
-                  const smoothFactor = 0.9; // Controls how smooth the curve is
+                  // Use different smooth factor for first bend point
+                  const smoothFactor = isFirstBendPoint ? 0.75 : 0.9; // Bigger smooth factor for first bend, normal for others
                   const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
                   const ctrl1y = cp1y + (curr.y - cp1y) * smoothFactor;
                   const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
@@ -522,9 +532,24 @@
                   pathData += ` L ${cp1x} ${cp1y} C ${ctrl1x} ${ctrl1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
                 }
                 
-                // Final line to horizontal end section, then to actual end point
-                pathData += ` L ${workingPoints[workingPoints.length - 1].x} ${workingPoints[workingPoints.length - 1].y} L ${endX} ${endY}`;
+                // Final section: mirror the start curve - curve to horizontal approach, then straight in
+                const finalStartX = workingPoints[workingPoints.length - 1].x;
+                const finalStartY = workingPoints[workingPoints.length - 1].y;
+                
+                // Create the horizontal approach point (mirror of start)
+                const horizontalApproachX = endX - horizontalDistance;
+                const horizontalApproachY = endY;
+                
+                // Create control points for smooth curve to horizontal approach (mirror the start logic)
+                const cp1x = finalStartX + horizontalDistance * 8; // Much bigger curve radius
+                const cp1y = finalStartY; // Keep at current Y initially
+                const cp2x = horizontalApproachX - horizontalDistance * 8; // Much bigger curve radius
+                const cp2y = horizontalApproachY; // At target Y level
+                
+                // Mirror the start: curve to horizontal approach, then straight line to target
+                pathData += ` L ${finalStartX} ${finalStartY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${horizontalApproachX} ${horizontalApproachY} L ${endX} ${endY}`;
               }
+              
               
               return React.createElement('g', {
                 style: {
@@ -547,9 +572,17 @@
             }
           }
           
-          // Fallback to straight line if no ELK data
+          // Fallback with curves if no ELK data
+          const horizontalDistance = 7.5;
+          const verticalOffset = 20;
+          const cp1x = sourceX + horizontalDistance * 4;
+          const cp1y = sourceY + (sourceY < targetY ? -verticalOffset : verticalOffset);
+          const cp2x = targetX - horizontalDistance * 4;
+          const cp2y = targetY + (targetY < sourceY ? -verticalOffset : verticalOffset);
+          const fallbackPath = `M ${sourceX} ${sourceY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${targetX} ${targetY}`;
+          
           return React.createElement('path', {
-            d: `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`,
+            d: fallbackPath,
             style: {
               ...style,
               fill: 'none',
@@ -836,6 +869,7 @@
           const lastFocusedNodeRef = React.useRef(null);
           const transitionTimeoutRef = React.useRef(null);
           const viewportStateRef = React.useRef(null);
+          const keySequenceRef = React.useRef('');
           
           // Fetch schema data
           React.useEffect(() => {
@@ -934,6 +968,41 @@
               if (transitionTimeoutRef.current) {
                 clearTimeout(transitionTimeoutRef.current);
               }
+            };
+          }, []);
+
+          // Keyboard event handler for ELK debug toggle
+          React.useEffect(() => {
+            const handleKeyDown = (event) => {
+              // Add key to sequence
+              keySequenceRef.current += event.key.toLowerCase();
+              
+              // Keep only last 10 characters to prevent memory issues
+              if (keySequenceRef.current.length > 10) {
+                keySequenceRef.current = keySequenceRef.current.slice(-10);
+              }
+              
+              // Check for "elk" sequence
+              if (keySequenceRef.current.includes('elk')) {
+                setShowELKDebug(true);
+                keySequenceRef.current = ''; // Reset sequence
+              }
+              
+              // Check for Escape key to hide debug
+              if (event.key === 'Escape') {
+                setShowELKDebug(false);
+                keySequenceRef.current = ''; // Reset sequence
+              }
+              
+              // Reset sequence after 2 seconds of inactivity
+              setTimeout(() => {
+                keySequenceRef.current = '';
+              }, 2000);
+            };
+
+            document.addEventListener('keydown', handleKeyDown);
+            return () => {
+              document.removeEventListener('keydown', handleKeyDown);
             };
           }, []);
 
@@ -1947,13 +2016,38 @@
                   const endPoint = section.endPoint;
                   const bendPoints = section.bendPoints || [];
                   
-                  // Add horizontal sections at start and end for debug visualization too
+                  // Add curved sections at start and end for debug visualization too
                   const horizontalDistance = 7.5;
-                  let pathData = `M ${startPoint.x} ${startPoint.y} L ${startPoint.x + horizontalDistance} ${startPoint.y}`;
-                  bendPoints.forEach(bp => {
-                    pathData += ` L ${bp.x} ${bp.y}`;
-                  });
-                  pathData += ` L ${endPoint.x - horizontalDistance} ${endPoint.y} L ${endPoint.x} ${endPoint.y}`;
+                  let pathData;
+                  
+                  if (bendPoints.length === 0) {
+                    // Simple curved line for straight edges with vertical offset
+                    const verticalOffset = 20;
+                    const cp1x = startPoint.x + horizontalDistance * 4;
+                    const cp1y = startPoint.y + (startPoint.y < endPoint.y ? -verticalOffset : verticalOffset);
+                    const cp2x = endPoint.x - horizontalDistance * 4;
+                    const cp2y = endPoint.y + (endPoint.y < startPoint.y ? -verticalOffset : verticalOffset);
+                    pathData = `M ${startPoint.x} ${startPoint.y} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endPoint.x} ${endPoint.y}`;
+                  } else {
+                    // Curved start and end for complex paths
+                    pathData = `M ${startPoint.x} ${startPoint.y} L ${startPoint.x + horizontalDistance} ${startPoint.y}`;
+                    bendPoints.forEach(bp => {
+                      pathData += ` L ${bp.x} ${bp.y}`;
+                    });
+                    
+                    // Mirror the start curve - curve to horizontal approach, then straight in
+                    const lastBend = bendPoints[bendPoints.length - 1] || { x: startPoint.x + horizontalDistance, y: startPoint.y };
+                    const horizontalApproachX = endPoint.x - horizontalDistance;
+                    const horizontalApproachY = endPoint.y;
+                    
+                    // Create control points for smooth curve to horizontal approach
+                    const cp1x = lastBend.x + horizontalDistance * 8; // Much bigger curve radius
+                    const cp1y = lastBend.y; // Keep at current Y initially
+                    const cp2x = horizontalApproachX - horizontalDistance * 8; // Much bigger curve radius
+                    const cp2y = horizontalApproachY; // At target Y level
+                    
+                    pathData += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${horizontalApproachX} ${horizontalApproachY} L ${endPoint.x} ${endPoint.y}`;
+                  }
                   
                   // Calculate midpoint for label
                   const midX = (startPoint.x + endPoint.x) / 2;
