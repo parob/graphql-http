@@ -492,7 +492,7 @@
             opacity: shouldDim ? 0.25 : 1,
             transform: isSelected ? 'scale(1.02)' : 'scale(1)',
             zIndex: isSelected ? 10 : shouldDim ? 1 : 5,
-            transition: 'all 0.3s ease'
+            transition: 'all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
           }
         }, [
           // Root type label (subtle header row)
@@ -523,22 +523,74 @@
             }
           }, [
             React.createElement('div', {
-              key: 'title',
+              key: 'header-content',
               style: {
-                fontWeight: 'bold',
-                fontSize: '16px'
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start'
               }
-            }, type.name),
-            React.createElement('div', {
-              key: 'kind',
-              style: {
-                fontSize: '11px',
-                opacity: 0.9,
-                textTransform: 'uppercase',
-                fontWeight: '500',
-                marginTop: '2px'
-              }
-            }, type.kind)
+            }, [
+              React.createElement('div', {
+                key: 'title-section',
+                style: { flex: 1 }
+              }, [
+                React.createElement('div', {
+                  key: 'title',
+                  style: {
+                    fontWeight: 'bold',
+                    fontSize: '16px'
+                  }
+                }, type.name),
+                React.createElement('div', {
+                  key: 'kind',
+                  style: {
+                    fontSize: '11px',
+                    opacity: 0.9,
+                    textTransform: 'uppercase',
+                    fontWeight: '500',
+                    marginTop: '2px'
+                  }
+                }, type.kind)
+              ]),
+              // Focus button
+              React.createElement('button', {
+                key: 'focus-button',
+                onClick: (e) => {
+                  e.stopPropagation();
+                  data.onFocus && data.onFocus(data.nodeId);
+                },
+                style: {
+                  background: '#0366d6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px',
+                  cursor: 'pointer',
+                  marginLeft: '8px',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px'
+                },
+                onMouseEnter: (e) => {
+                  e.target.style.background = '#0256cc';
+                  e.target.style.transform = 'scale(1.1)';
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.background = '#0366d6';
+                  e.target.style.transform = 'scale(1)';
+                }
+              }, React.createElement('svg', {
+                width: '16',
+                height: '16',
+                viewBox: '0 0 16 16',
+                fill: 'currentColor'
+              }, React.createElement('path', {
+                d: 'M11.5 7a4.499 4.499 0 11-8.998 0A4.499 4.499 0 0111.5 7zm-.82 4.74a6 6 0 111.06-1.06l3.04 3.04a.75.75 0 11-1.06 1.06l-3.04-3.04z'
+              })))
+            ])
           ]),
           
           // Fields with handles (for objects, interfaces, inputs) OR enum values (for enums)
@@ -669,9 +721,11 @@
           const [showELKDebug, setShowELKDebug] = React.useState(true);
           const [elkDebugData, setElkDebugData] = React.useState(null);
           const [selectedNodeId, setSelectedNodeId] = React.useState(null);
+          const [focusedNodeId, setFocusedNodeId] = React.useState(null);
           const [reactFlowInstance, setReactFlowInstance] = React.useState(null);
           const [nodes, setNodes] = React.useState([]);
           const [edges, setEdges] = React.useState([]);
+          const lastFocusedNodeRef = React.useRef(null);
           
           // Fetch schema data
           React.useEffect(() => {
@@ -711,7 +765,24 @@
             };
             
             applyLayout();
-          }, [schemaData, showOnlyRootTypes, selectedNodeId]);
+          }, [schemaData, showOnlyRootTypes, selectedNodeId, focusedNodeId]);
+
+          // Handle smooth animations when focusing/unfocusing
+          React.useEffect(() => {
+            if (reactFlowInstance && layoutedData.nodes.length > 0 && lastFocusedNodeRef.current !== focusedNodeId) {
+              lastFocusedNodeRef.current = focusedNodeId;
+              
+              // Only animate fitView for actual focus changes
+              const animateTimeout = setTimeout(() => {
+                reactFlowInstance.fitView({
+                  duration: 800,
+                  padding: 0.1
+                });
+              }, 200);
+              
+              return () => clearTimeout(animateTimeout);
+            }
+          }, [focusedNodeId, reactFlowInstance, layoutedData.nodes]);
 
           // Helper function to get clean type string
           const getTypeString = (type) => {
@@ -774,12 +845,14 @@
               const ports = [];
               
               // Add target port on the left side of the node
+              // Add slight offset based on node index to prevent overlapping target ports
+              const targetOffset = (nodeIndex % 5) * 4; // 0, 4, 8, 12, 16 pixel offset
               ports.push({
                 id: `${node.id}-target`,
                 width: 8,
                 height: 8,
                 x: -4,
-                y: 30
+                y: 30 + targetOffset
               });
               
               // Add source ports for ALL fields OR enum values to maintain correct ordering
@@ -795,12 +868,14 @@
                   
                   // Create a port for EVERY field: relationships, scalars, and other types
                   const fieldY = 60 + (itemIndex * 45) + 22; // Center of field - matches React Flow
+                  // Add slight vertical offset based on field index to prevent edge overlap
+                  const portOffset = (itemIndex % 3) * 3; // 0, 3, 6 pixel offset pattern
                   ports.push({
                     id: `${node.id}-field-${item.name}`,
                     width: 8,
                     height: 8,
                     x: nodeWidth - borderWidth - 10, // Adjust by observed 10px gap
-                    y: fieldY,
+                    y: fieldY + portOffset,
                     // Preserve metadata for debugging
                     isRelationship: isRelationship,
                     isScalar: isScalar,
@@ -810,12 +885,14 @@
                 } else {
                   // It's an enum value - create a dummy port for layout purposes
                   const enumY = 60 + (itemIndex * 45) + 22; // Center position - matches React Flow
+                  // Add slight vertical offset for enum ports too
+                  const enumPortOffset = (itemIndex % 3) * 3; // 0, 3, 6 pixel offset pattern
                   ports.push({
                     id: `${node.id}-enum-${item.name}`,
                     width: 8,
                     height: 8,
                     x: nodeWidth - borderWidth - 10, // Adjust by observed 10px gap
-                    y: enumY,
+                    y: enumY + enumPortOffset,
                     // Preserve metadata for debugging
                     isEnumValue: true,
                     fieldIndex: itemIndex
@@ -882,13 +959,20 @@
               layoutOptions: {
                 'elk.algorithm': 'layered',
                 'elk.direction': 'RIGHT',
-                'elk.spacing.nodeNode': '80',
-                'elk.layered.spacing.nodeNodeBetweenLayers': '150',
-                'elk.spacing.edgeNode': '50',
-                'elk.spacing.edgeEdge': '15',
-                'elk.edgeRouting': 'ORTHOGONAL',
+                'elk.spacing.nodeNode': '100',
+                'elk.layered.spacing.nodeNodeBetweenLayers': '180',
+                'elk.spacing.edgeNode': '120',
+                'elk.spacing.edgeEdge': '30',
+                'elk.edgeRouting': 'POLYLINE',
                 'elk.layered.mergeEdges': 'false',
-                'elk.layered.unnecessaryBendpoints': 'true',
+                'elk.layered.unnecessaryBendpoints': 'false',
+                'elk.layered.edgeRouting.polyline.sloppyRouting': 'false',
+                'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '2',
+                'elk.spacing.portPort': '20',
+                'elk.portAlignment.default': 'DISTRIBUTED',
+                'elk.layered.edgeRouting.multiEdgeSpacing': '25',
+                'elk.layered.edgeRouting.sloppySplineRouting': 'false',
+                'elk.separateConnectedComponents': 'false',
                 'elk.padding': '[top=50,left=50,bottom=50,right=50]',
                 'elk.portConstraints': 'FIXED_POS',
                 'elk.nodeConstraints': 'LAYER_CONSTRAINT'
@@ -1087,7 +1171,11 @@
             if (reactFlowInstance && targetNodeId) {
               const targetNode = layoutedData.nodes.find(n => n.id === targetNodeId);
               if (targetNode) {
-                reactFlowInstance.setCenter(targetNode.position.x + 160, targetNode.position.y + 100, { zoom: 1 });
+                // Smooth animation to target node without aggressive zoom
+                reactFlowInstance.setCenter(targetNode.position.x + 160, targetNode.position.y + 100, { 
+                  zoom: 0.8,
+                  duration: 600
+                });
                 setSelectedNodeId(targetNodeId);
               }
             }
@@ -1103,15 +1191,43 @@
             // Get all types that should be displayed as nodes
             const allTypes = schemaData.__schema.types.filter(shouldDisplayAsNode);
 
-            // Filter types based on showOnlyRootTypes
-            const typesToShow = showOnlyRootTypes 
-              ? allTypes.filter(type => {
-                  const isQueryType = type.name === schemaData.__schema.queryType?.name;
-                  const isMutationType = type.name === schemaData.__schema.mutationType?.name;
-                  const isSubscriptionType = type.name === schemaData.__schema.subscriptionType?.name;
-                  return isQueryType || isMutationType || isSubscriptionType;
-                })
-              : allTypes;
+            // Filter types based on showOnlyRootTypes or focusedNodeId
+            let typesToShow;
+            
+            if (focusedNodeId) {
+              // Focus mode: show only the focused node and its direct downstream types
+              const focusedTypeName = focusedNodeId.replace('type-', '');
+              const focusedType = allTypes.find(type => type.name === focusedTypeName);
+              
+              if (focusedType) {
+                const relatedTypeNames = new Set([focusedTypeName]);
+                
+                // Add only downstream types that the focused type references (not upstream)
+                if (focusedType.fields) {
+                  focusedType.fields.forEach(field => {
+                    const coreTypeName = getCoreTypeName(field.type);
+                    if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
+                      relatedTypeNames.add(coreTypeName);
+                    }
+                  });
+                }
+                
+                typesToShow = allTypes.filter(type => relatedTypeNames.has(type.name));
+              } else {
+                typesToShow = [];
+              }
+            } else if (showOnlyRootTypes) {
+              // Root types only mode
+              typesToShow = allTypes.filter(type => {
+                const isQueryType = type.name === schemaData.__schema.queryType?.name;
+                const isMutationType = type.name === schemaData.__schema.mutationType?.name;
+                const isSubscriptionType = type.name === schemaData.__schema.subscriptionType?.name;
+                return isQueryType || isMutationType || isSubscriptionType;
+              });
+            } else {
+              // Show all types
+              typesToShow = allTypes;
+            }
 
             // Create table-like nodes for each type
             typesToShow.forEach((type, typeIndex) => {
@@ -1150,6 +1266,7 @@
                   getCoreTypeName,
                   isScalarType,
                   onFieldClick,
+                  onFocus: setFocusedNodeId,
                   shouldDim,
                   isSelected
                 }
@@ -1310,6 +1427,72 @@
               height: '100%'
             }
           }, [
+            // Navigation bar
+            focusedNodeId && React.createElement('div', {
+              key: 'navigation-bar',
+              style: {
+                position: 'absolute',
+                top: '0',
+                left: '0',
+                right: '0',
+                height: '50px',
+                background: '#ffffff',
+                borderBottom: '2px solid #e1e4e8',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 20px',
+                zIndex: 1000,
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                transition: 'all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                transform: 'translateY(0)',
+                opacity: 1
+              }
+            }, [
+              React.createElement('button', {
+                key: 'back-button',
+                onClick: () => setFocusedNodeId(null),
+                style: {
+                  background: '#f6f8fa',
+                  border: '1px solid #d1d5da',
+                  borderRadius: '6px',
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: '#24292e',
+                  transition: 'all 0.2s ease'
+                },
+                onMouseEnter: (e) => {
+                  e.target.style.background = '#e1e4e8';
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.background = '#f6f8fa';
+                }
+              }, [
+                React.createElement('span', {
+                  key: 'back-arrow',
+                  style: {
+                    marginRight: '8px',
+                    fontSize: '16px'
+                  }
+                }, '←'),
+                React.createElement('span', {
+                  key: 'back-text'
+                }, 'Back to Full View')
+              ]),
+              React.createElement('div', {
+                key: 'breadcrumb',
+                style: {
+                  marginLeft: '20px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  color: '#24292e'
+                }
+              }, `Focused: ${focusedNodeId ? focusedNodeId.replace('type-', '') : ''} & Related Types`)
+            ]),
+            
             React.createElement(ReactFlow, {
               key: 'reactflow',
               nodes,
@@ -1321,7 +1504,9 @@
               style: {
                 background: '#fafbfc',
                 width: '100%',
-                height: '100%'
+                height: focusedNodeId ? 'calc(100% - 50px)' : '100%',
+                marginTop: focusedNodeId ? '50px' : '0',
+                transition: 'all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
               },
               defaultViewport: { x: 0, y: 0, zoom: 0.6 },
               minZoom: 0.1,
