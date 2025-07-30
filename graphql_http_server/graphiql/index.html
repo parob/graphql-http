@@ -568,7 +568,8 @@
                 style: {
                   opacity: isHidden ? 0 : 1,
                   visibility: isHidden ? 'hidden' : 'visible',
-                  pointerEvents: isHidden ? 'none' : 'auto'
+                  pointerEvents: isHidden ? 'none' : 'auto',
+                  zIndex: animated ? 1000 : 1 // Selected edges render on top
                 }
               }, [
                 React.createElement('path', {
@@ -581,13 +582,15 @@
                   markerEnd: markerEnd ? `url(#${markerEnd.type})` : undefined,
                   className: animated ? 'react-flow__edge-path animated' : 'react-flow__edge-path'
                 }),
-                // Only show anchor point when edge is selected/animated to avoid overlapping
-                animated && React.createElement('circle', {
+                // Only show anchor point when edge is selected OR when no edges are dimmed (no selection)
+                (animated || (style?.opacity === 1)) && React.createElement('circle', {
                   key: 'anchor-point',
                   cx: endPoint.x + 2, // 2 pixels to the right
                   cy: endPoint.y,
-                  r: 12, // 75% of current size (16 * 0.75 = 12)
-                  fill: '#0366d6', // Blue for selected edge
+                  r: animated ? 12 : 10, // Larger when selected
+                  fill: animated ? '#0366d6' : '#9e9e9e', // Blue when selected, gray otherwise
+                  stroke: animated ? 'white' : 'none', // White border when selected for better visibility
+                  strokeWidth: animated ? 1 : 0,
                   style: {
                     opacity: isHidden ? 0 : 1
                   }
