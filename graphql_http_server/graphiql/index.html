@@ -176,32 +176,20 @@
         const { getViewport, fitBounds, setViewport, zoomIn, zoomOut } = useReactFlow();
         const reactFlowViewport = getViewport();
         
-        // Function to center viewport on root types - defined early to access React Flow functions
         const centerOnRootTypes = React.useCallback(() => {
-          // Safety check - ensure React Flow functions are available
           if (typeof fitBounds !== 'function' || typeof setViewport !== 'function') {
-            console.log('React Flow functions not available yet, skipping root types centering');
             return;
           }
           
-          // Get current nodes from global cache or fallback to empty array
           const currentNodes = window._cachedLayoutData?.nodes || window._lastELKLayoutData?.nodes || [];
           
-          // Find root type nodes (Query, Mutation, Subscription)
           const rootTypeNodes = currentNodes.filter(node => 
             !node.data?.hidden && 
             node.position && 
             (node.data?.isQueryType || node.data?.isMutationType || node.data?.isSubscriptionType)
           );
           
-          console.log('centerOnRootTypes - found root nodes:', { 
-            totalNodes: currentNodes.length,
-            rootTypeNodes: rootTypeNodes.length,
-            rootTypeIds: rootTypeNodes.map(n => n.id)
-          });
-          
           if (rootTypeNodes.length === 0) {
-            console.log('No root type nodes found for centering');
             return;
           }
           
@@ -227,7 +215,6 @@
           });
           
           if (minX === Infinity) {
-            console.log('No valid coordinates found for root types bounding box');
             return;
           }
           
@@ -238,14 +225,9 @@
             height: maxY - minY + 130 // Compensate for extra top padding
           };
           
-          console.log('Centering viewport on root types:', rootBounds);
-          
-          // Use React Flow's fitBounds to center on the root types bounding box
           try {
             fitBounds(rootBounds, { duration: 800, padding: 0.15 });
-            console.log('Successfully centered on root types using fitBounds');
           } catch (error) {
-            console.log('fitBounds failed for root types, trying manual viewport calculation:', error);
             
             // Manual viewport calculation as fallback
             const containerWidth = 1000;
@@ -258,15 +240,12 @@
             const x = -(rootBounds.x + rootBounds.width / 2) * scale + containerWidth / 2;
             const y = -(rootBounds.y + rootBounds.height / 2) * scale + containerHeight / 2;
             
-            console.log('Manual viewport calculation for root types:', { x, y, zoom: scale });
             setViewport({ x, y, zoom: scale }, { duration: 600 });
           }
         }, [fitBounds, setViewport]);
         
-        // Make centerOnRootTypes available globally for keyboard handler
         React.useEffect(() => {
           window._centerOnRootTypes = centerOnRootTypes;
-          
           return () => {
             delete window._centerOnRootTypes;
           };
@@ -277,14 +256,11 @@
           const checkFocusBounds = () => {
             if (window._focusBounds) {
               const bounds = window._focusBounds;
-              console.log('Applying focus bounds:', bounds);
-              console.log('Current viewport:', reactFlowViewport);
               
               // Try both approaches - fitBounds and manual viewport calculation
               try {
                 fitBounds(bounds, { duration: 800, padding: 0.08 });
               } catch (error) {
-                console.log('fitBounds failed, trying manual viewport calculation:', error);
                 
                 // Manual viewport calculation as fallback
                 const containerWidth = 1000; // Approximate viewport width
@@ -297,7 +273,6 @@
                 const x = -(bounds.x * scale) + (containerWidth - bounds.width * scale) / 2;
                 const y = -(bounds.y * scale) + (containerHeight - bounds.height * scale) / 2;
                 
-                console.log('Manual viewport calculation:', { x, y, zoom: scale });
                 setViewport({ x, y, zoom: scale }, { duration: 400 }); // Faster fit view
               }
               
@@ -333,7 +308,6 @@
             return; // Skip the fit view logic
           }
           
-          console.log('Checking for initial fit view readiness...');
           
           // Poll for ELK layout data to be available
           const checkForELKData = () => {
@@ -349,18 +323,15 @@
                   // Auto-center on root types after initial load
                   setTimeout(() => {
                     if (window._centerOnRootTypes) {
-                      console.log('Auto-centering on root types after initial load');
                       window._centerOnRootTypes();
                     }
                   }, 800); // Delay to let the graph become visible first
                 }, 500); // Small delay to let fit view complete
               } else {
-                console.log('_smoothFitView not available yet');
                 setGraphVisible(true); // Show anyway if fit view isn't available
                 // Auto-center on root types after initial load (fallback)
                 setTimeout(() => {
                   if (window._centerOnRootTypes) {
-                    console.log('Auto-centering on root types after initial load (fallback)');
                     window._centerOnRootTypes();
                   }
                 }, 800); // Delay to let the graph become visible first
@@ -538,7 +509,6 @@
         // Restore viewport on mount if returning to tab
         React.useEffect(() => {
           if (window._persistedViewport && window._graphVisualizationEverLoaded) {
-            console.log('Restoring persisted viewport on mount:', window._persistedViewport);
             setTimeout(() => {
               setViewport(window._persistedViewport, { duration: 0 });
             }, 50); // Small delay to ensure component is ready
@@ -568,15 +538,8 @@
             const visibleNodes = currentNodes.filter(node => !node.data?.hidden && node.position);
             const visibleEdges = currentEdges.filter(edge => !edge.data?.hidden);
             
-            console.log('calculateBoundingBox:', { 
-              totalNodes: currentNodes.length,
-              totalEdges: currentEdges.length,
-              visibleNodes: visibleNodes.length, 
-              visibleEdges: visibleEdges.length 
-            });
             
             if (visibleNodes.length === 0) {
-              console.log('No visible nodes with positions for bounding box');
               return null;
             }
             
@@ -599,8 +562,6 @@
               minY = Math.min(minY, y);
               maxX = Math.max(maxX, x + width);
               maxY = Math.max(maxY, y + height);
-              
-              console.log(`Node ${node.id}: (${x}, ${y}) ${width}x${height}`);
             });
             
             // Include all edge path points to ensure edges are within bounds
@@ -627,7 +588,6 @@
             });
             
             if (minX === Infinity) {
-              console.log('No valid coordinates found for bounding box');
               return null;
             }
             
@@ -638,7 +598,6 @@
               height: maxY - minY + 130 // Compensate for extra top padding
             };
             
-            console.log('Calculated bounding box:', bounds);
             return bounds;
           };
         };
@@ -659,14 +618,8 @@
               (node.data?.isQueryType || node.data?.isMutationType || node.data?.isSubscriptionType)
             );
             
-            console.log('calculateRootTypesBoundingBox:', { 
-              totalNodes: currentNodes.length,
-              rootTypeNodes: rootTypeNodes.length,
-              rootTypeIds: rootTypeNodes.map(n => n.id)
-            });
             
             if (rootTypeNodes.length === 0) {
-              console.log('No root type nodes found for bounding box');
               return null;
             }
             
@@ -689,12 +642,9 @@
               minY = Math.min(minY, y);
               maxX = Math.max(maxX, x + width);
               maxY = Math.max(maxY, y + height);
-              
-              console.log(`Root node ${node.id}: (${x}, ${y}) ${width}x${height}`);
             });
             
             if (minX === Infinity) {
-              console.log('No valid coordinates found for root types bounding box');
               return null;
             }
             
@@ -705,7 +655,6 @@
               height: maxY - minY + 100
             };
             
-            console.log('Calculated root types bounding box:', bounds);
             return bounds;
           };
         };
@@ -1282,303 +1231,7 @@
         }
       };
 
-      // Removed React Flow edge components - now using direct SVG path rendering
-      /*
-      const CustomAvoidingEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label, labelStyle }) => {
-        // Calculate control points that avoid going through the middle area
-        const edgePath = React.useMemo(() => {
-          const xDiff = targetX - sourceX;
-          const yDiff = targetY - sourceY;
-          
-          // If nodes are on the same vertical level, route around them
-          const routeAround = Math.abs(yDiff) < 100;
-          
-          if (routeAround) {
-            // Route around nodes by adding a large vertical offset
-            const midX = sourceX + xDiff * 0.5;
-            const offsetY = yDiff > 0 ? -150 : 150; // Route above or below
-            const controlY1 = sourceY + offsetY;
-            const controlY2 = targetY + offsetY;
-            
-            return `M ${sourceX},${sourceY} C ${sourceX + 20},${controlY1} ${targetX - 20},${controlY2} ${targetX},${targetY}`;
-          } else {
-            // Use standard bezier curve for normal cases with reduced curvature
-            const [path] = getBezierPath({
-              sourceX,
-              sourceY,
-              sourcePosition,
-              targetX,
-              targetY,
-              targetPosition,
-              curvature: 0.5 // Much more curved (default is 0.25)
-            });
-            return path;
-          }
-        }, [sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition]);
 
-        return React.createElement('g', {}, [
-          React.createElement('path', {
-            key: 'path',
-            id,
-            style,
-            className: 'react-flow__edge-path',
-            d: edgePath,
-            markerEnd
-          }),
-          label && React.createElement('text', {
-            key: 'label',
-            style: {
-              ...labelStyle,
-              dominantBaseline: 'middle',
-              textAnchor: 'middle'
-            },
-            x: sourceX + (targetX - sourceX) * 0.5,
-            y: sourceY + (targetY - sourceY) * 0.5 - 10
-          }, [
-            React.createElement('textPath', {
-              key: 'textPath',
-              href: `#${id}`,
-              startOffset: '50%'
-            }, label)
-          ])
-        ]);
-      };
-      */
-
-      // Removed ELK Edge Component - now using direct SVG path rendering
-      /*
-      const createELKEdge = (elkDebugData) => {
-        return ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, data, markerEnd, animated, target }) => {
-          // Get ELK edge data if available
-          const elkEdgeData = data?.elkEdgeData;
-          const isHidden = data?.hidden;
-          
-          if (elkDebugData && elkDebugData.edges && elkEdgeData) {
-            // Find the ELK edge that matches this React Flow edge
-            const elkEdge = elkDebugData.edges.find(e => e.id === id);
-            
-            
-            if (elkEdge && elkEdge.sections && elkEdge.sections.length > 0) {
-              const section = elkEdge.sections[0];
-              const startPoint = section.startPoint;
-              const endPoint = section.endPoint;
-              const bendPoints = section.bendPoints || [];
-              
-              // Create path using ELK coordinates with rounded corners
-              let pathData = '';
-              const radius = 500; // Corner radius - extra rounded corners for natural curves
-              
-              let points = [startPoint, ...bendPoints, endPoint];
-              
-              // Check if this edge comes from the compound root node
-              const isFromCompoundRoot = id.startsWith('type-HelloWorld');
-              
-              
-              if (points.length === 2) {
-                const horizontalDistance = 15;
-                const startX = points[0].x;
-                const startY = points[0].y;
-                const endX = points[1].x;
-                const endY = points[1].y;
-                
-                const cp1x = startX + horizontalDistance + 20; // Extend horizontally first
-                const cp1y = startY;
-                const cp2x = endX - 20;
-                const cp2y = endY;
-                
-                pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endX} ${endY}`;
-                
-              } else {
-                // Path with rounded corners - add horizontal section at start
-                const horizontalDistance = isFromCompoundRoot ? 15 : 7.5; // Longer horizontal section for compound root edges
-                const startX = points[0].x;
-                const startY = points[0].y;
-                pathData = `M ${startX} ${startY} L ${startX + horizontalDistance} ${startY}`;
-                
-                
-                // Create modified points where the first and last bend points are adjusted
-                // to create smooth transitions from/to the horizontal sections
-                const modifiedPoints = [...points];
-                const endX = points[points.length - 1].x;
-                const endY = points[points.length - 1].y;
-                
-                if (modifiedPoints.length > 2) {
-                  // If there are bend points, adjust the first one to be further right
-                  // to avoid sharp curves back
-                  const firstBend = modifiedPoints[1];
-                  if (firstBend.x < startX + horizontalDistance + 50) {
-                    modifiedPoints[1] = {
-                      x: Math.max(firstBend.x, startX + horizontalDistance + 50),
-                      y: firstBend.y
-                    };
-                  }
-                  
-                  // Adjust the last bend point to be further left for smooth end transition
-                  const lastBendIndex = modifiedPoints.length - 2;
-                  const lastBend = modifiedPoints[lastBendIndex];
-                  if (lastBend.x > endX - horizontalDistance - 50) {
-                    modifiedPoints[lastBendIndex] = {
-                      x: Math.min(lastBend.x, endX - horizontalDistance - 50),
-                      y: lastBend.y
-                    };
-                  }
-                }
-                
-                // Create working points with horizontal sections at both ends
-                const workingPoints = [
-                  { x: startX + horizontalDistance, y: startY },
-                  ...modifiedPoints.slice(1, -1),
-                  { x: endX - horizontalDistance, y: endY }
-                ];
-                
-                for (let i = 1; i < workingPoints.length - 1; i++) {
-                  const prev = workingPoints[i - 1];
-                  const curr = workingPoints[i];
-                  const next = workingPoints[i + 1];
-                  
-                  // Calculate directions
-                  const dx1 = curr.x - prev.x;
-                  const dy1 = curr.y - prev.y;
-                  const dx2 = next.x - curr.x;
-                  const dy2 = next.y - curr.y;
-                  
-                  // Calculate lengths
-                  const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
-                  const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
-                  
-                  // Use different settings for first and last bend points (bigger curves)
-                  const isFirstBendPoint = (i === 1);
-                  const isLastBendPoint = (i === workingPoints.length - 2);
-                  const bendRadius = (isFirstBendPoint || isLastBendPoint) ? radius * 1.5 : radius; // 1.5x bigger radius for first and last bends
-                  const r = Math.min(bendRadius, len1 / 2, len2 / 2);
-                  
-                  // Calculate control points for smooth cubic bezier curves
-                  const cp1x = curr.x - (dx1 / len1) * r;
-                  const cp1y = curr.y - (dy1 / len1) * r;
-                  const cp2x = curr.x + (dx2 / len2) * r;
-                  const cp2y = curr.y + (dy2 / len2) * r;
-                  
-                  // Calculate smooth factor first (needed for special handling)
-                  const smoothFactor = (isFirstBendPoint || isLastBendPoint) ? 0.6 : 0.9; // Smaller smooth factor for first and last bends to make them less curvy
-                  
-                  // Special handling for first bend point after horizontal line (compound root edges)
-                  if (isFirstBendPoint && isFromCompoundRoot) {
-                    // Create one seamless curve from horizontal line end through the bend point
-                    const horizontalEndX = workingPoints[0].x;
-                    const horizontalEndY = workingPoints[0].y;
-                    
-                    // Control points for seamless transition from horizontal line through bend point
-                    const smoothCP1x = horizontalEndX + Math.min(30, Math.abs(curr.x - horizontalEndX) * 0.5);
-                    const smoothCP1y = horizontalEndY;
-                    
-                    // Use the regular curve's second control point for seamless continuation
-                    const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
-                    const ctrl2y = cp2y + (curr.y - cp2y) * smoothFactor;
-                    
-                    pathData += ` C ${smoothCP1x} ${smoothCP1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
-                    continue; // Skip the regular bend point logic for this point
-                  }
-                  const ctrl1x = cp1x + (curr.x - cp1x) * smoothFactor;
-                  const ctrl1y = cp1y + (curr.y - cp1y) * smoothFactor;
-                  const ctrl2x = cp2x + (curr.x - cp2x) * smoothFactor;
-                  const ctrl2y = cp2y + (curr.y - cp2y) * smoothFactor;
-                  
-                  // Draw line to first control point, then smooth cubic curve to second control point
-                  pathData += ` L ${cp1x} ${cp1y} C ${ctrl1x} ${ctrl1y} ${ctrl2x} ${ctrl2y} ${cp2x} ${cp2y}`;
-                }
-                
-                // Final section: straight line to end (last bend point now handles the curve)
-                const finalStartX = workingPoints[workingPoints.length - 1].x;
-                const finalStartY = workingPoints[workingPoints.length - 1].y;
-                
-                // Simple straight line to target - the last bend point now provides the curve
-                pathData += ` L ${finalStartX} ${finalStartY} L ${endX} ${endY}`;
-                
-              }
-              
-              
-              // Get target type information for anchor point color based on GraphQL type category
-              const getTargetTypeColor = () => {
-                // Extract target node ID from the edge target prop
-                if (target) {
-                  const targetTypeName = target.replace('type-', '');
-                  
-                  // Simple flat colors based on GraphQL type categories
-                  if (targetTypeName.endsWith('Enum')) {
-                    return '#9575cd'; // Flat purple for enums
-                  } else if (targetTypeName.includes('Mutable') || targetTypeName.includes('Mutation')) {
-                    return '#ff7043'; // Flat orange for mutations/mutables
-                  } else if (targetTypeName.includes('Query') || targetTypeName === 'HelloWorld') {
-                    return '#ef5350'; // Flat red for queries
-                  } else if (targetTypeName.includes('Subscription')) {
-                    return '#7e57c2'; // Flat purple for subscriptions
-                  } else {
-                    return '#64b5f6'; // Flat blue for object types
-                  }
-                }
-                return '#9e9e9e'; // Flat gray default
-              };
-
-              return React.createElement('g', {
-                style: {
-                  opacity: isHidden ? 0 : 1,
-                  visibility: isHidden ? 'hidden' : 'visible',
-                  pointerEvents: isHidden ? 'none' : 'auto',
-                  zIndex: animated ? 1000 : 1 // Selected edges render on top
-                }
-              }, [
-                React.createElement('path', {
-                  key: 'elk-path',
-                  d: pathData,
-                  style: {
-                    ...style,
-                    fill: 'none'
-                  },
-                  markerEnd: markerEnd ? `url(#${markerEnd.type})` : undefined,
-                  className: animated ? 'react-flow__edge-path animated' : 'react-flow__edge-path'
-                }),
-                // Only show anchor point when edge is selected OR when no edges are dimmed (no selection)
-                (animated || (style?.opacity === 1)) && React.createElement('circle', {
-                  key: 'anchor-point',
-                  cx: endPoint.x + 2, // 2 pixels to the right
-                  cy: endPoint.y,
-                  r: animated ? 12 : 10, // Larger when selected
-                  fill: animated ? '#0366d6' : '#d0d0d0', // Blue when selected, even lighter gray otherwise
-                  stroke: animated ? 'white' : 'none', // White border when selected for better visibility
-                  strokeWidth: animated ? 1 : 0,
-                  style: {
-                    opacity: isHidden ? 0 : 1
-                  }
-                })
-              ]);
-            }
-          }
-          
-          
-          // Fallback with subtle curves if no ELK data
-          const horizontalDistance = 7.5;
-          const verticalOffset = 8;
-          const cp1x = sourceX + horizontalDistance * 2;
-          const cp1y = sourceY + (sourceY < targetY ? -verticalOffset : verticalOffset);
-          const cp2x = targetX - horizontalDistance * 2;
-          const cp2y = targetY + (targetY < sourceY ? -verticalOffset : verticalOffset);
-          const fallbackPath = `M ${sourceX} ${sourceY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${targetX} ${targetY}`;
-          
-          return React.createElement('path', {
-            d: fallbackPath,
-            style: {
-              ...style,
-              fill: 'none',
-              opacity: isHidden ? 0 : (style?.opacity || 1),
-              visibility: isHidden ? 'hidden' : 'visible',
-              pointerEvents: isHidden ? 'none' : 'auto'
-            },
-            markerEnd: markerEnd ? `url(#${markerEnd.type})` : undefined,
-            className: animated ? 'react-flow__edge-path animated' : 'react-flow__edge-path'
-          });
-        };
-      };
-      */
 
       // Custom GraphQL Type Node Component
       const GraphQLTypeNode = ({ data }) => {
@@ -1594,7 +1247,6 @@
             e.preventDefault();
             e.stopPropagation();
             
-            console.log('Node double-click triggered for:', data.nodeId);
             
             // Trigger the zoom functionality directly
             if (window._handleNodeDoubleClick) {
@@ -1625,7 +1277,6 @@
                       width: trueWidth,
                       height: trueHeight
                     });
-                    console.log(`Measured node ${data.nodeId}: ${trueWidth.toFixed(1)} x ${trueHeight.toFixed(1)}px (zoom: ${currentZoom.toFixed(2)})`);
                   }
                 }
               });
@@ -1805,7 +1456,6 @@
                           height: rect.height,
                           width: rect.width
                         });
-                        console.log(`Measured port ${fieldKey}: x=${portX.toFixed(1)}, y=${adjustedPortY.toFixed(1)} (raw: ${portY.toFixed(1)}, zoom: ${currentZoom.toFixed(2)})`);
                       }
                     }
                   });
@@ -1851,7 +1501,6 @@
                     e.stopPropagation();
                     const targetTypeId = `type-${coreTypeName}`;
                     if (onFieldClick) {
-                      console.log('Field type clicked:', field.name, '-> target:', targetTypeId);
                       onFieldClick(targetTypeId);
                     }
                   } : undefined
@@ -1922,7 +1571,6 @@
                               height: rect.height,
                               width: rect.width
                             });
-                            console.log(`Measured argument port ${argKey}: x=${portX.toFixed(1)}, y=${adjustedPortY.toFixed(1)} (raw: ${portY.toFixed(1)}, zoom: ${currentZoom.toFixed(2)})`);
                           }
                         }
                       });
@@ -1958,7 +1606,6 @@
                       e.stopPropagation();
                       const targetTypeId = `type-${argCoreTypeName}`;
                       if (onFieldClick) {
-                        console.log('Argument type clicked:', arg.name, '-> target:', targetTypeId);
                         onFieldClick(targetTypeId);
                       }
                     } : undefined
@@ -1968,24 +1615,6 @@
             ]);
           })),
 
-          // Removed React Flow Handle - target handles are now managed by ELK ports
-          // React.createElement(Handle, {
-          //   key: 'target-handle',
-          //   type: 'target',
-          //   position: 'left',
-          //   id: `${data.nodeId}-target`,
-          //   style: {
-          //     left: '-6px',
-          //     top: '30px', // Position at the header
-          //     width: '4px',
-          //     height: '4px',
-          //     backgroundColor: 'transparent',
-          //     borderRadius: '50%',
-          //     border: 'none',
-          //     boxShadow: 'none',
-          //     opacity: 0
-          //   }
-          // })
         ]);
         
         return nodeContent;
@@ -2091,7 +1720,6 @@
             
             // Check if we already have cached layout data
             if (window._cachedLayoutData) {
-              console.log('Using cached layout data');
               setLayoutedData(window._cachedLayoutData);
               setNodes(window._cachedLayoutData.nodes);
               setEdges(window._cachedLayoutData.edges);
@@ -2125,52 +1753,19 @@
               setNodes(layouted.nodes);
               setEdges(layouted.edges);
               
-              // Let ELK handle all positioning - no React Flow centering
-              // const visibleNodes = layouted.nodes.filter(node => !node.data?.hidden);
-              // if (visibleNodes.length === 1 && reactFlowInstance) {
-              //   const singleNode = visibleNodes[0];
-              //   setTimeout(() => {
-              //     reactFlowInstance.setCenter(singleNode.position.x + 142, singleNode.position.y + 150, {
-              //       zoom: 1,
-              //       duration: 600
-              //     });
-              //   }, 200); // Much shorter delay - just enough for layout to settle
-              // }
               
               // Handle pending navigation after layout completes
               if (window.pendingNavigation) {
                 const targetNodeId = window.pendingNavigation;
                 window.pendingNavigation = null;
                 
-                console.log('Handling pending navigation to:', targetNodeId);
-                console.log('Custom viewport available: true');
-                console.log('Target node found:', !!layouted.nodes.find(n => n.id === targetNodeId));
                 
                 // Delay for 1 second to let user see the full view first
                 setTimeout(() => {
                   const targetNode = layouted.nodes.find(n => n.id === targetNodeId);
-                  // ELK controls positioning - no navigation bounds
-                  // if (targetNode && targetNode.position && reactFlowInstance) {
-                  //   console.log('Navigating to target node:', targetNode.id, 'at position:', targetNode.position);
-                  //   reactFlowInstance.fitBounds({
-                  //     x: targetNode.position.x,
-                  //     y: targetNode.position.y,
-                  //     width: 320,
-                  //     height: 200
-                  //   }, {
-                  //     padding: 0.2,
-                  //     duration: 600
-                  //   });
-                  //   setSelectedNodeId(targetNodeId);
-                  // }
                   if (targetNode) {
                     setSelectedNodeId(targetNodeId);
                   } else {
-                    console.log('Failed to navigate - missing:', {
-                      targetNode: !!targetNode,
-                      position: targetNode?.position,
-                      customViewport: true
-                    });
                   }
                 }, 1000); // 1 second delay to let user see the full view
               }
@@ -2301,11 +1896,9 @@
               
               // Center viewport on root types with 'r' key
               if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey) {
-                console.log('Root types centering triggered by R key');
                 if (window._centerOnRootTypes) {
                   window._centerOnRootTypes();
                 } else {
-                  console.log('centerOnRootTypes not available yet');
                 }
                 event.preventDefault();
               }
@@ -2378,7 +1971,6 @@
             if (waitForMeasurements) {
               // Give DOM time to render and measure nodes
               await new Promise(resolve => setTimeout(resolve, 100));
-              console.log('Node dimension measurements:', window.measuredNodeDimensions);
             }
             
             // Filter to only visible nodes and edges for ELK layout calculation
@@ -2466,8 +2058,7 @@
                     portY = 60 + rootTypeHeaderHeight + (itemIndex * 45) + 22 + 22.5;
                     const portOffset = (itemIndex % 3) * 3; // Small offset to prevent overlap
                     portY += portOffset;
-                    console.log(`Using calculated port position for ${fieldKey}: (${portX}, ${portY}) with offset`);
-                  }
+                      }
                   ports.push({
                     id: `${node.id}-field-${item.name}`,
                     width: 4,
@@ -2495,7 +2086,6 @@
                     enumPortY = 60 + (itemIndex * 45) + 22 + 22.5;
                     const enumPortOffset = (itemIndex % 3) * 3; // Small offset to prevent overlap
                     enumPortY += enumPortOffset;
-                    console.log(`Using calculated port position for enum ${enumKey}: (${enumPortX}, ${enumPortY}) with offset`);
                   }
                   ports.push({
                     id: `${node.id}-enum-${item.name}`,
@@ -2543,7 +2133,6 @@
                             argPortX = nodeWidth - 10;
                             argPortY = 60 + rootTypeHeaderHeight + (itemIndex * 45) + 22 + 22.5 + 20 + (argIndex * 12);
                           }
-                          console.log(`Using calculated argument port position for ${argKey}: (${argPortX}, ${argPortY})`);
                         }
                         
                         ports.push({
@@ -2561,7 +2150,6 @@
                           argIndex: argIndex
                         });
                         
-                        console.log(`Created argument port: ${node.id}-arg-${item.name}-${arg.name} at (${argPortX}, ${argPortY})`);
                       }
                     });
                   }
@@ -2697,7 +2285,6 @@
                 const position = rootTypePositions.get(node.id);
                 return node.ports.map(port => {
                   const updatedPortId = port.id.replace(node.id, 'compound-root');
-                  console.log(`Port ID update: ${port.id} -> ${updatedPortId}`);
                   return {
                     ...port,
                     // Update port ID to use compound-root prefix to match updated edge sources
@@ -2731,7 +2318,6 @@
             // Update edges to reference compound node instead of individual root nodes
             const updatedEdges = elkEdges.map(edge => {
               const rootNodeIds = rootNodes.map(n => n.id);
-              console.log(`Checking edge: ${edge.id}, sources: ${edge.sources}, rootNodeIds: ${rootNodeIds}`);
               const sourceIsRoot = rootNodeIds.some(id => edge.sources[0].startsWith(id));
               
               if (sourceIsRoot && compoundRootNode) {
@@ -2739,16 +2325,13 @@
                 return {
                   ...edge,
                   sources: edge.sources.map(source => {
-                    console.log(`Processing source: ${source}, checking against rootNodeIds: ${rootNodeIds}`);
                     // Find the longest matching root ID to avoid partial matches
                     const matchingRootId = rootNodeIds
                       .filter(id => source.startsWith(id))
                       .sort((a, b) => b.length - a.length)[0]; // Get the longest match
-                    console.log(`Matching root ID found: ${matchingRootId}`);
                     if (matchingRootId) {
                       // Replace the entire root node ID with compound-root
                       const updatedSource = source.replace(matchingRootId, 'compound-root');
-                      console.log(`Edge source update: ${source} -> ${updatedSource} (replaced ${matchingRootId})`);
                       return updatedSource;
                     }
                     return source;
@@ -2760,8 +2343,6 @@
             
             // Debug final compound node structure
             if (compoundRootNode) {
-              console.log('Final compound node ports:', compoundRootNode.ports.map(p => ({ id: p.id, x: p.x, y: p.y })));
-              console.log('Final updated edges:', updatedEdges.map(e => ({ id: e.id, sources: e.sources, targets: e.targets })));
             }
             
             const elkGraph = {
@@ -2794,62 +2375,6 @@
             try {
               console.log('ELK Input:', elkGraph);
               
-              // Debug port information
-              console.log('Node order in ELK input:', elkGraph.children.map(n => n.id));
-              elkGraph.children.forEach((node, nodeIndex) => {
-                if (node.id === 'compound-root') {
-                  console.log(`Compound Node ${nodeIndex}: ${node.id}:`, {
-                    width: node.width,
-                    height: node.height,
-                    childCount: node.children ? node.children.length : 0,
-                    totalPorts: node.ports ? node.ports.length : 0,
-                    algorithm: node.layoutOptions?.['elk.algorithm'],
-                    portConstraints: node.layoutOptions?.['elk.portConstraints']
-                  });
-                  if (node.ports) {
-                    console.log(`  Compound ports (${node.ports.length}):`, node.ports.map(p => ({
-                      id: p.id,
-                      x: p.x,
-                      y: p.y,
-                      isRelationship: p.isRelationship,
-                      isScalar: p.isScalar,
-                      fieldType: p.fieldType
-                    })));
-                  }
-                  if (node.children) {
-                    node.children.forEach((child, childIndex) => {
-                      console.log(`  Child ${childIndex}: ${child.id}:`, {
-                        x: child.x,
-                        y: child.y,
-                        totalPorts: child.ports ? child.ports.length : 0
-                      });
-                    });
-                  }
-                } else if (node.ports) {
-                  console.log(`Node ${nodeIndex}: ${node.id}:`, {
-                    priority: node.layoutOptions?.['elk.priority'],
-                    position: node.layoutOptions?.['elk.position'],
-                    totalPorts: node.ports.length,
-                    relationships: node.ports.filter(p => p.isRelationship).length,
-                    scalars: node.ports.filter(p => p.isScalar).length,
-                    others: node.ports.filter(p => !p.isRelationship && !p.isScalar && !p.id.includes('-target')).length,
-                    portOrder: node.ports.map(p => ({
-                      index: p.layoutOptions?.['elk.port.index'],
-                      side: p.layoutOptions?.['elk.port.side'],
-                      fieldName: p.id.split('-field-')[1] || 'target',
-                      type: p.isRelationship ? 'REL' : p.isScalar ? 'SCALAR' : p.id.includes('-target') ? 'TARGET' : 'OTHER',
-                      y: p.y
-                    }))
-                  });
-                } else {
-                  console.log(`Node ${nodeIndex}: ${node.id}:`, {
-                    priority: node.layoutOptions?.['elk.priority'],
-                    position: node.layoutOptions?.['elk.position'],
-                    totalPorts: 0,
-                    note: 'No ports'
-                  });
-                }
-              });
               
               const layoutedGraph = await elk.layout(elkGraph);
               console.log('ELK Output:', layoutedGraph);
@@ -2877,20 +2402,6 @@
                 }
               });
               
-              // Debug ELK output port positioning
-              flattenedNodes.forEach((elkNode, nodeIndex) => {
-                console.log(`ELK Output Node ${nodeIndex}: ${elkNode.id}:`, {
-                  position: `(${elkNode.x}, ${elkNode.y})`,
-                  size: `${elkNode.width}x${elkNode.height}`,
-                  portPositions: (elkNode.ports || []).map(port => ({
-                    id: port.id,
-                    position: `(${elkNode.x + port.x}, ${elkNode.y + port.y})`,
-                    originalX: port.x,
-                    originalY: port.y,
-                    side: port.layoutOptions?.['elk.port.side'] || 'unknown'
-                  }))
-                });
-              });
               
               // Store ELK debug data - preserve our custom port properties
               flattenedNodes.forEach(elkNode => {
@@ -2920,7 +2431,6 @@
               // Update layoutedGraph with flattened nodes for React Flow
               layoutedGraph.children = flattenedNodes;
               
-              console.log('All ELK edge IDs:', layoutedGraph.edges.map(e => e.id));
               setElkDebugData(layoutedGraph);
               
               // Cache ELK debug data globally
@@ -2943,7 +2453,6 @@
                       x: elkNode.x,
                       y: elkNode.y
                     };
-                    console.log(`Node ${node.id}: position (${elkNode.x}, ${elkNode.y})`);
                     return {
                       ...node,
                       position: newPosition
@@ -2964,7 +2473,6 @@
                         x: 100 + (isolatedIndex % 4) * 350, // 4 columns starting from left
                         y: maxY + 100 + Math.floor(isolatedIndex / 4) * 250 // Below ELK nodes with spacing
                       };
-                      console.log(`Node ${node.id}: Isolated positioned at (${newPosition.x}, ${newPosition.y}) below ELK max Y: ${maxY}`);
                       return {
                         ...node,
                         position: newPosition
@@ -2983,7 +2491,6 @@
                 
                 if (sourceIsRoot && compoundRootNode) {
                   // Keep the original edge ID to match ELK output, but ensure elkEdgeData is set
-                  console.log(`Keeping original edge ID for ELK matching: ${edge.id}`);
                   return {
                     ...edge,
                     data: {
@@ -3285,7 +2792,6 @@
           
           // Handle node click
           const onNodeClick = React.useCallback((event, node) => {
-            console.log('Node clicked:', node.id);
             
             // Clear any existing timeout
             if (clickTimeoutRef.current) {
@@ -3295,15 +2801,12 @@
             
             // Set a timeout to handle single click - delayed to allow double-click to cancel
             clickTimeoutRef.current = setTimeout(() => {
-              console.log('Processing single click for node:', node.id);
               
               // Use functional update to avoid dependency on selectedNodeId
               setSelectedNodeId(currentSelectedId => {
                 if (currentSelectedId === node.id) {
-                  console.log('Deselecting node');
                   return null; // Deselect if clicking the same node
                 } else {
-                  console.log('Selecting node:', node.id);
                   return node.id;
                 }
               });
@@ -3314,7 +2817,6 @@
 
           // Handle clicking on empty space to deselect
           const onPaneClick = React.useCallback(() => {
-            console.log('Pane clicked - deselecting');
             setSelectedNodeId(null);
           }, []);
           
@@ -3332,47 +2834,7 @@
             const downstreamIds = getDownstreamNodeIds(node.id);
             const nodesToFit = [node, ...layoutedData.nodes.filter(n => downstreamIds.has(n.id))];
             
-            // ELK controls all positioning - no centering or bounds fitting
-            // if (nodesToFit.length === 1) {
-            //   // If only the clicked node, center it
-            //   reactFlowInstance.setCenter(node.position.x + 150, node.position.y + 50, {
-            //     zoom: 1,
-            //     duration: 800
-            //   });
-            // } 
-            // ELK controls positioning - no bounds calculation
-            // else {
-            //   // Calculate bounds of all nodes to fit
-            //   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            //   
-            //   nodesToFit.forEach(n => {
-            //     const nodeWidth = 284; // Calculated width from earlier
-            //     const itemCount = n.data.type.fields?.length || n.data.type.inputFields?.length || n.data.type.enumValues?.length || 0;
-            //     const isRootType = n.data.isQueryType || n.data.isMutationType || n.data.isSubscriptionType;
-            //     const rootTypeHeaderHeight = isRootType ? 29 : 0; // Match the adjusted height
-            //     const nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight);
-            //     
-            //     minX = Math.min(minX, n.position.x);
-            //     minY = Math.min(minY, n.position.y);
-            //     maxX = Math.max(maxX, n.position.x + nodeWidth);
-            //     maxY = Math.max(maxY, n.position.y + nodeHeight);
-            //   });
-            //   
-            //   // Add padding
-            //   const padding = 100;
-            //   minX -= padding;
-            //   minY -= padding;
-            //   maxX += padding;
-            //   maxY += padding;
-            //   
-            //   // Fit to bounds
-            //   reactFlowInstance.fitBounds(
-            //     { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
-            //     { duration: 800 }
-            //   );
-            // }
             
-            console.log('Double-click handler executing for node:', node.id);
             
             // Immediately select the node to show highlighted descendants
             setSelectedNodeId(node.id);
@@ -3412,7 +2874,6 @@
                 return nodeIdSet.has(sourceNodeId) && !edge.data?.hidden;
               });
               
-              console.log('Including highlighted edges in focus bounds:', highlightedEdges.length);
               
               // Include edge path points in bounds
               highlightedEdges.forEach(edge => {
@@ -3445,8 +2906,6 @@
                 height: maxY - minY + (padding * 2)
               };
               
-              console.log('Double-click focus bounds:', bounds);
-              console.log('Nodes to fit:', nodesToFit.map(n => ({ id: n.id, x: n.position.x, y: n.position.y })));
               
               // Store the focus bounds for the React Flow component to use
               window._focusBounds = bounds;
@@ -3460,12 +2919,10 @@
           // Set up global double-click handler for nodes to use
           React.useEffect(() => {
             window._handleNodeDoubleClick = (nodeId) => {
-              console.log('Global double-click handler called for:', nodeId);
               
               // Find the node
               const node = layoutedData.nodes.find(n => n.id === nodeId);
               if (!node) {
-                console.log('Node not found:', nodeId);
                 return;
               }
               
@@ -3481,16 +2938,13 @@
 
           // Handle field click to center on target node (like double-click)
           const onFieldClick = React.useCallback((targetNodeId) => {
-            console.log('Field clicked:', targetNodeId, 'Focus mode:', focusedNodeId !== null);
             
             if (targetNodeId) {
               // Check if we're in focus mode
               const isInFocusMode = focusedNodeId !== null;
               
               if (isInFocusMode) {
-                console.log('In focus mode, checking if target is visible...');
                 // Always exit focus mode and navigate to target for now
-                console.log('Exiting focus mode and navigating to:', targetNodeId);
                 
                 // Store the target for navigation after layout completes
                 window.pendingNavigation = targetNodeId;
@@ -3501,7 +2955,6 @@
               // Find the target node and trigger double-click behavior to move viewport
               const targetNode = layoutedData.nodes.find(n => n.id === targetNodeId);
               if (targetNode) {
-                console.log('Moving viewport to node via field click:', targetNodeId);
                 // Trigger the same behavior as double-clicking the node
                 onNodeDoubleClick(null, targetNode);
               }
@@ -3820,7 +3273,6 @@
                             }
                           });
                           
-                          console.log(`Created argument edge: ${edgeId} from ${typeNodeId} to ${targetTypeId}`);
                         }
                       });
                     }
@@ -3863,15 +3315,6 @@
           // Remove this line since we're using state now
           // const { nodes, edges } = layoutedData;
 
-          // Node and edge types removed - using direct rendering instead
-          // const nodeTypes = {
-          //   graphqlType: GraphQLTypeNode
-          // };
-          //
-          // const edgeTypes = {
-          //   avoiding: CustomAvoidingEdge,
-          //   elk: createELKEdge(elkDebugData)
-          // };
 
           return React.createElement('div', {
             className: 'schema-visualizer',
@@ -4095,7 +3538,6 @@
                     
                     // If clicked within 1 second, zoom to root types instead
                     if (timeSinceLastClick < 1000) {
-                      console.log('Double fitview click detected - zooming to root types');
                       if (window._centerOnRootTypes) {
                         window._centerOnRootTypes();
                       }
