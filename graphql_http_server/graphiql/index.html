@@ -2466,6 +2466,12 @@
                   setPanStart({ x: e.clientX - viewport.x, y: e.clientY - viewport.y });
                 }
               },
+              onClick: (e) => {
+                // Only deselect if clicking on the viewport background (not on a node)
+                if (e.target === e.currentTarget) {
+                  setSelectedNodeId(null);
+                }
+              },
               onMouseMove: (e) => {
                 if (isPanning && panStart) {
                   setViewport({
@@ -2486,15 +2492,21 @@
               ref: (el) => {
                 if (el && !el._wheelListenerAdded) {
                   el._wheelListenerAdded = true;
+                  let wheelTimer = null;
+                  
                   el.addEventListener('wheel', (e) => {
                     e.preventDefault();
+                    
+                    // Clear any existing timer
+                    if (wheelTimer) {
+                      clearTimeout(wheelTimer);
+                    }
+                    
                     const rect = el.getBoundingClientRect();
-                    const centerX = rect.width / 2;
-                    const centerY = rect.height / 2;
                     const mouseX = e.clientX - rect.left;
                     const mouseY = e.clientY - rect.top;
                     
-                    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                    const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05; // Smoother zoom increments
                     const currentViewport = window._currentViewport || { x: -100, y: -100, zoom: 0.8 };
                     const newZoom = Math.max(0.1, Math.min(1.5, currentViewport.zoom * zoomFactor));
                     
@@ -2505,8 +2517,14 @@
                       y: mouseY - (mouseY - currentViewport.y) * zoomRatio,
                       zoom: newZoom
                     };
+                    
+                    // Update immediately for smooth feel
                     window._currentViewport = newViewport;
-                    window._setViewport && window._setViewport(newViewport);
+                    
+                    // Throttle React state updates to reduce jerkiness
+                    wheelTimer = setTimeout(() => {
+                      window._setViewport && window._setViewport(newViewport);
+                    }, 16); // ~60fps
                   }, { passive: false });
                 }
               }
@@ -2536,38 +2554,66 @@
                     zIndex: 1
                   }
                 }, [
-                  // Arrow marker definitions
+                  // Circle marker definitions
                   React.createElement('defs', { key: 'defs' }, [
                     React.createElement('marker', {
-                      key: 'arrowclosed',
-                      id: 'arrowclosed',
-                      markerWidth: 12,
-                      markerHeight: 12,
-                      refX: 9,
-                      refY: 3,
+                      key: 'circleEnd',
+                      id: 'circleEnd',
+                      markerWidth: 8,
+                      markerHeight: 8,
+                      refX: 4,
+                      refY: 4,
                       orient: 'auto',
                       markerUnits: 'strokeWidth'
                     }, [
-                      React.createElement('path', {
-                        key: 'arrow-path',
-                        d: 'M0,0 L0,6 L9,3 z',
-                        fill: '#d0d0d0'
+                      React.createElement('circle', {
+                        key: 'circle-marker',
+                        cx: 4,
+                        cy: 4,
+                        r: 3,
+                        fill: '#d0d0d0',
+                        stroke: '#d0d0d0',
+                        strokeWidth: 1
+                      })
+                    ]),
+                    React.createElement('marker', {
+                      key: 'circleEndHighlight',
+                      id: 'circleEndHighlight',
+                      markerWidth: 8,
+                      markerHeight: 8,
+                      refX: 4,
+                      refY: 4,
+                      orient: 'auto',
+                      markerUnits: 'strokeWidth'
+                    }, [
+                      React.createElement('circle', {
+                        key: 'circle-marker-highlight',
+                        cx: 4,
+                        cy: 4,
+                        r: 3,
+                        fill: '#4a90e2',
+                        stroke: '#4a90e2',
+                        strokeWidth: 1
                       })
                     ])
                   ]),
                   // Render edges as SVG paths
                   ...edges.filter(edge => !edge.data?.hidden).map(edge => {
                     if (!edge.data?.pathData) return null;
+                    
+                    // Check if this edge is descended from the selected node (outgoing only)
+                    const isHighlighted = selectedNodeId && edge.source === selectedNodeId;
+                    
                     return React.createElement('path', {
                       key: edge.id,
                       d: edge.data.pathData,
-                      stroke: '#d0d0d0',
-                      strokeWidth: 2,
+                      stroke: isHighlighted ? '#4a90e2' : '#d0d0d0',
+                      strokeWidth: isHighlighted ? 3 : 2,
                       fill: 'none',
-                      markerEnd: 'url(#arrowclosed)',
+                      markerEnd: isHighlighted ? 'url(#circleEndHighlight)' : 'url(#circleEnd)',
                       opacity: edgesFading ? 0.3 : 1,
                       style: {
-                        transition: 'opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                        transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
                       }
                     });
                   })
@@ -2701,9 +2747,27 @@
               }, [
                 React.createElement('button', {
                   key: 'zoom-in',
-                  onClick: () => {
-                    const newZoom = Math.min(1.5, viewport.zoom * 1.2);
-                    setViewport({ ...viewport, zoom: newZoom });
+                  onClick: (e) => {
+                    const zoomFactor = 1.2;
+                    const newZoom = Math.min(1.5, viewport.zoom * zoomFactor);
+                    
+                    // Get viewport center for zooming
+                    const viewportEl = e.target.closest('[key="custom-viewport"]') || document.querySelector('[style*="position: relative"][style*="width: 100%"]');
+                    if (viewportEl) {
+                      const rect = viewportEl.getBoundingClientRect();
+                      const centerX = rect.width / 2;
+                      const centerY = rect.height / 2;
+                      
+                      // Zoom towards center
+                      const zoomRatio = newZoom / viewport.zoom;
+                      setViewport({
+                        x: centerX - (centerX - viewport.x) * zoomRatio,
+                        y: centerY - (centerY - viewport.y) * zoomRatio,
+                        zoom: newZoom
+                      });
+                    } else {
+                      setViewport({ ...viewport, zoom: newZoom });
+                    }
                   },
                   style: {
                     width: '32px',
@@ -2719,9 +2783,27 @@
                 }, '+'),
                 React.createElement('button', {
                   key: 'zoom-out',
-                  onClick: () => {
-                    const newZoom = Math.max(0.1, viewport.zoom * 0.8);
-                    setViewport({ ...viewport, zoom: newZoom });
+                  onClick: (e) => {
+                    const zoomFactor = 0.8;
+                    const newZoom = Math.max(0.1, viewport.zoom * zoomFactor);
+                    
+                    // Get viewport center for zooming
+                    const viewportEl = e.target.closest('[key="custom-viewport"]') || document.querySelector('[style*="position: relative"][style*="width: 100%"]');
+                    if (viewportEl) {
+                      const rect = viewportEl.getBoundingClientRect();
+                      const centerX = rect.width / 2;
+                      const centerY = rect.height / 2;
+                      
+                      // Zoom towards center
+                      const zoomRatio = newZoom / viewport.zoom;
+                      setViewport({
+                        x: centerX - (centerX - viewport.x) * zoomRatio,
+                        y: centerY - (centerY - viewport.y) * zoomRatio,
+                        zoom: newZoom
+                      });
+                    } else {
+                      setViewport({ ...viewport, zoom: newZoom });
+                    }
                   },
                   style: {
                     width: '32px',
