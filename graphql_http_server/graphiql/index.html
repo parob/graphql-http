@@ -965,7 +965,7 @@
           }),
           
           // Bounding Box Label
-          boundingBox && React.createElement('div', {
+          boundingBox && showELKDebug && React.createElement('div', {
             key: 'bounding-box-label',
             style: {
               position: 'absolute',
@@ -1878,7 +1878,7 @@
           const [schemaData, setSchemaData] = React.useState(null);
           const [showOnlyRootTypes, setShowOnlyRootTypes] = React.useState(false);
           const [layoutedData, setLayoutedData] = React.useState({ nodes: [], edges: [] });
-          const [showELKDebug, setShowELKDebug] = React.useState(true); // Show by default for debugging
+          const [showELKDebug, setShowELKDebug] = React.useState(false); // Hidden by default
           const [elkDebugData, setElkDebugData] = React.useState(null);
           const [selectedNodeId, setSelectedNodeId] = React.useState(() => {
             // Restore previous selection if returning to tab
