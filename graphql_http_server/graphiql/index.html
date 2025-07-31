@@ -111,6 +111,17 @@
       .react-flow__attribution {
         display: none !important;
       }
+      
+      /* Remove CSS transitions - React Flow handles animations internally */
+      
+      /* Style the control buttons */
+      .react-flow__controls button {
+        transition: all 0.2s ease;
+      }
+      
+      .react-flow__controls button:hover {
+        transform: scale(1.1);
+      }
     </style>
     <!-- React Flow CSS removed - using custom styles -->
     <!--
@@ -161,8 +172,195 @@
 
       // Custom Graph Node - contains our entire graph visualization
       const GraphVisualizationNode = ({ data }) => {
-        const { getViewport } = useReactFlow();
+        const { getViewport, fitBounds, setViewport, zoomIn, zoomOut } = useReactFlow();
         const reactFlowViewport = getViewport();
+        
+        // Handle focus bounds changes
+        React.useEffect(() => {
+          const checkFocusBounds = () => {
+            if (window._focusBounds) {
+              const bounds = window._focusBounds;
+              console.log('Applying focus bounds:', bounds);
+              console.log('Current viewport:', reactFlowViewport);
+              
+              // Try both approaches - fitBounds and manual viewport calculation
+              try {
+                fitBounds(bounds, { duration: 800, padding: 0.1 });
+              } catch (error) {
+                console.log('fitBounds failed, trying manual viewport calculation:', error);
+                
+                // Manual viewport calculation as fallback
+                const containerWidth = 1000; // Approximate viewport width
+                const containerHeight = 800; // Approximate viewport height
+                
+                const scaleX = containerWidth / bounds.width;
+                const scaleY = containerHeight / bounds.height;
+                const scale = Math.min(scaleX, scaleY, 1.5); // Max zoom of 1.5x
+                
+                const x = -(bounds.x * scale) + (containerWidth - bounds.width * scale) / 2;
+                const y = -(bounds.y * scale) + (containerHeight - bounds.height * scale) / 2;
+                
+                console.log('Manual viewport calculation:', { x, y, zoom: scale });
+                setViewport({ x, y, zoom: scale }, { duration: 800 });
+              }
+              
+              // Clear the bounds after applying
+              delete window._focusBounds;
+            }
+          };
+          
+          // Check immediately and set up interval
+          checkFocusBounds();
+          const interval = setInterval(checkFocusBounds, 100);
+          
+          return () => clearInterval(interval);
+        }, [fitBounds]);
+        
+        // Initial fit view on component mount
+        React.useEffect(() => {
+          // Use the React Flow hook to fit view on initial load
+          const timer = setTimeout(() => {
+            try {
+              // Use the fitBounds function with the full graph bounds
+              const nodes = data.nodes || [];
+              if (nodes.length > 0) {
+                // Calculate bounds from all nodes
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                nodes.forEach(node => {
+                  const x = node.position?.x || 0;
+                  const y = node.position?.y || 0;
+                  const width = node.data?.width || 200;
+                  const height = node.data?.height || 100;
+                  
+                  minX = Math.min(minX, x);
+                  minY = Math.min(minY, y);
+                  maxX = Math.max(maxX, x + width);
+                  maxY = Math.max(maxY, y + height);
+                });
+                
+                if (minX !== Infinity) {
+                  const bounds = {
+                    x: minX - 50,
+                    y: minY - 50,
+                    width: maxX - minX + 100,
+                    height: maxY - minY + 100
+                  };
+                  
+                  fitBounds(bounds, { duration: 800, padding: 0.1 });
+                }
+              }
+            } catch (error) {
+              console.log('Initial fit view failed:', error);
+            }
+          }, 1000); // Give more time for layout to complete
+          
+          return () => clearTimeout(timer);
+        }, []); // Empty dependency array means this runs only once on mount
+        
+        // Set up smooth zoom handlers using React Flow's built-in animations
+        React.useEffect(() => {
+          // Override default zoom behavior with React Flow's smooth transitions
+          window._smoothZoomIn = () => {
+            const current = getViewport();
+            const newZoom = Math.min(2, current.zoom * 1.5);
+            
+            // Get actual container dimensions
+            const container = document.querySelector('.react-flow');
+            const containerWidth = container ? container.clientWidth : 1000;
+            const containerHeight = container ? container.clientHeight : 800;
+            const centerX = containerWidth / 2;
+            const centerY = containerHeight / 2;
+            
+            // Calculate world coordinates of center point
+            const worldCenterX = (centerX - current.x) / current.zoom;
+            const worldCenterY = (centerY - current.y) / current.zoom;
+            
+            // Calculate new position to keep center point in same place after zoom
+            const newX = centerX - (worldCenterX * newZoom);
+            const newY = centerY - (worldCenterY * newZoom);
+            
+            setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 300 });
+          };
+          
+          window._smoothZoomOut = () => {
+            const current = getViewport();
+            const newZoom = Math.max(0.1, current.zoom / 1.5);
+            
+            // Get actual container dimensions
+            const container = document.querySelector('.react-flow');
+            const containerWidth = container ? container.clientWidth : 1000;
+            const containerHeight = container ? container.clientHeight : 800;
+            const centerX = containerWidth / 2;
+            const centerY = containerHeight / 2;
+            
+            // Calculate world coordinates of center point
+            const worldCenterX = (centerX - current.x) / current.zoom;
+            const worldCenterY = (centerY - current.y) / current.zoom;
+            
+            // Calculate new position to keep center point in same place after zoom
+            const newX = centerX - (worldCenterX * newZoom);
+            const newY = centerY - (worldCenterY * newZoom);
+            
+            setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 300 });
+          };
+          
+          window._smoothFitView = () => {
+            console.log('Smooth Fit View called, nodes:', data.nodes);
+            
+            // Calculate actual bounds from all visible nodes
+            const nodes = data.nodes || [];
+            const visibleNodes = nodes.filter(node => !node.data?.hidden);
+            
+            console.log('Visible nodes for fit view:', visibleNodes.length, visibleNodes.map(n => ({ id: n.id, position: n.position })));
+            
+            if (visibleNodes.length > 0) {
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              
+              visibleNodes.forEach(node => {
+                const x = node.position?.x || 0;
+                const y = node.position?.y || 0;
+                
+                // Try to get measured dimensions from window globals first
+                let width = 200, height = 100; // defaults
+                if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(node.id)) {
+                  const measured = window.measuredNodeDimensions.get(node.id);
+                  width = measured.width;
+                  height = measured.height;
+                  console.log(`Using measured dimensions for ${node.id}: ${width}x${height}`);
+                } else {
+                  console.log(`Using default dimensions for ${node.id}: ${width}x${height}`);
+                }
+                
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x + width);
+                maxY = Math.max(maxY, y + height);
+              });
+              
+              if (minX !== Infinity) {
+                const bounds = {
+                  x: minX - 50,
+                  y: minY - 50,
+                  width: maxX - minX + 100,
+                  height: maxY - minY + 100
+                };
+                
+                console.log('Calculated fit bounds:', bounds);
+                fitBounds(bounds, { duration: 800, padding: 0.1 });
+              } else {
+                console.log('No valid bounds calculated for fit view');
+              }
+            } else {
+              console.log('No visible nodes found for fit view');
+            }
+          };
+          
+          return () => {
+            delete window._smoothZoomIn;
+            delete window._smoothZoomOut;
+            delete window._smoothFitView;
+          };
+        }, [getViewport, setViewport, fitBounds]);
         
         const {
           nodes,
@@ -313,10 +511,7 @@
                 e.stopPropagation();
                 onNodeClick(null, node);
               },
-              onDoubleClick: (e) => {
-                e.stopPropagation();
-                onNodeDoubleClick(null, node);
-              },
+              // Double-click now handled by individual GraphQLTypeNode components
               style: {
                 position: 'absolute',
                 left: `${node.position.x}px`,
@@ -939,6 +1134,17 @@
         const isRootType = isQueryType || isMutationType || isSubscriptionType;
         
         const nodeContent = React.createElement('div', {
+          onDoubleClick: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('Node double-click triggered for:', data.nodeId);
+            
+            // Trigger the zoom functionality directly
+            if (window._handleNodeDoubleClick) {
+              window._handleNodeDoubleClick(data.nodeId);
+            }
+          },
           ref: (el) => {
             if (el && !data.hidden) {
               // Use requestAnimationFrame to ensure measurement happens after layout
@@ -2321,9 +2527,81 @@
             //   );
             // }
             
-            // Also select the node
+            console.log('Double-click handler executing for node:', node.id);
+            
+            // Immediately select the node to show highlighted descendants
             setSelectedNodeId(node.id);
+            
+            // Calculate bounds immediately (no need to wait)
+            setTimeout(() => {
+              // Get all downstream nodes (highlighted descendants)
+              const downstreamIds = getDownstreamNodeIds(node.id);
+              const nodesToFit = [node, ...layoutedData.nodes.filter(n => downstreamIds.has(n.id))];
+              
+              if (nodesToFit.length === 0) return;
+              
+              // Calculate bounds of all nodes to fit
+              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              
+              nodesToFit.forEach(n => {
+                // Get actual measured dimensions if available
+                let nodeWidth = 350;
+                let nodeHeight = 200;
+                
+                if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(n.id)) {
+                  const measured = window.measuredNodeDimensions.get(n.id);
+                  nodeWidth = measured.width;
+                  nodeHeight = measured.height;
+                }
+                
+                minX = Math.min(minX, n.position.x);
+                minY = Math.min(minY, n.position.y);
+                maxX = Math.max(maxX, n.position.x + nodeWidth);
+                maxY = Math.max(maxY, n.position.y + nodeHeight);
+              });
+              
+              // Add padding around the focused area
+              const padding = 100;
+              const bounds = {
+                x: minX - padding,
+                y: minY - padding, 
+                width: maxX - minX + (padding * 2),
+                height: maxY - minY + (padding * 2)
+              };
+              
+              console.log('Double-click focus bounds:', bounds);
+              console.log('Nodes to fit:', nodesToFit.map(n => ({ id: n.id, x: n.position.x, y: n.position.y })));
+              
+              // Store the focus bounds for the React Flow component to use
+              window._focusBounds = bounds;
+              
+              // Trigger a re-render to apply the focus
+              setIsTransitioning(true);
+              setTimeout(() => setIsTransitioning(false), 800);
+            }, 100);
           }, [layoutedData.nodes, getDownstreamNodeIds]);
+          
+          // Set up global double-click handler for nodes to use
+          React.useEffect(() => {
+            window._handleNodeDoubleClick = (nodeId) => {
+              console.log('Global double-click handler called for:', nodeId);
+              
+              // Find the node
+              const node = layoutedData.nodes.find(n => n.id === nodeId);
+              if (!node) {
+                console.log('Node not found:', nodeId);
+                return;
+              }
+              
+              // Call the existing double-click logic
+              onNodeDoubleClick(null, node);
+            };
+            
+            // Cleanup
+            return () => {
+              delete window._handleNodeDoubleClick;
+            };
+          }, [layoutedData.nodes, onNodeDoubleClick]);
 
           // Handle field click to center on target node
           const onFieldClick = React.useCallback((targetNodeId) => {
@@ -2750,19 +3028,133 @@
               nodeTypes,
               fitView: true,
               fitViewOptions: {
-                padding: 0.1
+                padding: 0.1,
+                duration: 800
               },
               defaultViewport: { x: 0, y: 0, zoom: 0.8 },
               minZoom: 0.1,
               maxZoom: 2,
+              zoomOnDoubleClick: false, // Disable React Flow's double-click zoom
+              panOnDrag: true,
+              zoomOnScroll: true,
+              zoomActivationKeyCode: null, // Disable zoom activation key
+              deleteKeyCode: null, // Disable delete key
+              selectionKeyCode: null, // Disable selection key
+              multiSelectionKeyCode: null, // Disable multi-selection key
+              translateExtent: [[-Infinity, -Infinity], [Infinity, Infinity]],
+              nodeExtent: [[-Infinity, -Infinity], [Infinity, Infinity]],
               style: {
                 background: '#fafbfc'
               }
             }, [
-              React.createElement(Controls, {
-                key: 'controls',
-                showInteractive: false
-              })
+              // Custom smooth controls positioned in bottom-left
+              React.createElement('div', {
+                key: 'custom-controls',
+                style: {
+                  position: 'absolute',
+                  bottom: '20px',
+                  left: '20px',
+                  zIndex: 1000,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px'
+                }
+              }, [
+                // Zoom In Button
+                React.createElement('button', {
+                  key: 'zoom-in',
+                  onClick: () => {
+                    if (window._smoothZoomIn) {
+                      window._smoothZoomIn();
+                    }
+                  },
+                  style: {
+                    width: '40px',
+                    height: '40px',
+                    border: '1px solid #d1d5da',
+                    borderRadius: '4px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    color: '#24292e',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                    transition: 'all 0.2s ease'
+                  },
+                  onMouseEnter: (e) => {
+                    e.target.style.background = 'rgba(225, 228, 232, 0.95)';
+                  },
+                  onMouseLeave: (e) => {
+                    e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                  }
+                }, '+'),
+                
+                // Zoom Out Button
+                React.createElement('button', {
+                  key: 'zoom-out',
+                  onClick: () => {
+                    if (window._smoothZoomOut) {
+                      window._smoothZoomOut();
+                    }
+                  },
+                  style: {
+                    width: '40px',
+                    height: '40px',
+                    border: '1px solid #d1d5da',
+                    borderRadius: '4px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    color: '#24292e',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                    transition: 'all 0.2s ease'
+                  },
+                  onMouseEnter: (e) => {
+                    e.target.style.background = 'rgba(225, 228, 232, 0.95)';
+                  },
+                  onMouseLeave: (e) => {
+                    e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                  }
+                }, '−'),
+                
+                // Fit View Button
+                React.createElement('button', {
+                  key: 'fit-view',
+                  onClick: () => {
+                    if (window._smoothFitView) {
+                      window._smoothFitView();
+                    }
+                  },
+                  style: {
+                    width: '40px',
+                    height: '40px',
+                    border: '1px solid #d1d5da',
+                    borderRadius: '4px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '14px',
+                    color: '#24292e',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                    transition: 'all 0.2s ease'
+                  },
+                  onMouseEnter: (e) => {
+                    e.target.style.background = 'rgba(225, 228, 232, 0.95)';
+                  },
+                  onMouseLeave: (e) => {
+                    e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                  }
+                }, '⌘')
+              ])
             ]),
             
             // ELK Debug legend - positioned relative to viewport, not the custom node
