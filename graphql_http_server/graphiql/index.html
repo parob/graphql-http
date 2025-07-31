@@ -3926,12 +3926,26 @@
                 React.createElement('button', {
                   key: 'fit-view',
                   onClick: () => {
-                    // Clear any selection when fit view is clicked
-                    if (setSelectedNodeId) {
-                      setSelectedNodeId(null);
-                    }
-                    if (window._smoothFitView) {
-                      window._smoothFitView();
+                    const now = Date.now();
+                    const lastFitViewTime = window._lastFitViewClickTime || 0;
+                    const timeSinceLastClick = now - lastFitViewTime;
+                    window._lastFitViewClickTime = now;
+                    
+                    // If clicked within 1 second, zoom to root types instead
+                    if (timeSinceLastClick < 1000) {
+                      console.log('Double fitview click detected - zooming to root types');
+                      if (window._centerOnRootTypes) {
+                        window._centerOnRootTypes();
+                      }
+                    } else {
+                      // Normal fitview behavior
+                      // Clear any selection when fit view is clicked
+                      if (setSelectedNodeId) {
+                        setSelectedNodeId(null);
+                      }
+                      if (window._smoothFitView) {
+                        window._smoothFitView();
+                      }
                     }
                   },
                   style: {
