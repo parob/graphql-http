@@ -201,7 +201,7 @@
                 const y = -(bounds.y * scale) + (containerHeight - bounds.height * scale) / 2;
                 
                 console.log('Manual viewport calculation:', { x, y, zoom: scale });
-                setViewport({ x, y, zoom: scale }, { duration: 800 });
+                setViewport({ x, y, zoom: scale }, { duration: 400 }); // Faster fit view
               }
               
               // Clear the bounds after applying
@@ -218,29 +218,50 @@
         
         // Initial fit view on component mount - wait for ELK layout data
         React.useEffect(() => {
-          if (!window._initialFitViewDone) {
-            console.log('Checking for initial fit view readiness...');
-            
-            // Poll for ELK layout data to be available
-            const checkForELKData = () => {
-              if (window._lastELKLayoutData && window._lastELKLayoutData.nodes && window._lastELKLayoutData.nodes.length > 0) {
-                console.log('ELK data available, running initial fit view');
-                window._initialFitViewDone = true;
-                
-                if (window._smoothFitView) {
-                  window._smoothFitView();
-                } else {
-                  console.log('_smoothFitView not available yet');
-                }
-              } else {
-                console.log('ELK data not ready yet, will check again...');
-                setTimeout(checkForELKData, 500); // Check again in 500ms
-              }
-            };
-            
-            // Start checking after a short delay to let ELK run
-            setTimeout(checkForELKData, 1000);
+          // Always start with loading screen to hide any initial movement
+          setGraphVisible(false);
+          
+          // Check if this is the very first load of the visualization
+          const isFirstLoad = !window._graphVisualizationEverLoaded;
+          
+          if (isFirstLoad) {
+            // First time ever - do initial fit view
+            window._graphVisualizationEverLoaded = true;
+            window._initialFitViewDone = false;
+          } else {
+            // Returning to tab - shorter delay since no layout calculation needed
+            setTimeout(() => {
+              setGraphVisible(true);
+            }, 800); // Short delay to hide any movement during tab switch
+            return; // Skip the fit view logic
           }
+          
+          console.log('Checking for initial fit view readiness...');
+          
+          // Poll for ELK layout data to be available
+          const checkForELKData = () => {
+            if (window._lastELKLayoutData && window._lastELKLayoutData.nodes && window._lastELKLayoutData.nodes.length > 0) {
+              console.log('ELK data available, running initial fit view');
+              window._initialFitViewDone = true;
+              
+              if (window._smoothFitView) {
+                window._smoothFitView();
+                // Show the graph after fit view completes
+                setTimeout(() => {
+                  setGraphVisible(true);
+                }, 500); // Small delay to let fit view complete
+              } else {
+                console.log('_smoothFitView not available yet');
+                setGraphVisible(true); // Show anyway if fit view isn't available
+              }
+            } else {
+              console.log('ELK data not ready yet, will check again...');
+              setTimeout(checkForELKData, 100); // Check again in 100ms - faster polling
+            }
+          };
+          
+          // Start checking after a short delay to let ELK run
+          setTimeout(checkForELKData, 300); // Faster initial check
         }, []); // Only run once on mount
         
         // Set up smooth zoom handlers using React Flow's built-in animations
@@ -265,7 +286,7 @@
             const newX = centerX - (worldCenterX * newZoom);
             const newY = centerY - (worldCenterY * newZoom);
             
-            setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 300 });
+            setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 200 }); // Faster zoom
           };
           
           window._smoothZoomOut = () => {
@@ -287,7 +308,7 @@
             const newX = centerX - (worldCenterX * newZoom);
             const newY = centerY - (worldCenterY * newZoom);
             
-            setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 300 });
+            setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 200 }); // Faster zoom
           };
           
           // Store reference to get latest ELK layout data
@@ -377,7 +398,7 @@
               scaleY: scaleY.toFixed(3)
             });
             
-            setViewport({ x, y, zoom: scale }, { duration: 800 });
+            setViewport({ x, y, zoom: scale }, { duration: 400 }); // Faster fit view
           };
           
           return () => {
@@ -397,7 +418,8 @@
           onNodeDoubleClick,
           showELKDebug,
           elkDebugData,
-          edgesFading
+          edgesFading,
+          setGraphVisible
         } = data;
         
         // Create a dynamic bounding box calculator that accesses current data
@@ -1595,6 +1617,7 @@
       // Complete GraphQL Schema Visualizer Plugin using React Flow
       const schemaVisualizerPlugin = {
         title: 'Graph',
+        key: 'schema-visualizer', // Stable key to prevent remounting
         icon: () => React.createElement('svg', {
           width: '16',
           height: '16',
@@ -1623,8 +1646,16 @@
           const [layoutedData, setLayoutedData] = React.useState({ nodes: [], edges: [] });
           const [showELKDebug, setShowELKDebug] = React.useState(true); // Show by default for debugging
           const [elkDebugData, setElkDebugData] = React.useState(null);
-          const [selectedNodeId, setSelectedNodeId] = React.useState(null);
+          const [selectedNodeId, setSelectedNodeId] = React.useState(() => {
+            // Restore previous selection if returning to tab
+            return window._persistedSelectedNodeId || null;
+          });
           const [focusedNodeId, setFocusedNodeId] = React.useState(null);
+          
+          // Persist selected node ID when it changes
+          React.useEffect(() => {
+            window._persistedSelectedNodeId = selectedNodeId;
+          }, [selectedNodeId]);
           // Removed React Flow instance - using custom viewport
           // React Flow handles viewport state internally, so we don't need these
           // const [viewport, setViewport] = React.useState({ x: -100, y: -100, zoom: 0.8 });
@@ -1634,6 +1665,7 @@
           const [edges, setEdges] = React.useState([]);
           const [edgesFading, setEdgesFading] = React.useState(false);
           const [isTransitioning, setIsTransitioning] = React.useState(false);
+          const [graphVisible, setGraphVisible] = React.useState(false); // Start hidden
           const lastFocusedNodeRef = React.useRef(null);
           const transitionTimeoutRef = React.useRef(null);
           const viewportStateRef = React.useRef(null);
@@ -1641,6 +1673,14 @@
           
           // Fetch schema data
           React.useEffect(() => {
+            // Check if we already have cached schema data
+            if (window._cachedSchemaData) {
+              console.log('Using cached schema data');
+              setSchemaData(window._cachedSchemaData);
+              setLoading(false);
+              return;
+            }
+            
             const fetchSchema = async () => {
               try {
                 const introspectionQuery = getIntrospectionQuery();
@@ -1653,6 +1693,8 @@
                   throw new Error(result.errors[0].message);
                 }
                 
+                // Cache the schema data globally
+                window._cachedSchemaData = result.data;
                 setSchemaData(result.data);
                 setLoading(false);
               } catch (err) {
@@ -1668,6 +1710,15 @@
           React.useEffect(() => {
             if (!schemaData) return;
             
+            // Check if we already have cached layout data
+            if (window._cachedLayoutData) {
+              console.log('Using cached layout data');
+              setLayoutedData(window._cachedLayoutData);
+              setNodes(window._cachedLayoutData.nodes);
+              setEdges(window._cachedLayoutData.edges);
+              return;
+            }
+            
             const applyLayout = async () => {
               const { nodes, edges } = generateCompleteFlowData();
               
@@ -1680,6 +1731,10 @@
               
               // Second pass: apply ELK layout with measured widths
               const layouted = await getLayoutedElements(nodes, edges, true);
+              
+              // Cache the layout data globally
+              window._cachedLayoutData = layouted;
+              
               setLayoutedData(layouted);
               setNodes(layouted.nodes);
               setEdges(layouted.edges);
@@ -2611,22 +2666,29 @@
           const onNodeClick = React.useCallback((event, node) => {
             console.log('Node clicked:', node.id);
             
-            // Handle single click immediately - no delay needed
-            // Use functional update to avoid dependency on selectedNodeId
-            setSelectedNodeId(currentSelectedId => {
-              if (currentSelectedId === node.id) {
-                console.log('Deselecting node');
-                return null; // Deselect if clicking the same node
-              } else {
-                console.log('Selecting node:', node.id);
-                return node.id;
-              }
-            });
-            
-            // Set a flag to prevent double-click from re-selecting after deselection
-            clickTimeoutRef.current = setTimeout(() => {
+            // Clear any existing timeout
+            if (clickTimeoutRef.current) {
+              clearTimeout(clickTimeoutRef.current);
               clickTimeoutRef.current = null;
-            }, 300); // Slightly longer window for double-click detection
+            }
+            
+            // Set a timeout to handle single click - delayed to allow double-click to cancel
+            clickTimeoutRef.current = setTimeout(() => {
+              console.log('Processing single click for node:', node.id);
+              
+              // Use functional update to avoid dependency on selectedNodeId
+              setSelectedNodeId(currentSelectedId => {
+                if (currentSelectedId === node.id) {
+                  console.log('Deselecting node');
+                  return null; // Deselect if clicking the same node
+                } else {
+                  console.log('Selecting node:', node.id);
+                  return node.id;
+                }
+              });
+              
+              clickTimeoutRef.current = null;
+            }, 250); // 250ms delay to wait for potential double-click
           }, []); // No dependencies needed now
 
           // Handle clicking on empty space to deselect
@@ -3196,6 +3258,22 @@
               }, 'Back')
             ]),
             
+            // Loading indicator when graph is hidden
+            !graphVisible && React.createElement('div', {
+              key: 'loading-indicator',
+              style: {
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                color: '#656d76',
+                fontSize: '16px',
+                fontFamily: 'SF Pro Display, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                opacity: 0.7,
+                zIndex: 1000
+              }
+            }, 'Loading schema visualization...'),
+            
             // React Flow with our custom graph as a single node
             React.createElement(ReactFlow, {
               key: 'react-flow',
@@ -3212,7 +3290,8 @@
                   onNodeDoubleClick,
                   showELKDebug,
                   elkDebugData,
-                  edgesFading
+                  edgesFading,
+                  setGraphVisible
                 },
                 draggable: false,
                 selectable: false
@@ -3222,7 +3301,7 @@
               fitView: true,
               fitViewOptions: {
                 padding: 0.1,
-                duration: 800
+                duration: 400 // Faster initial fit view
               },
               defaultViewport: { x: 0, y: 0, zoom: 0.8 },
               minZoom: 0.1,
@@ -3240,7 +3319,9 @@
               translateExtent: [[-Infinity, -Infinity], [Infinity, Infinity]],
               nodeExtent: [[-Infinity, -Infinity], [Infinity, Infinity]],
               style: {
-                background: '#fafbfc'
+                background: '#fafbfc',
+                opacity: graphVisible ? 1 : 0,
+                transition: 'opacity 0.6s ease-in-out'
               }
             }, [
               // Custom smooth controls positioned in bottom-left
