@@ -216,46 +216,32 @@
           return () => clearInterval(interval);
         }, [fitBounds]);
         
-        // Initial fit view on component mount
+        // Initial fit view on component mount - wait for ELK layout data
         React.useEffect(() => {
-          // Use the React Flow hook to fit view on initial load
-          const timer = setTimeout(() => {
-            try {
-              // Use the fitBounds function with the full graph bounds
-              const nodes = data.nodes || [];
-              if (nodes.length > 0) {
-                // Calculate bounds from all nodes
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                nodes.forEach(node => {
-                  const x = node.position?.x || 0;
-                  const y = node.position?.y || 0;
-                  const width = node.data?.width || 200;
-                  const height = node.data?.height || 100;
-                  
-                  minX = Math.min(minX, x);
-                  minY = Math.min(minY, y);
-                  maxX = Math.max(maxX, x + width);
-                  maxY = Math.max(maxY, y + height);
-                });
+          if (!window._initialFitViewDone) {
+            console.log('Checking for initial fit view readiness...');
+            
+            // Poll for ELK layout data to be available
+            const checkForELKData = () => {
+              if (window._lastELKLayoutData && window._lastELKLayoutData.nodes && window._lastELKLayoutData.nodes.length > 0) {
+                console.log('ELK data available, running initial fit view');
+                window._initialFitViewDone = true;
                 
-                if (minX !== Infinity) {
-                  const bounds = {
-                    x: minX - 50,
-                    y: minY - 50,
-                    width: maxX - minX + 100,
-                    height: maxY - minY + 100
-                  };
-                  
-                  fitBounds(bounds, { duration: 800, padding: 0.1 });
+                if (window._smoothFitView) {
+                  window._smoothFitView();
+                } else {
+                  console.log('_smoothFitView not available yet');
                 }
+              } else {
+                console.log('ELK data not ready yet, will check again...');
+                setTimeout(checkForELKData, 500); // Check again in 500ms
               }
-            } catch (error) {
-              console.log('Initial fit view failed:', error);
-            }
-          }, 1000); // Give more time for layout to complete
-          
-          return () => clearTimeout(timer);
-        }, []); // Empty dependency array means this runs only once on mount
+            };
+            
+            // Start checking after a short delay to let ELK run
+            setTimeout(checkForELKData, 1000);
+          }
+        }, []); // Only run once on mount
         
         // Set up smooth zoom handlers using React Flow's built-in animations
         React.useEffect(() => {
@@ -304,61 +290,101 @@
             setViewport({ x: newX, y: newY, zoom: newZoom }, { duration: 300 });
           };
           
+          // Store reference to get latest ELK layout data
+          window._getLatestLayoutData = () => {
+            // Look for the most recent ELK layout data stored globally
+            if (window._lastELKLayoutData) {
+              return window._lastELKLayoutData;
+            }
+            return null;
+          };
+          
           window._smoothFitView = () => {
-            console.log('Smooth Fit View called, nodes:', data.nodes);
+            console.log('Smooth Fit View called');
             
-            // Calculate actual bounds from all visible nodes
-            const nodes = data.nodes || [];
-            const visibleNodes = nodes.filter(node => !node.data?.hidden);
+            // Use stored ELK layout data if available
+            const layoutData = window._getLatestLayoutData();
             
-            console.log('Visible nodes for fit view:', visibleNodes.length, visibleNodes.map(n => ({ id: n.id, position: n.position })));
+            if (!layoutData || !layoutData.nodes || layoutData.nodes.length === 0) {
+              console.log('No ELK layout data available for fit view');
+              return;
+            }
             
-            if (visibleNodes.length > 0) {
-              let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-              
-              visibleNodes.forEach(node => {
-                const x = node.position?.x || 0;
-                const y = node.position?.y || 0;
+            console.log('Using ELK layout data with', layoutData.nodes.length, 'nodes');
+            
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            
+            // Use the ELK-calculated positions directly
+            layoutData.nodes.forEach(node => {
+              if (node.position && !node.data?.hidden) {
+                const x = node.position.x;
+                const y = node.position.y;
                 
-                // Try to get measured dimensions from window globals first
-                let width = 200, height = 100; // defaults
+                // Get measured dimensions or use reasonable defaults
+                let width = 280, height = 200;
                 if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(node.id)) {
                   const measured = window.measuredNodeDimensions.get(node.id);
                   width = measured.width;
                   height = measured.height;
-                  console.log(`Using measured dimensions for ${node.id}: ${width}x${height}`);
-                } else {
-                  console.log(`Using default dimensions for ${node.id}: ${width}x${height}`);
                 }
                 
                 minX = Math.min(minX, x);
                 minY = Math.min(minY, y);
                 maxX = Math.max(maxX, x + width);
                 maxY = Math.max(maxY, y + height);
-              });
-              
-              if (minX !== Infinity) {
-                const bounds = {
-                  x: minX - 50,
-                  y: minY - 50,
-                  width: maxX - minX + 100,
-                  height: maxY - minY + 100
-                };
                 
-                console.log('Calculated fit bounds:', bounds);
-                fitBounds(bounds, { duration: 800, padding: 0.1 });
-              } else {
-                console.log('No valid bounds calculated for fit view');
+                console.log(`ELK Node ${node.id}: (${x}, ${y}) ${width}x${height}`);
               }
-            } else {
-              console.log('No visible nodes found for fit view');
+            });
+            
+            if (minX === Infinity) {
+              console.log('No valid ELK bounds calculated');
+              return;
             }
+            
+            const bounds = {
+              x: minX - 50,
+              y: minY - 50,
+              width: maxX - minX + 100,
+              height: maxY - minY + 100
+            };
+            
+            console.log('Calculated ELK bounds for fit view:', bounds);
+            
+            // Calculate viewport manually for reliable results
+            const container = document.querySelector('.react-flow');
+            const containerWidth = container ? container.clientWidth : 1000;
+            const containerHeight = container ? container.clientHeight : 800;
+            
+            console.log('Container dimensions:', { containerWidth, containerHeight });
+            
+            // Calculate scale to fit the bounds with padding
+            const paddingFactor = 0.9; // 10% padding
+            const scaleX = (containerWidth * paddingFactor) / bounds.width;
+            const scaleY = (containerHeight * paddingFactor) / bounds.height;
+            const scale = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x zoom
+            
+            // Calculate position to center the bounds
+            const x = (containerWidth - bounds.width * scale) / 2 - bounds.x * scale;
+            const y = (containerHeight - bounds.height * scale) / 2 - bounds.y * scale;
+            
+            console.log('Calculated viewport:', { 
+              x: x.toFixed(1), 
+              y: y.toFixed(1), 
+              zoom: scale.toFixed(3),
+              bounds,
+              scaleX: scaleX.toFixed(3),
+              scaleY: scaleY.toFixed(3)
+            });
+            
+            setViewport({ x, y, zoom: scale }, { duration: 800 });
           };
           
           return () => {
             delete window._smoothZoomIn;
             delete window._smoothZoomOut;
             delete window._smoothFitView;
+            delete window._getLatestLayoutData;
           };
         }, [getViewport, setViewport, fitBounds]);
         
@@ -373,6 +399,95 @@
           elkDebugData,
           edgesFading
         } = data;
+        
+        // Create a dynamic bounding box calculator that accesses current data
+        const createBoundingBoxCalculator = () => {
+          return () => {
+            // Access current data from the component's scope
+            const currentNodes = data.nodes || [];
+            const currentEdges = data.edges || [];
+            
+            const visibleNodes = currentNodes.filter(node => !node.data?.hidden && node.position);
+            const visibleEdges = currentEdges.filter(edge => !edge.data?.hidden);
+            
+            console.log('calculateBoundingBox:', { 
+              totalNodes: currentNodes.length,
+              totalEdges: currentEdges.length,
+              visibleNodes: visibleNodes.length, 
+              visibleEdges: visibleEdges.length 
+            });
+            
+            if (visibleNodes.length === 0) {
+              console.log('No visible nodes with positions for bounding box');
+              return null;
+            }
+            
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            
+            // Include all visible nodes
+            visibleNodes.forEach(node => {
+              const x = node.position.x;
+              const y = node.position.y;
+              
+              // Try to get measured dimensions, fallback to defaults
+              let width = 200, height = 100;
+              if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(node.id)) {
+                const measured = window.measuredNodeDimensions.get(node.id);
+                width = measured.width;
+                height = measured.height;
+              }
+              
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x + width);
+              maxY = Math.max(maxY, y + height);
+              
+              console.log(`Node ${node.id}: (${x}, ${y}) ${width}x${height}`);
+            });
+            
+            // Include all edge path points to ensure edges are within bounds
+            visibleEdges.forEach(edge => {
+              if (edge.data?.pathData) {
+                // Parse SVG path data to get all coordinates
+                const pathData = edge.data.pathData;
+                const coordinates = pathData.match(/[\d.-]+/g);
+                
+                if (coordinates) {
+                  for (let i = 0; i < coordinates.length; i += 2) {
+                    const x = parseFloat(coordinates[i]);
+                    const y = parseFloat(coordinates[i + 1]);
+                    
+                    if (!isNaN(x) && !isNaN(y)) {
+                      minX = Math.min(minX, x);
+                      minY = Math.min(minY, y);
+                      maxX = Math.max(maxX, x);
+                      maxY = Math.max(maxY, y);
+                    }
+                  }
+                }
+              }
+            });
+            
+            if (minX === Infinity) {
+              console.log('No valid coordinates found for bounding box');
+              return null;
+            }
+            
+            const bounds = {
+              x: minX - 50,
+              y: minY - 50,
+              width: maxX - minX + 100,
+              height: maxY - minY + 100
+            };
+            
+            console.log('Calculated bounding box:', bounds);
+            return bounds;
+          };
+        };
+        
+        const calculateBoundingBox = createBoundingBoxCalculator();
+        
+        const boundingBox = calculateBoundingBox();
 
         // Calculate the bounding box of all nodes to size the container appropriately
         const calculateBounds = () => {
@@ -610,7 +725,44 @@
                 opacity: 0.8
               });
             })
-          ])
+          ]),
+          
+          // Bounding Box Visualization - shows the area that fit view will target
+          boundingBox && React.createElement('div', {
+            key: 'bounding-box-overlay',
+            style: {
+              position: 'absolute',
+              left: `${boundingBox.x}px`,
+              top: `${boundingBox.y}px`,
+              width: `${boundingBox.width}px`,
+              height: `${boundingBox.height}px`,
+              border: '3px dashed #ff0080',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(255, 0, 128, 0.1)',
+              pointerEvents: 'none',
+              zIndex: 1001,
+              boxSizing: 'border-box'
+            }
+          }),
+          
+          // Bounding Box Label
+          boundingBox && React.createElement('div', {
+            key: 'bounding-box-label',
+            style: {
+              position: 'absolute',
+              left: `${boundingBox.x + 10}px`,
+              top: `${boundingBox.y - 25}px`,
+              background: 'rgba(255, 0, 128, 0.9)',
+              color: 'white',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              pointerEvents: 'none',
+              zIndex: 1002
+            }
+          }, `FIT VIEW BOUNDS: ${Math.round(boundingBox.width)}×${Math.round(boundingBox.height)}`)
         ]);
       };
 
@@ -2186,6 +2338,9 @@
               const layoutedGraph = await elk.layout(elkGraph);
               console.log('ELK Output:', layoutedGraph);
               
+              // Store the layout data for fit view functionality
+              window._lastELKLayoutData = null; // Will be set after processing
+              
               // Flatten compound node structure and adjust positions
               let flattenedNodes = [];
               layoutedGraph.children.forEach(child => {
@@ -2410,6 +2565,13 @@
                 return edge;
               });
 
+              // Store the final layout data for fit view functionality
+              window._lastELKLayoutData = {
+                nodes: updatedNodes,
+                edges: finalEdges,
+                elkGraph: layoutedGraph
+              };
+              
               return { nodes: updatedNodes, edges: finalEdges, elkGraph: layoutedGraph };
             } catch (error) {
               console.error('ELK layout failed:', error);
