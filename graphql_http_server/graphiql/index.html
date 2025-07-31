@@ -2810,37 +2810,7 @@
                 maxY = Math.max(maxY, n.position.y + nodeHeight);
               });
               
-              // Also include highlighted edges in the bounds calculation
-              const nodeIdSet = new Set([node.id, ...downstreamIds]);
-              const highlightedEdges = layoutedData.edges.filter(edge => {
-                const sourceNodeId = edge.source;
-                return nodeIdSet.has(sourceNodeId) && !edge.data?.hidden;
-              });
-              
-              
-              // Include edge path points in bounds
-              highlightedEdges.forEach(edge => {
-                if (edge.data?.pathData) {
-                  const pathData = edge.data.pathData;
-                  const coordinates = pathData.match(/[\d.-]+/g);
-                  
-                  if (coordinates) {
-                    for (let i = 0; i < coordinates.length; i += 2) {
-                      const x = parseFloat(coordinates[i]);
-                      const y = parseFloat(coordinates[i + 1]);
-                      
-                      if (!isNaN(x) && !isNaN(y)) {
-                        minX = Math.min(minX, x);
-                        minY = Math.min(minY, y);
-                        maxX = Math.max(maxX, x);
-                        maxY = Math.max(maxY, y);
-                      }
-                    }
-                  }
-                }
-              });
-              
-              // Add padding around the focused area
+              // Add padding around the focused area (nodes only, no edges)
               const padding = 100;
               const bounds = {
                 x: minX - padding,
