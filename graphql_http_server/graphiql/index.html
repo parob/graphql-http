@@ -232,7 +232,7 @@
             // Returning to tab - shorter delay since no layout calculation needed
             setTimeout(() => {
               setGraphVisible(true);
-            }, 800); // Short delay to hide any movement during tab switch
+            }, 100); // Shorter delay when restoring
             return; // Skip the fit view logic
           }
           
@@ -408,6 +408,26 @@
             delete window._getLatestLayoutData;
           };
         }, [getViewport, setViewport, fitBounds]);
+        
+        // Persist viewport when it changes
+        React.useEffect(() => {
+          const interval = setInterval(() => {
+            const currentViewport = getViewport();
+            window._persistedViewport = currentViewport;
+          }, 1000); // Save viewport every second
+          
+          return () => clearInterval(interval);
+        }, [getViewport]);
+        
+        // Restore viewport on mount if returning to tab
+        React.useEffect(() => {
+          if (window._persistedViewport && window._graphVisualizationEverLoaded) {
+            console.log('Restoring persisted viewport on mount:', window._persistedViewport);
+            setTimeout(() => {
+              setViewport(window._persistedViewport, { duration: 0 });
+            }, 50); // Small delay to ensure component is ready
+          }
+        }, [setViewport]);
         
         const {
           nodes,
@@ -760,7 +780,7 @@
               height: `${boundingBox.height}px`,
               border: '3px dashed #ff0080',
               borderRadius: '8px',
-              backgroundColor: 'rgba(255, 0, 128, 0.1)',
+              backgroundColor: 'rgba(255, 0, 128, 0.01)', // 10x more transparent
               pointerEvents: 'none',
               zIndex: 1001,
               boxSizing: 'border-box'
@@ -1656,6 +1676,7 @@
           React.useEffect(() => {
             window._persistedSelectedNodeId = selectedNodeId;
           }, [selectedNodeId]);
+          
           // Removed React Flow instance - using custom viewport
           // React Flow handles viewport state internally, so we don't need these
           // const [viewport, setViewport] = React.useState({ x: -100, y: -100, zoom: 0.8 });
@@ -1716,6 +1737,13 @@
               setLayoutedData(window._cachedLayoutData);
               setNodes(window._cachedLayoutData.nodes);
               setEdges(window._cachedLayoutData.edges);
+              
+              // Restore cached ELK debug data
+              if (window._cachedElkDebugData) {
+                setElkDebugData(window._cachedElkDebugData);
+              }
+              
+              // The highlighting will be updated by the highlighting useEffect that runs after layoutedData changes
               return;
             }
             
@@ -1829,7 +1857,7 @@
             
             setNodes(updatedNodes);
             setEdges(updatedEdges);
-          }, [selectedNodeId]);
+          }, [selectedNodeId, layoutedData.nodes.length]); // Added layoutedData dependency
 
           // Handle smooth animations when focusing/unfocusing
           React.useEffect(() => {
@@ -2461,6 +2489,9 @@
               
               console.log('All ELK edge IDs:', layoutedGraph.edges.map(e => e.id));
               setElkDebugData(layoutedGraph);
+              
+              // Cache ELK debug data globally
+              window._cachedElkDebugData = layoutedGraph;
               
               // Apply positions back to React Flow nodes (only for visible nodes)
               const originalPositions = {};
