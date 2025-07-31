@@ -2878,7 +2878,7 @@
             };
           }, [layoutedData.nodes, onNodeDoubleClick]);
 
-          // Handle field click to center on target node
+          // Handle field click to center on target node (like double-click)
           const onFieldClick = React.useCallback((targetNodeId) => {
             console.log('Field clicked:', targetNodeId, 'Focus mode:', focusedNodeId !== null);
             
@@ -2897,22 +2897,15 @@
                 return; // Exit early to prevent immediate navigation
               }
               
-              // ELK controls positioning - only select the node
-              const targetNode = nodes.find(n => n.id === targetNodeId);
+              // Find the target node and trigger double-click behavior to move viewport
+              const targetNode = layoutedData.nodes.find(n => n.id === targetNodeId);
               if (targetNode) {
-                // reactFlowInstance.fitBounds({
-                //   x: targetNode.position.x,
-                //   y: targetNode.position.y,
-                //   width: 320,
-                //   height: 200
-                // }, {
-                //   padding: 0.2,
-                //   duration: 600
-                // });
-                setSelectedNodeId(targetNodeId);
+                console.log('Moving viewport to node via field click:', targetNodeId);
+                // Trigger the same behavior as double-clicking the node
+                onNodeDoubleClick(null, targetNode);
               }
             }
-          }, [focusedNodeId, nodes, schemaData, shouldDisplayAsNode, getCoreTypeName, isScalarType]);
+          }, [focusedNodeId, layoutedData.nodes, onNodeDoubleClick]);
 
           // Helper functions for type ancestry analysis
           const getTypeDescendants = (typeName, visited = new Set()) => {
