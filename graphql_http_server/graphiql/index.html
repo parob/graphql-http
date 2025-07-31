@@ -844,6 +844,25 @@
               
               // Check if this edge is descended from the selected node (outgoing only)
               const isHighlighted = selectedNodeId && edge.source === selectedNodeId;
+              const isArgumentEdge = edge.data?.isArgumentEdge;
+              
+              // Different styling for argument edges - less prominent even when highlighted
+              if (isArgumentEdge) {
+                const isArgHighlighted = selectedNodeId && edge.source === selectedNodeId;
+                return React.createElement('path', {
+                  key: edge.id,
+                  d: edge.data.pathData,
+                  stroke: isArgHighlighted ? '#0366d6' : '#9ca3af', // Blue when highlighted, grey otherwise
+                  strokeWidth: isArgHighlighted ? 2 : 1, // Thicker when highlighted but not as thick as regular edges
+                  strokeDasharray: '3,3', // Always dashed
+                  fill: 'none',
+                  markerEnd: isArgHighlighted ? 'url(#circleEndHighlight)' : 'url(#circleEnd)',
+                  opacity: edgesFading ? 0.3 : (selectedNodeId && !isArgHighlighted ? 0.3 : isArgHighlighted ? 0.8 : 0.6), // More visible than before
+                  style: {
+                    transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                  }
+                });
+              }
               
               return React.createElement('path', {
                 key: edge.id,
@@ -1841,7 +1860,22 @@
                   padding: '0 16px 8px 48px', // More inset for arguments
                   backgroundColor: 'white' // Always white background for arguments
                 }
-              }, field.args.map((arg, argIndex) => {
+              }, [
+                // Arguments header
+                React.createElement('div', {
+                  key: 'args-header',
+                  style: {
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    color: '#999', // Dimmer color
+                    marginBottom: '4px',
+                    marginLeft: '-16px', // Outdent the header
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }
+                }, 'Field Arguments'),
+                // Arguments list
+                ...field.args.map((arg, argIndex) => {
                 // Check if argument type is a relationship (not scalar)
                 const argCoreTypeName = getCoreTypeName(arg.type);
                 const isArgRelationship = argCoreTypeName && !argCoreTypeName.startsWith('__') && !isScalarType(argCoreTypeName);
@@ -1895,7 +1929,7 @@
                     alignItems: 'center',
                     padding: '4px 0',
                     fontSize: '16px',
-                    color: '#586069'
+                    color: '#999' // Dimmer color for arguments
                   }
                 }, [
                   React.createElement('span', {
@@ -1909,7 +1943,7 @@
                   React.createElement('span', {
                     key: 'arg-type',
                     style: {
-                      color: isArgRelationship ? '#7c9eff' : '#9ca3af', // Faded blue for relationships, lighter gray for scalars
+                      color: isArgRelationship ? '#0366d6' : '#9ca3af', // Blue for relationships (clickable), grey for scalars
                       fontWeight: '400',
                       fontSize: '16px',
                       fontFamily: 'SFMono-Regular, Consolas, monospace',
@@ -1925,7 +1959,7 @@
                     } : undefined
                   }, getTypeString(arg.type))
                 ]);
-              }))
+              })])
             ]);
           })),
 
@@ -3594,14 +3628,14 @@
                             type: 'elk',
                             animated: false,
                             style: {
-                              stroke: '#7c9eff', // Faded blue to match argument type color
+                              stroke: '#9ca3af', // Grey to match non-highlighted state
                               strokeWidth: 1,
                               strokeDasharray: '3,3', // Dashed line to distinguish from field edges
-                              opacity: 0.6
+                              opacity: 0.6 // Higher opacity for better visibility
                             },
                             markerEnd: {
                               type: 'arrowclosed',
-                              color: '#7c9eff',
+                              color: '#9ca3af', // Grey for arrow
                               width: 10,
                               height: 10
                             },
@@ -3892,6 +3926,10 @@
                 React.createElement('button', {
                   key: 'fit-view',
                   onClick: () => {
+                    // Clear any selection when fit view is clicked
+                    if (setSelectedNodeId) {
+                      setSelectedNodeId(null);
+                    }
                     if (window._smoothFitView) {
                       window._smoothFitView();
                     }
@@ -3917,7 +3955,14 @@
                   onMouseLeave: (e) => {
                     e.target.style.background = 'rgba(255, 255, 255, 0.95)';
                   }
-                }, '⌘')
+                }, React.createElement('svg', {
+                  width: '16',
+                  height: '16',
+                  viewBox: '0 0 16 16',
+                  fill: 'currentColor'
+                }, React.createElement('path', {
+                  d: 'M2 2h3v2H3v2H1V3a1 1 0 0 1 1-1zm9 0h3a1 1 0 0 1 1 1v3h-2V4h-2V2zM3 11H1v3a1 1 0 0 0 1 1h3v-2H3v-2zm10 0v2h-2v2h3a1 1 0 0 0 1-1v-3h-2z'
+                })))
               ])
             ]),
             
