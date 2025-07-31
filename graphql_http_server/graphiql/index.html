@@ -3007,61 +3007,138 @@
                   return `M ${startX} ${startY} L ${endX} ${endY}`;
                 }
                 
-                // Use ELK routing data to create curved path
+                // Use ELK routing data to create smooth curved path
                 const section = elkEdge.sections[0];
                 const startPoint = section.startPoint;
                 const endPoint = section.endPoint;
                 const bendPoints = section.bendPoints || [];
                 
-                // Add horizontal extension at start and end for smoother curves
-                const horizontalExtension = 30;
-                
-                if (bendPoints.length > 0) {
-                  // Complex path with bend points
-                  const points = [startPoint, ...bendPoints, endPoint];
-                  let path = `M ${startPoint.x} ${startPoint.y}`;
-                  
-                  // Start with horizontal line
-                  path += ` L ${startPoint.x + horizontalExtension} ${startPoint.y}`;
-                  
-                  // Create smooth bezier curves through all points
-                  for (let i = 0; i < points.length - 1; i++) {
-                    const curr = i === 0 ? {x: startPoint.x + horizontalExtension, y: startPoint.y} : points[i];
-                    const next = points[i + 1];
-                    const isLast = i === points.length - 2;
-                    
-                    if (isLast) {
-                      // Last segment - curve to horizontal approach
-                      const cp1x = curr.x + (next.x - curr.x) * 0.7;
-                      const cp1y = curr.y;
-                      const cp2x = next.x - horizontalExtension - 20;
-                      const cp2y = next.y;
-                      path += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${next.x - horizontalExtension} ${next.y}`;
-                      path += ` L ${next.x} ${next.y}`;
-                    } else {
-                      // Middle segments - smooth curves
-                      const cp1x = curr.x + (next.x - curr.x) * 0.5;
-                      const cp1y = curr.y;
-                      const cp2x = next.x;
-                      const cp2y = curr.y + (next.y - curr.y) * 0.5;
-                      path += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${next.x} ${next.y}`;
-                    }
-                  }
-                  
-                  return path;
-                } else {
-                  // Simple direct connection with nice curve
+                if (bendPoints.length === 0) {
+                  // Simple direct connection with smooth S-curve
                   const dx = endPoint.x - startPoint.x;
                   const dy = endPoint.y - startPoint.y;
+                  const distance = Math.sqrt(dx * dx + dy * dy);
                   
-                  // Create control points for a smooth S-curve
-                  const cp1x = startPoint.x + Math.min(horizontalExtension + 50, dx * 0.5);
+                  // Adaptive control point distance based on connection length
+                  const controlDistance = Math.min(distance * 0.4, 120);
+                  
+                  const cp1x = startPoint.x + controlDistance;
                   const cp1y = startPoint.y;
-                  const cp2x = endPoint.x - Math.min(horizontalExtension + 50, dx * 0.5);
+                  const cp2x = endPoint.x - controlDistance;
                   const cp2y = endPoint.y;
                   
                   return `M ${startPoint.x} ${startPoint.y} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${endPoint.x} ${endPoint.y}`;
                 }
+                
+                // Create smooth spline through all points using cubic bezier segments
+                const allPoints = [startPoint, ...bendPoints, endPoint];
+                let path = `M ${allPoints[0].x} ${allPoints[0].y}`;
+                
+                for (let i = 0; i < allPoints.length - 1; i++) {
+                  const current = allPoints[i];
+                  const next = allPoints[i + 1];
+                  const prev = i > 0 ? allPoints[i - 1] : null;
+                  const nextNext = i < allPoints.length - 2 ? allPoints[i + 2] : null;
+                  
+                  // Calculate smooth control points that create continuous tangents
+                  let cp1x, cp1y, cp2x, cp2y;
+                  
+                  if (i === 0) {
+                    // First segment - start horizontally
+                    const distance = Math.sqrt((next.x - current.x) ** 2 + (next.y - current.y) ** 2);
+                    const tension = Math.min(distance * 0.3, 80);
+                    
+                    cp1x = current.x + tension;
+                    cp1y = current.y;
+                    
+                    // Second control point considers the next point if available
+                    if (nextNext) {
+                      const nextDir = { x: nextNext.x - next.x, y: nextNext.y - next.y };
+                      const nextLength = Math.sqrt(nextDir.x ** 2 + nextDir.y ** 2);
+                      if (nextLength > 0) {
+                        cp2x = next.x - (nextDir.x / nextLength) * tension * 0.5;
+                        cp2y = next.y - (nextDir.y / nextLength) * tension * 0.5;
+                      } else {
+                        cp2x = next.x - tension * 0.5;
+                        cp2y = next.y;
+                      }
+                    } else {
+                      // Last point - approach horizontally
+                      cp2x = next.x - tension * 0.7;
+                      cp2y = next.y;
+                    }
+                  } else if (i === allPoints.length - 2) {
+                    // Last segment - end horizontally
+                    const distance = Math.sqrt((next.x - current.x) ** 2 + (next.y - current.y) ** 2);
+                    const tension = Math.min(distance * 0.3, 80);
+                    
+                    // First control point continues from previous direction
+                    if (prev) {
+                      const prevDir = { x: current.x - prev.x, y: current.y - prev.y };
+                      const prevLength = Math.sqrt(prevDir.x ** 2 + prevDir.y ** 2);
+                      if (prevLength > 0) {
+                        cp1x = current.x + (prevDir.x / prevLength) * tension * 0.5;
+                        cp1y = current.y + (prevDir.y / prevLength) * tension * 0.5;
+                      } else {
+                        cp1x = current.x + tension * 0.5;
+                        cp1y = current.y;
+                      }
+                    } else {
+                      cp1x = current.x + tension * 0.5;
+                      cp1y = current.y;
+                    }
+                    
+                    cp2x = next.x - tension;
+                    cp2y = next.y;
+                  } else {
+                    // Middle segments - create smooth continuity
+                    const prevDir = prev ? { x: current.x - prev.x, y: current.y - prev.y } : { x: 1, y: 0 };
+                    const nextDir = { x: next.x - current.x, y: next.y - current.y };
+                    const nextNextDir = nextNext ? { x: nextNext.x - next.x, y: nextNext.y - next.y } : { x: 1, y: 0 };
+                    
+                    // Normalize directions
+                    const prevLength = Math.sqrt(prevDir.x ** 2 + prevDir.y ** 2) || 1;
+                    const nextLength = Math.sqrt(nextDir.x ** 2 + nextDir.y ** 2) || 1;
+                    const nextNextLength = Math.sqrt(nextNextDir.x ** 2 + nextNextDir.y ** 2) || 1;
+                    
+                    prevDir.x /= prevLength;
+                    prevDir.y /= prevLength;
+                    nextDir.x /= nextLength;
+                    nextDir.y /= nextLength;
+                    nextNextDir.x /= nextNextLength;
+                    nextNextDir.y /= nextNextLength;
+                    
+                    // Calculate tangent at current point (average of incoming and outgoing directions)
+                    const tangent = {
+                      x: (prevDir.x + nextDir.x) * 0.5,
+                      y: (prevDir.y + nextDir.y) * 0.5
+                    };
+                    const tangentLength = Math.sqrt(tangent.x ** 2 + tangent.y ** 2) || 1;
+                    tangent.x /= tangentLength;
+                    tangent.y /= tangentLength;
+                    
+                    // Calculate tangent at next point
+                    const nextTangent = {
+                      x: (nextDir.x + nextNextDir.x) * 0.5,
+                      y: (nextDir.y + nextNextDir.y) * 0.5
+                    };
+                    const nextTangentLength = Math.sqrt(nextTangent.x ** 2 + nextTangent.y ** 2) || 1;
+                    nextTangent.x /= nextTangentLength;
+                    nextTangent.y /= nextTangentLength;
+                    
+                    // Set control points along tangents
+                    const tension = Math.min(nextLength * 0.3, 60);
+                    
+                    cp1x = current.x + tangent.x * tension;
+                    cp1y = current.y + tangent.y * tension;
+                    cp2x = next.x - nextTangent.x * tension;
+                    cp2y = next.y - nextTangent.y * tension;
+                  }
+                  
+                  path += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${next.x} ${next.y}`;
+                }
+                
+                return path;
               };
               
               // Add path data to edges
