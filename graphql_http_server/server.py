@@ -164,9 +164,10 @@ class GraphQLHTTPServer:
                 graphiql_path = os.path.join(graphiql_dir, "index.html")
                 if self.graphiql_default_query:
                     if isinstance(self.graphiql_default_query, str):
-                        default_query = self.graphiql_default_query
-                    else:
                         default_query = json.dumps(self.graphiql_default_query)
+                        if default_query.startswith('"'):
+                            default_query = default_query[1:-1]
+                        
                 else:
                     default_query = ''
 
