@@ -1282,6 +1282,51 @@
         }
       };
 
+      // Federation Plugin
+      const federationPlugin = {
+        title: 'Federation',
+        icon: () => React.createElement('svg', {
+          width: '16',
+          height: '16',
+          viewBox: '0 0 24 24',
+          fill: 'currentColor'
+        }, React.createElement('path', {
+          d: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z'
+        })),
+        content: () => {
+          const [sdl, setSdl] = React.useState(null);
+          const [error, setError] = React.useState(null);
+
+          React.useEffect(() => {
+            const fetchFederationSdl = async () => {
+              try {
+                const result = await fetcher({
+                  query: `query { _service { sdl } }`,
+                  operationName: 'IntrospectionQuery',
+                });
+                if (result.errors) {
+                  throw new Error(result.errors[0].message);
+                }
+                setSdl(result.data._service.sdl);
+              } catch (err) {
+                setError(err.message);
+              }
+            };
+            fetchFederationSdl();
+          }, []);
+
+          if (error) {
+            return React.createElement('div', { style: { padding: '1em', color: 'red' } }, error);
+          }
+
+          if (!sdl) {
+            return React.createElement('div', { style: { padding: '1em' } }, 'Loading federation schema...');
+          }
+
+          return React.createElement('pre', { style: { padding: '1em', whiteSpace: 'pre-wrap' } }, sdl);
+        }
+      };
+
       // Removed React Flow edge components - now using direct SVG path rendering
       /*
       const CustomAvoidingEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, label, labelStyle }) => {
@@ -4179,7 +4224,7 @@
       const fetcher = createGraphiQLFetcher({
         url: fetchURL
       });
-      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin];
+      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin, federationPlugin];
 
       function App() {
         return React.createElement(GraphiQL, {
