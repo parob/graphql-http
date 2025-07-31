@@ -233,16 +233,16 @@
           
           const rootBounds = {
             x: minX - 50,
-            y: minY - 50,
+            y: minY - 80, // Extra top padding to prevent cutoff
             width: maxX - minX + 100,
-            height: maxY - minY + 100
+            height: maxY - minY + 130 // Compensate for extra top padding
           };
           
           console.log('Centering viewport on root types:', rootBounds);
           
           // Use React Flow's fitBounds to center on the root types bounding box
           try {
-            fitBounds(rootBounds, { duration: 800, padding: 0.2 });
+            fitBounds(rootBounds, { duration: 800, padding: 0.15 });
             console.log('Successfully centered on root types using fitBounds');
           } catch (error) {
             console.log('fitBounds failed for root types, trying manual viewport calculation:', error);
@@ -282,7 +282,7 @@
               
               // Try both approaches - fitBounds and manual viewport calculation
               try {
-                fitBounds(bounds, { duration: 800, padding: 0.1 });
+                fitBounds(bounds, { duration: 800, padding: 0.08 });
               } catch (error) {
                 console.log('fitBounds failed, trying manual viewport calculation:', error);
                 
@@ -483,6 +483,10 @@
             
             console.log('Calculated ELK bounds for fit view:', bounds);
             
+            // Add extra top padding to prevent cutoff
+            bounds.y -= 30; // Extra 30px top padding
+            bounds.height += 30; // Compensate height
+            
             // Calculate viewport manually for reliable results
             const container = document.querySelector('.react-flow');
             const containerWidth = container ? container.clientWidth : 1000;
@@ -491,7 +495,8 @@
             console.log('Container dimensions:', { containerWidth, containerHeight });
             
             // Calculate scale to fit the bounds with padding
-            const paddingFactor = 0.9; // 10% padding
+            // Account for container padding and ensure we don't touch the edges
+            const paddingFactor = 0.85; // 15% padding to account for container margins
             const scaleX = (containerWidth * paddingFactor) / bounds.width;
             const scaleY = (containerHeight * paddingFactor) / bounds.height;
             const scale = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x zoom
@@ -628,9 +633,9 @@
             
             const bounds = {
               x: minX - 50,
-              y: minY - 50,
+              y: minY - 80, // Extra top padding to prevent cutoff
               width: maxX - minX + 100,
-              height: maxY - minY + 100
+              height: maxY - minY + 130 // Compensate for extra top padding
             };
             
             console.log('Calculated bounding box:', bounds);
@@ -2775,9 +2780,9 @@
                 'elk.layered.unnecessaryBendpoints': 'false',
                 'elk.layered.edgeRouting.polyline.sloppyRouting': 'false',
                 'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '4',
-                'elk.spacing.portPort': '18',
+                'elk.spacing.portPort': '25',
                 'elk.portAlignment.default': 'DISTRIBUTED',
-                'elk.layered.edgeRouting.multiEdgeSpacing': '45',
+                'elk.layered.edgeRouting.multiEdgeSpacing': '70',
                 'elk.layered.edgeRouting.sloppySplineRouting': 'false',
                 'elk.separateConnectedComponents': 'false',
                 'elk.padding': '[top=30,left=30,bottom=30,right=30]',
@@ -3978,7 +3983,7 @@
               nodeTypes,
               fitView: true,
               fitViewOptions: {
-                padding: 0.1,
+                padding: 0.08, // Reduced padding to account for container margins
                 duration: 400 // Faster initial fit view
               },
               defaultViewport: { x: 0, y: 0, zoom: 0.8 },
