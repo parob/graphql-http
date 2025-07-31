@@ -167,7 +167,7 @@ class GraphQLHTTPServer:
                         default_query = json.dumps(self.graphiql_default_query)
                         if default_query.startswith('"'):
                             default_query = default_query[1:-1]
-                        
+
                 else:
                     default_query = ''
 
