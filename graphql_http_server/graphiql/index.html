@@ -251,7 +251,7 @@
           };
         }, [centerOnRootTypes]);
         
-        // Handle focus bounds changes
+        // Handle focus bounds changes for double-click navigation
         React.useEffect(() => {
           const checkFocusBounds = () => {
             if (window._focusBounds) {
@@ -261,7 +261,6 @@
               try {
                 fitBounds(bounds, { duration: 800, padding: 0.08 });
               } catch (error) {
-                
                 // Manual viewport calculation as fallback
                 const containerWidth = 1000; // Approximate viewport width
                 const containerHeight = 800; // Approximate viewport height
@@ -276,8 +275,10 @@
                 setViewport({ x, y, zoom: scale }, { duration: 400 }); // Faster fit view
               }
               
-              // Clear the bounds after applying
+              // Clear the bounds after applying (but keep debug info)
               delete window._focusBounds;
+              
+              // Keep _lastFocusBounds for debug visualization - don't auto-clear
             }
           };
           
@@ -286,7 +287,7 @@
           const interval = setInterval(checkFocusBounds, 100);
           
           return () => clearInterval(interval);
-        }, [fitBounds]);
+        }, [fitBounds, setViewport]);
         
         // Initial fit view on component mount - wait for ELK layout data
         React.useEffect(() => {
@@ -940,7 +941,32 @@
                 fill: 'none',
                 opacity: 0.8
               });
-            })
+            }),
+            
+            // Focus Bounds Visualization - shows the area that double-click will target
+            window._lastFocusBounds && React.createElement('rect', {
+              key: 'focus-bounds-debug',
+              x: window._lastFocusBounds.x,
+              y: window._lastFocusBounds.y,
+              width: window._lastFocusBounds.width,
+              height: window._lastFocusBounds.height,
+              fill: 'none',
+              stroke: '#ff8800',
+              strokeWidth: 3,
+              strokeDasharray: '10,5',
+              opacity: 0.9
+            }),
+            
+            // Focus Bounds Label
+            window._lastFocusBounds && React.createElement('text', {
+              key: 'focus-bounds-label',
+              x: window._lastFocusBounds.x + 10,
+              y: window._lastFocusBounds.y - 10,
+              fontSize: '14px',
+              fill: '#ff8800',
+              fontWeight: 'bold',
+              fontFamily: 'monospace'
+            }, `FOCUS: ${Math.round(window._lastFocusBounds.width)}×${Math.round(window._lastFocusBounds.height)}`)
           ]),
           
           // Bounding Box Visualization - shows the area that fit view will target
@@ -1348,7 +1374,8 @@
                   style: {
                     fontWeight: 'bold',
                     fontSize: isRootType ? '28px' : '24px'
-                  }
+                  },
+                  title: type.description || undefined
                 }, type.name),
                 React.createElement('div', {
                   key: 'kind',
@@ -1358,50 +1385,10 @@
                     textTransform: 'uppercase',
                     fontWeight: '500',
                     marginTop: '2px'
-                  }
+                  },
+                  title: type.description || undefined
                 }, type.kind)
               ])
-              // Focus button - hidden
-              /* React.createElement('button', {
-                key: 'focus-button',
-                onClick: (e) => {
-                  e.stopPropagation();
-                  if (!data.isTransitioning) {
-                    data.onFocus && data.onFocus(data.nodeId);
-                  }
-                },
-                style: {
-                  background: '#f6f8fa',
-                  color: '#656d76',
-                  border: '1px solid #d1d5da',
-                  borderRadius: '4px',
-                  padding: '6px',
-                  cursor: 'pointer',
-                  marginLeft: '8px',
-                  transition: 'all 0.2s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  alignSelf: 'center',
-                  width: '48px',
-                  height: '48px'
-                },
-                onMouseEnter: (e) => {
-                  e.target.style.background = '#e1e4e8';
-                  e.target.style.color = '#24292e';
-                },
-                onMouseLeave: (e) => {
-                  e.target.style.background = '#f6f8fa';
-                  e.target.style.color = '#656d76';
-                }
-              }, React.createElement('svg', {
-                width: '40',
-                height: '40',
-                viewBox: '0 0 24 24',
-                fill: 'currentColor'
-              }, React.createElement('path', {
-                d: 'M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'
-              }))) */
             ])
           ]),
           
@@ -1487,7 +1474,8 @@
                     color: '#24292e',
                     fontWeight: '500',
                     fontSize: isRootType ? '21px' : '19.5px'
-                  }
+                  },
+                  title: field.description || undefined
                 }, field.name),
                 !isEnumValue && React.createElement('span', {
                   key: 'type',
@@ -1498,6 +1486,7 @@
                     fontFamily: 'SFMono-Regular, Consolas, monospace',
                     cursor: isRelationship ? 'pointer' : 'default'
                   },
+                  title: field.description || undefined,
                   onClick: isRelationship ? (e) => {
                     e.stopPropagation();
                     const targetTypeId = `type-${coreTypeName}`;
@@ -1592,7 +1581,8 @@
                       color: '#8c959f', // Lighter color for argument names
                       fontWeight: '400',
                       fontSize: '16px'
-                    }
+                    },
+                    title: arg.description || undefined
                   }, arg.name),
                   React.createElement('span', {
                     key: 'arg-type',
@@ -1603,6 +1593,7 @@
                       fontFamily: 'SFMono-Regular, Consolas, monospace',
                       cursor: isArgRelationship ? 'pointer' : 'default'
                     },
+                    title: arg.description || undefined,
                     onClick: isArgRelationship ? (e) => {
                       e.stopPropagation();
                       const targetTypeId = `type-${argCoreTypeName}`;
@@ -1658,7 +1649,6 @@
             // Restore previous selection if returning to tab
             return window._persistedSelectedNodeId || null;
           });
-          const [focusedNodeId, setFocusedNodeId] = React.useState(null);
           
           // Persist selected node ID when it changes
           React.useEffect(() => {
@@ -1675,7 +1665,6 @@
           const [edgesFading, setEdgesFading] = React.useState(false);
           const [isTransitioning, setIsTransitioning] = React.useState(false);
           const [graphVisible, setGraphVisible] = React.useState(false); // Start hidden
-          const lastFocusedNodeRef = React.useRef(null);
           const transitionTimeoutRef = React.useRef(null);
           const viewportStateRef = React.useRef(null);
           const keySequenceRef = React.useRef('');
@@ -1773,7 +1762,7 @@
             };
             
             applyLayout();
-          }, [schemaData, showOnlyRootTypes, focusedNodeId]);
+          }, [schemaData, showOnlyRootTypes]);
 
           // Update node and edge highlighting when selection changes (without triggering layout)
           React.useEffect(() => {
@@ -1813,58 +1802,6 @@
             setEdges(updatedEdges);
           }, [selectedNodeId, layoutedData.nodes.length]); // Added layoutedData dependency
 
-          // Handle smooth animations when focusing/unfocusing
-          React.useEffect(() => {
-            if (layoutedData.nodes.length > 0) {
-              // Check if focus state actually changed
-              if (lastFocusedNodeRef.current !== focusedNodeId) {
-                const previousFocus = lastFocusedNodeRef.current;
-                lastFocusedNodeRef.current = focusedNodeId;
-                
-                // Clear any existing transition
-                if (transitionTimeoutRef.current) {
-                  clearTimeout(transitionTimeoutRef.current);
-                }
-                
-                // Custom viewport - no React Flow dependency
-                viewportStateRef.current = viewport;
-                
-                // Set transitioning state
-                setIsTransitioning(true);
-                setEdgesFading(true);
-                
-                transitionTimeoutRef.current = setTimeout(() => {
-                  // Custom viewport - already maintained in state
-                  // No viewport restoration needed with custom implementation
-                  
-                  // Wait a bit for layout to settle, then animate
-                  setTimeout(() => {
-                    setEdgesFading(false);
-                    
-                    // Now smoothly animate to the target state
-                    setTimeout(() => {
-                      // ELK controls all positioning - no React Flow fitView
-                      // const visibleNodes = layoutedData.nodes.filter(node => !node.data?.hidden);
-                      // if (visibleNodes.length > 1 || !focusedNodeId) {
-                      //   // Run fitView for multiple nodes OR when going back to full view
-                      //   reactFlowInstance.fitView({
-                      //     duration: 700,
-                      //     padding: focusedNodeId ? 0.15 : 0.12 // Increased padding for full view to prevent top cutoff
-                      //   });
-                      // }
-                      
-                      setTimeout(() => {
-                        if (!focusedNodeId) {
-                          setSelectedNodeId(null);
-                        }
-                        setIsTransitioning(false);
-                      }, 700);
-                    }, 50);
-                  }, 100);
-                }, 50);
-              }
-            }
-          }, [focusedNodeId, layoutedData]);
 
           // Cleanup transition timeouts on unmount
           React.useEffect(() => {
@@ -2174,11 +2111,6 @@
                 'elk.portConstraints': 'FIXED_POS'
               };
               
-              // If this is the focused node, fix its position
-              if (focusedNodeId && node.id === focusedNodeId) {
-                layoutOptions['elk.nodeConstraints'] = 'FIXED_POS';
-                layoutOptions['elk.position'] = `(${node.position.x}, ${node.position.y})`;
-              }
               
               // Set fixed positions and constraints for root types
               if (isRootType) {
@@ -2808,6 +2740,8 @@
                 if (currentSelectedId === node.id) {
                   return null; // Deselect if clicking the same node
                 } else {
+                  // Clear old focus bounds when switching to a different node
+                  delete window._lastFocusBounds;
                   return node.id;
                 }
               });
@@ -2820,6 +2754,14 @@
           const onPaneClick = React.useCallback(() => {
             setSelectedNodeId(null);
           }, []);
+          
+          // Clear focus bounds when node is deselected
+          React.useEffect(() => {
+            if (!selectedNodeId) {
+              // Clear focus bounds when no node is selected
+              delete window._lastFocusBounds;
+            }
+          }, [selectedNodeId]);
           
           // Handle node double-click to center and zoom to fit downstream nodes
           const onNodeDoubleClick = React.useCallback((event, node) => {
@@ -2907,13 +2849,11 @@
                 height: maxY - minY + (padding * 2)
               };
               
-              
-              // Store the focus bounds for the React Flow component to use
+              // Apply viewport change using the same mechanism as focus bounds
               window._focusBounds = bounds;
+              // Store debug info for ELK debug overlay
+              window._lastFocusBounds = bounds;
               
-              // Trigger a re-render to apply the focus
-              setIsTransitioning(true);
-              setTimeout(() => setIsTransitioning(false), 800);
             }, 100);
           }, [layoutedData.nodes, getDownstreamNodeIds]);
           
@@ -2939,20 +2879,7 @@
 
           // Handle field click to center on target node (like double-click)
           const onFieldClick = React.useCallback((targetNodeId) => {
-            
             if (targetNodeId) {
-              // Check if we're in focus mode
-              const isInFocusMode = focusedNodeId !== null;
-              
-              if (isInFocusMode) {
-                // Always exit focus mode and navigate to target for now
-                
-                // Store the target for navigation after layout completes
-                window.pendingNavigation = targetNodeId;
-                setFocusedNodeId(null);
-                return; // Exit early to prevent immediate navigation
-              }
-              
               // Find the target node and trigger double-click behavior to move viewport
               const targetNode = layoutedData.nodes.find(n => n.id === targetNodeId);
               if (targetNode) {
@@ -2960,7 +2887,7 @@
                 onNodeDoubleClick(null, targetNode);
               }
             }
-          }, [focusedNodeId, layoutedData.nodes, onNodeDoubleClick]);
+          }, [layoutedData.nodes, onNodeDoubleClick]);
 
           // Helper functions for type ancestry analysis
           const getTypeDescendants = (typeName, visited = new Set()) => {
@@ -3043,25 +2970,7 @@
             // Determine which types should be visible (but create nodes for ALL types)
             let visibleTypeNames = new Set();
             
-            if (focusedNodeId) {
-              // Focus mode: show only the focused node and its direct downstream types
-              const focusedTypeName = focusedNodeId.replace('type-', '');
-              const focusedType = allTypes.find(type => type.name === focusedTypeName);
-              
-              if (focusedType) {
-                visibleTypeNames.add(focusedTypeName);
-                
-                // Add only downstream types that the focused type references (not upstream)
-                if (focusedType.fields) {
-                  focusedType.fields.forEach(field => {
-                    const coreTypeName = getCoreTypeName(field.type);
-                    if (coreTypeName && !coreTypeName.startsWith('__') && !isScalarType(coreTypeName)) {
-                      visibleTypeNames.add(coreTypeName);
-                    }
-                  });
-                }
-              }
-            } else if (showOnlyRootTypes) {
+            if (showOnlyRootTypes) {
               // Root types only mode
               allTypes.forEach(type => {
                 const isQueryType = type.name === schemaData.__schema.queryType?.name;
@@ -3117,7 +3026,7 @@
               const isSelected = selectedNodeId === typeNodeId;
               const isSelectedDownstream = selectedNodeId && downstreamNodeIds.has(selectedNodeId);
               const isDownstreamOfSelected = selectedNodeId && getDownstreamNodeIds(selectedNodeId).has(typeNodeId);
-              const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected && !focusedNodeId;
+              const shouldDim = selectedNodeId && !isSelected && !isDownstreamOfSelected;
               const isVisible = visibleTypeNames.has(type.name);
               
               // Determine partition membership
@@ -3146,7 +3055,6 @@
                   getCoreTypeName,
                   isScalarType,
                   onFieldClick,
-                  onFocus: setFocusedNodeId,
                   shouldDim,
                   isSelected,
                   isDownstreamOfSelected,
@@ -3175,7 +3083,7 @@
                     const isTargetSelected = selectedNodeId === targetTypeId;
                     const isDownstreamEdge = isSourceSelected; // Only edges FROM the selected node
                     const isUpstreamEdge = isTargetSelected; // Edges TO the selected node (should be dimmed)
-                    const shouldDimEdge = selectedNodeId && !isDownstreamEdge && !focusedNodeId;
+                    const shouldDimEdge = selectedNodeId && !isDownstreamEdge;
                     
                     // Check if edge should be visible based on source and target visibility
                     const isSourceVisible = visibleTypeNames.has(type.name);
@@ -3326,53 +3234,6 @@
             }
           }, [
             // Navigation bar
-            // Focus mode overlay back button
-            focusedNodeId && React.createElement('button', {
-              key: 'focus-back-overlay',
-              onClick: () => {
-                setFocusedNodeId(null);
-                setSelectedNodeId(null);
-              },
-              style: {
-                position: 'absolute',
-                top: '16px',
-                left: '16px',
-                zIndex: 1000,
-                background: 'rgba(255, 255, 255, 0.95)',
-                border: '1px solid #d1d5da',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: '#24292e',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-                backdropFilter: 'blur(4px)',
-                transition: 'all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
-              },
-              onMouseEnter: (e) => {
-                e.target.style.background = 'rgba(225, 228, 232, 0.95)';
-              },
-              onMouseLeave: (e) => {
-                e.target.style.background = 'rgba(255, 255, 255, 0.95)';
-              }
-            }, [
-              React.createElement('span', {
-                key: 'back-arrow',
-                style: {
-                  marginRight: '6px',
-                  fontSize: '16px'
-                }
-              }, '←'),
-              React.createElement('span', {
-                key: 'back-text',
-                style: {
-                  fontSize: '13px'
-                }
-              }, 'Back')
-            ]),
             
             // Loading indicator when graph is hidden
             !graphVisible && React.createElement('div', {
@@ -3411,6 +3272,7 @@
                   setSelectedNodeId,
                   onNodeClick,
                   onNodeDoubleClick,
+                  onFieldClick,
                   showELKDebug,
                   elkDebugData,
                   showArgumentEdges,
@@ -3606,6 +3468,7 @@
               React.createElement('div', { key: 'title', style: { marginBottom: '4px', color: '#ff0000' } }, 'ELK DEBUG OVERLAY'),
               React.createElement('div', { key: 'nodes', style: { color: '#ff0000' } }, '🟥 Red dashed: ELK nodes'),
               React.createElement('div', { key: 'edges', style: { color: '#00ff00' } }, '🟢 Green dashed: ELK edges'),
+              React.createElement('div', { key: 'focus', style: { color: '#ff8800' } }, '🟧 Orange dashed: Focus bounds (double-click)'),
               React.createElement('div', { key: 'target', style: { color: '#0066ff' } }, '🔵 Blue: TARGET ports'),
               React.createElement('div', { key: 'rel', style: { color: '#ff6600' } }, '🟠 Orange: REL ports'),
               React.createElement('div', { key: 'scalar', style: { color: '#9966ff' } }, '🟣 Purple: SCALAR ports'),
