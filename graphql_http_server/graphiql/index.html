@@ -33,6 +33,10 @@
       rel="stylesheet"
       href="https://esm.sh/@graphiql/plugin-explorer/dist/style.css"
     />
+    <link
+      rel="stylesheet"
+      href="https://esm.sh/reactflow@11.10.4/dist/style.css"
+    />
     <style>
       /* Custom GraphQL Schema Visualizer */
       .schema-visualizer {
@@ -91,8 +95,9 @@
 
       .react-flow__node {
         z-index: 10 !important;
-        background: white;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
       }
       
       /* Hide nodes that have opacity 0 and visibility hidden */
@@ -143,8 +148,281 @@
       import { explorerPlugin } from '@graphiql/plugin-explorer';
       import { buildClientSchema, printSchema, getIntrospectionQuery } from 'graphql';
       import 'graphiql/setup-workers/esm.sh';
-      // Removed React Flow - using pure DOM/SVG implementation
+      import ReactFlow, { 
+        Controls, 
+        MiniMap, 
+        Background,
+        useNodesState,
+        useEdgesState,
+        addEdge,
+        useReactFlow
+      } from 'reactflow';
       import ELK from 'elkjs';
+
+      // Custom Graph Node - contains our entire graph visualization
+      const GraphVisualizationNode = ({ data }) => {
+        const { getViewport } = useReactFlow();
+        const reactFlowViewport = getViewport();
+        
+        const {
+          nodes,
+          edges,
+          selectedNodeId,
+          setSelectedNodeId,
+          onNodeClick,
+          onNodeDoubleClick,
+          showELKDebug,
+          elkDebugData,
+          edgesFading
+        } = data;
+
+        // Calculate the bounding box of all nodes to size the container appropriately
+        const calculateBounds = () => {
+          if (!nodes || nodes.length === 0) return { width: 1000, height: 800 };
+          
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          
+          nodes.forEach(node => {
+            if (!node.data?.hidden && node.position) {
+              // Try to get actual measured dimensions, otherwise use reasonable estimates
+              let nodeWidth = 350;
+              let nodeHeight = 200;
+              
+              if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(node.id)) {
+                const measured = window.measuredNodeDimensions.get(node.id);
+                nodeWidth = measured.width;
+                nodeHeight = measured.height;
+              }
+              
+              minX = Math.min(minX, node.position.x);
+              minY = Math.min(minY, node.position.y);
+              maxX = Math.max(maxX, node.position.x + nodeWidth);
+              maxY = Math.max(maxY, node.position.y + nodeHeight);
+            }
+          });
+          
+          // Add padding around the content
+          const padding = 100;
+          return {
+            width: Math.max(1000, maxX - minX + padding),
+            height: Math.max(800, maxY - minY + padding)
+          };
+        };
+        
+        const bounds = calculateBounds();
+
+        return React.createElement('div', {
+          style: {
+            width: `${bounds.width}px`,
+            height: `${bounds.height}px`,
+            position: 'relative',
+            background: 'transparent',
+            pointerEvents: 'auto'
+          },
+          onClick: (e) => {
+            // Only deselect if clicking on the container background (not on a node)
+            if (e.target === e.currentTarget) {
+              setSelectedNodeId(null);
+            }
+          }
+        }, [
+          // SVG for edges
+          React.createElement('svg', {
+            key: 'edges-svg',
+            style: {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+              zIndex: 1
+            }
+          }, [
+            // Circle marker definitions
+            React.createElement('defs', { key: 'defs' }, [
+              React.createElement('marker', {
+                key: 'circleEnd',
+                id: 'circleEnd',
+                markerWidth: 8,
+                markerHeight: 8,
+                refX: 4,
+                refY: 4,
+                orient: 'auto',
+                markerUnits: 'strokeWidth'
+              }, [
+                React.createElement('circle', {
+                  key: 'circle-marker',
+                  cx: 4,
+                  cy: 4,
+                  r: 3,
+                  fill: '#d0d0d0',
+                  stroke: '#d0d0d0',
+                  strokeWidth: 1
+                })
+              ]),
+              React.createElement('marker', {
+                key: 'circleEndHighlight',
+                id: 'circleEndHighlight',
+                markerWidth: 8,
+                markerHeight: 8,
+                refX: 4,
+                refY: 4,
+                orient: 'auto',
+                markerUnits: 'strokeWidth'
+              }, [
+                React.createElement('circle', {
+                  key: 'circle-marker-highlight',
+                  cx: 4,
+                  cy: 4,
+                  r: 3,
+                  fill: '#0366d6',
+                  stroke: '#0366d6',
+                  strokeWidth: 1
+                })
+              ])
+            ]),
+            // Render edges as SVG paths
+            ...edges.filter(edge => !edge.data?.hidden).map(edge => {
+              if (!edge.data?.pathData) return null;
+              
+              // Check if this edge is descended from the selected node (outgoing only)
+              const isHighlighted = selectedNodeId && edge.source === selectedNodeId;
+              
+              return React.createElement('path', {
+                key: edge.id,
+                d: edge.data.pathData,
+                stroke: isHighlighted ? '#0366d6' : '#d0d0d0',
+                strokeWidth: isHighlighted ? 5 : 2,
+                fill: 'none',
+                markerEnd: isHighlighted ? 'url(#circleEndHighlight)' : 'url(#circleEnd)',
+                opacity: edgesFading ? 0.3 : (selectedNodeId && !isHighlighted ? 0.2 : 1),
+                style: {
+                  transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                }
+              });
+            })
+          ]),
+          
+          // Render nodes as positioned DOM elements
+          ...nodes.filter(node => !node.data?.hidden).map(node => 
+            React.createElement('div', {
+              key: node.id,
+              'data-node-id': node.id,
+              onClick: (e) => {
+                e.stopPropagation();
+                onNodeClick(null, node);
+              },
+              onDoubleClick: (e) => {
+                e.stopPropagation();
+                onNodeDoubleClick(null, node);
+              },
+              style: {
+                position: 'absolute',
+                left: `${node.position.x}px`,
+                top: `${node.position.y}px`,
+                zIndex: 2,
+                cursor: 'pointer'
+              }
+            }, [
+              // Render the node content directly
+              GraphQLTypeNode({
+                data: {
+                  ...node.data,
+                  nodeId: node.id,
+                  isSelected: selectedNodeId === node.id,
+                  reactFlowViewport: reactFlowViewport
+                }
+              })
+            ])
+          ),
+          
+          // ELK Debug overlay
+          showELKDebug && elkDebugData && React.createElement('svg', {
+            key: 'elk-debug-svg',
+            style: {
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+              zIndex: 1000,
+              opacity: 0.5
+            }
+          }, [
+            // Draw ELK-proposed node positions
+            ...(elkDebugData.children || []).map(elkNode => [
+              // Node rectangle - using actual ELK dimensions
+              React.createElement('rect', {
+                key: `elk-${elkNode.id}`,
+                x: elkNode.x,
+                y: elkNode.y,
+                width: elkNode.width,
+                height: elkNode.height,
+                fill: 'none',
+                stroke: '#ff0000',
+                strokeWidth: 2,
+                strokeDasharray: '5,5',
+                opacity: 0.8
+              }),
+              // Node label
+              React.createElement('text', {
+                key: `elk-label-${elkNode.id}`,
+                x: elkNode.x + 5,
+                y: elkNode.y - 5,
+                fontSize: '12px',
+                fill: '#ff0000',
+                fontWeight: 'bold',
+                fontFamily: 'monospace'
+              }, `ELK: ${elkNode.id}`),
+              // Draw ELK-proposed port positions
+              ...(elkNode.ports || []).map(port => 
+                React.createElement('circle', {
+                  key: `elk-port-${elkNode.id}-${port.id}`,
+                  cx: elkNode.x + port.x,
+                  cy: elkNode.y + port.y,
+                  r: 3,
+                  fill: port.isRelationship ? '#ff6600' : 
+                        port.isScalar ? '#9966ff' : 
+                        port.id.includes('target') ? '#0066ff' : '#cccccc',
+                  stroke: '#000',
+                  strokeWidth: 1
+                })
+              )
+            ]).flat(),
+            
+            // Draw ELK edges
+            ...(elkDebugData.edges || []).map(elkEdge => {
+              if (!elkEdge.sections || elkEdge.sections.length === 0) return null;
+              const section = elkEdge.sections[0];
+              let pathData = `M ${section.startPoint.x} ${section.startPoint.y}`;
+              
+              if (section.bendPoints && section.bendPoints.length > 0) {
+                section.bendPoints.forEach(point => {
+                  pathData += ` L ${point.x} ${point.y}`;
+                });
+              }
+              pathData += ` L ${section.endPoint.x} ${section.endPoint.y}`;
+              
+              return React.createElement('path', {
+                key: `elk-edge-${elkEdge.id}`,
+                d: pathData,
+                stroke: '#00ff00',
+                strokeWidth: 2,
+                strokeDasharray: '5,5',
+                fill: 'none',
+                opacity: 0.8
+              });
+            })
+          ])
+        ]);
+      };
+
+      // Define custom node types
+      const nodeTypes = {
+        graphVisualization: GraphVisualizationNode
+      };
 
       // SDL Download Plugin
       const sdlDownloadPlugin = {
@@ -670,8 +948,11 @@
                   if (!window.measuredNodeDimensions) {
                     window.measuredNodeDimensions = new Map();
                   }
-                  // Compensate for viewport zoom to get true CSS dimensions
-                  const currentZoom = window._currentViewport?.zoom || 0.8;
+                  // Get React Flow's current zoom to compensate for scaling
+                  const currentZoom = data.reactFlowViewport?.zoom || 1;
+                  
+                  // Use the full rendered dimensions - let ELK work with what's actually displayed
+                  // This includes all borders, padding, content - everything that's visually rendered
                   const trueWidth = rect.width / currentZoom;
                   const trueHeight = rect.height / currentZoom;
                   
@@ -691,9 +972,9 @@
           style: {
             background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' : 
                        isDownstreamOfSelected ? 'linear-gradient(135deg, #f8f9ff 0%, #f4f6ff 100%)' : 'white',
-            border: isSelected ? '3px solid #0366d6' : 
-                   isDownstreamOfSelected ? '2px solid #0366d6' :
-                   shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
+            border: shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
+            outline: isSelected ? '5px solid #0366d6' : 
+                    isDownstreamOfSelected ? '3px solid #0366d6' : 'none',
             borderRadius: '8px',
             minWidth: isRootType ? '350px' : '280px',
             maxWidth: isRootType ? '400px' : '320px',
@@ -701,12 +982,12 @@
                        isDownstreamOfSelected ? '0 4px 12px rgba(3,102,214,0.2), 0 0 0 1px rgba(3,102,214,0.05)' :
                        shouldDim ? '0 1px 3px rgba(0,0,0,0.05)' : '0 2px 8px rgba(0,0,0,0.1)',
             position: 'relative',
-            opacity: data.hidden ? 0 : (shouldDim ? 0.25 : 1), // Hide with opacity for DOM stability
+            opacity: data.hidden ? 0 : (shouldDim ? 0.15 : 1), // More faded out for better contrast
             visibility: data.hidden ? 'hidden' : 'visible', // Also use visibility for better performance
             pointerEvents: data.hidden ? 'none' : 'auto', // Disable interaction for hidden nodes
             transform: 'scale(1)',
             zIndex: isSelected ? 10 : isDownstreamOfSelected ? 8 : shouldDim ? 1 : 5,
-            transition: 'border 0.2s ease, box-shadow 0.2s ease, background 0.2s ease'
+            transition: 'border 0.2s ease, outline 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, opacity 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
           }
         }, [
           // Root type label (subtle header row)
@@ -837,8 +1118,8 @@
                       const nodeRect = nodeEl.getBoundingClientRect();
                       
                       // Calculate exact port position - right edge center of the field
-                      // Compensate for viewport zoom to get true CSS dimensions
-                      const currentZoom = window._currentViewport?.zoom || 0.8;
+                      // Get React Flow's zoom to compensate for scaling
+                      const currentZoom = data.reactFlowViewport?.zoom || 1;
                       
                       // Calculate field position relative to node in screen pixels, then compensate for zoom
                       const fieldTopRelative = rect.top - nodeRect.top;
@@ -987,15 +1268,10 @@
           const [selectedNodeId, setSelectedNodeId] = React.useState(null);
           const [focusedNodeId, setFocusedNodeId] = React.useState(null);
           // Removed React Flow instance - using custom viewport
-          const [viewport, setViewport] = React.useState({ x: -100, y: -100, zoom: 0.8 });
-          
-          // Store viewport in window for non-passive wheel handler
-          React.useEffect(() => {
-            window._currentViewport = viewport;
-            window._setViewport = setViewport;
-          }, [viewport]);
-          const [isPanning, setIsPanning] = React.useState(false);
-          const [panStart, setPanStart] = React.useState(null);
+          // React Flow handles viewport state internally, so we don't need these
+          // const [viewport, setViewport] = React.useState({ x: -100, y: -100, zoom: 0.8 });
+          // const [isPanning, setIsPanning] = React.useState(false);
+          // const [panStart, setPanStart] = React.useState(null);
           const [nodes, setNodes] = React.useState([]);
           const [edges, setEdges] = React.useState([]);
           const [edgesFading, setEdgesFading] = React.useState(false);
@@ -2449,380 +2725,47 @@
               }, 'Back')
             ]),
             
-            // Custom Viewport Implementation (replacing React Flow)
-            React.createElement('div', {
-              key: 'custom-viewport',
+            // React Flow with our custom graph as a single node
+            React.createElement(ReactFlow, {
+              key: 'react-flow',
+              nodes: [{
+                id: 'graph-container',
+                type: 'graphVisualization',
+                position: { x: 0, y: 0 },
+                data: {
+                  nodes,
+                  edges,
+                  selectedNodeId,
+                  setSelectedNodeId,
+                  onNodeClick,
+                  onNodeDoubleClick,
+                  showELKDebug,
+                  elkDebugData,
+                  edgesFading
+                },
+                draggable: false,
+                selectable: false
+              }],
+              edges: [], // No React Flow edges, we handle them internally
+              nodeTypes,
+              fitView: true,
+              fitViewOptions: {
+                padding: 0.1
+              },
+              defaultViewport: { x: 0, y: 0, zoom: 0.8 },
+              minZoom: 0.1,
+              maxZoom: 2,
               style: {
-                position: 'relative',
-                width: '100%',
-                height: '100%',
-                background: '#fafbfc',
-                overflow: 'hidden',
-                cursor: isPanning ? 'grabbing' : 'grab'
-              },
-              onMouseDown: (e) => {
-                if (e.button === 0) { // Left click only
-                  setIsPanning(true);
-                  setPanStart({ x: e.clientX - viewport.x, y: e.clientY - viewport.y });
-                }
-              },
-              onClick: (e) => {
-                // Only deselect if clicking on the viewport background (not on a node)
-                if (e.target === e.currentTarget) {
-                  setSelectedNodeId(null);
-                }
-              },
-              onMouseMove: (e) => {
-                if (isPanning && panStart) {
-                  setViewport({
-                    ...viewport,
-                    x: e.clientX - panStart.x,
-                    y: e.clientY - panStart.y
-                  });
-                }
-              },
-              onMouseUp: () => {
-                setIsPanning(false);
-                setPanStart(null);
-              },
-              onMouseLeave: () => {
-                setIsPanning(false);
-                setPanStart(null);
-              },
-              ref: (el) => {
-                if (el && !el._wheelListenerAdded) {
-                  el._wheelListenerAdded = true;
-                  let wheelTimer = null;
-                  
-                  el.addEventListener('wheel', (e) => {
-                    e.preventDefault();
-                    
-                    // Clear any existing timer
-                    if (wheelTimer) {
-                      clearTimeout(wheelTimer);
-                    }
-                    
-                    const rect = el.getBoundingClientRect();
-                    const mouseX = e.clientX - rect.left;
-                    const mouseY = e.clientY - rect.top;
-                    
-                    const zoomFactor = e.deltaY > 0 ? 0.95 : 1.05; // Smoother zoom increments
-                    const currentViewport = window._currentViewport || { x: -100, y: -100, zoom: 0.8 };
-                    const newZoom = Math.max(0.1, Math.min(1.5, currentViewport.zoom * zoomFactor));
-                    
-                    // Zoom towards mouse position
-                    const zoomRatio = newZoom / currentViewport.zoom;
-                    const newViewport = {
-                      x: mouseX - (mouseX - currentViewport.x) * zoomRatio,
-                      y: mouseY - (mouseY - currentViewport.y) * zoomRatio,
-                      zoom: newZoom
-                    };
-                    
-                    // Update immediately for smooth feel
-                    window._currentViewport = newViewport;
-                    
-                    // Throttle React state updates to reduce jerkiness
-                    wheelTimer = setTimeout(() => {
-                      window._setViewport && window._setViewport(newViewport);
-                    }, 16); // ~60fps
-                  }, { passive: false });
-                }
+                background: '#fafbfc'
               }
             }, [
-              // Viewport container for nodes and edges
-              React.createElement('div', {
-                key: 'viewport-content',
-                style: {
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
-                  transformOrigin: '0 0',
-                  transition: isPanning ? 'none' : 'transform 0.2s ease-out'
-                }
-              }, [
-                // SVG for edges
-                React.createElement('svg', {
-                  key: 'edges-svg',
-                  style: {
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    width: '4000px', // Large canvas for ELK layout
-                    height: '4000px',
-                    pointerEvents: 'none',
-                    zIndex: 1
-                  }
-                }, [
-                  // Circle marker definitions
-                  React.createElement('defs', { key: 'defs' }, [
-                    React.createElement('marker', {
-                      key: 'circleEnd',
-                      id: 'circleEnd',
-                      markerWidth: 8,
-                      markerHeight: 8,
-                      refX: 4,
-                      refY: 4,
-                      orient: 'auto',
-                      markerUnits: 'strokeWidth'
-                    }, [
-                      React.createElement('circle', {
-                        key: 'circle-marker',
-                        cx: 4,
-                        cy: 4,
-                        r: 3,
-                        fill: '#d0d0d0',
-                        stroke: '#d0d0d0',
-                        strokeWidth: 1
-                      })
-                    ]),
-                    React.createElement('marker', {
-                      key: 'circleEndHighlight',
-                      id: 'circleEndHighlight',
-                      markerWidth: 8,
-                      markerHeight: 8,
-                      refX: 4,
-                      refY: 4,
-                      orient: 'auto',
-                      markerUnits: 'strokeWidth'
-                    }, [
-                      React.createElement('circle', {
-                        key: 'circle-marker-highlight',
-                        cx: 4,
-                        cy: 4,
-                        r: 3,
-                        fill: '#4a90e2',
-                        stroke: '#4a90e2',
-                        strokeWidth: 1
-                      })
-                    ])
-                  ]),
-                  // Render edges as SVG paths
-                  ...edges.filter(edge => !edge.data?.hidden).map(edge => {
-                    if (!edge.data?.pathData) return null;
-                    
-                    // Check if this edge is descended from the selected node (outgoing only)
-                    const isHighlighted = selectedNodeId && edge.source === selectedNodeId;
-                    
-                    return React.createElement('path', {
-                      key: edge.id,
-                      d: edge.data.pathData,
-                      stroke: isHighlighted ? '#4a90e2' : '#d0d0d0',
-                      strokeWidth: isHighlighted ? 3 : 2,
-                      fill: 'none',
-                      markerEnd: isHighlighted ? 'url(#circleEndHighlight)' : 'url(#circleEnd)',
-                      opacity: edgesFading ? 0.3 : 1,
-                      style: {
-                        transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
-                      }
-                    });
-                  })
-                ]),
-                
-                // Render nodes as positioned DOM elements
-                ...nodes.filter(node => !node.data?.hidden).map(node => 
-                  React.createElement('div', {
-                    key: node.id,
-                    'data-node-id': node.id,
-                    onClick: (e) => {
-                      e.stopPropagation();
-                      onNodeClick(null, node);
-                    },
-                    onDoubleClick: (e) => {
-                      e.stopPropagation();
-                      onNodeDoubleClick(null, node);
-                    },
-                    style: {
-                      position: 'absolute',
-                      left: `${node.position.x}px`,
-                      top: `${node.position.y}px`,
-                      zIndex: 2,
-                      cursor: 'pointer'
-                    }
-                  }, [
-                    // Render the node content directly
-                    GraphQLTypeNode({
-                      data: {
-                        ...node.data,
-                        nodeId: node.id,
-                        isSelected: selectedNodeId === node.id
-                      }
-                    })
-                  ])
-                ),
-                
-                // ELK Debug overlay - in same coordinate system as nodes
-                showELKDebug && elkDebugData && React.createElement('svg', {
-                  key: 'elk-debug-svg',
-                  style: {
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    width: '4000px',
-                    height: '4000px',
-                    pointerEvents: 'none',
-                    zIndex: 1000,
-                    opacity: 0.5
-                  }
-                }, [
-                  // Draw ELK-proposed node positions
-                  ...(elkDebugData.children || []).map(elkNode => [
-                    // Node rectangle - using actual ELK dimensions
-                    React.createElement('rect', {
-                      key: `elk-${elkNode.id}`,
-                      x: elkNode.x,
-                      y: elkNode.y,
-                      width: elkNode.width,
-                      height: elkNode.height,
-                      fill: 'none',
-                      stroke: '#ff0000',
-                      strokeWidth: 2,
-                      strokeDasharray: '5,5',
-                      opacity: 0.8
-                    }),
-                    // Node label
-                    React.createElement('text', {
-                      key: `elk-label-${elkNode.id}`,
-                      x: elkNode.x + 5,
-                      y: elkNode.y - 5,
-                      fontSize: '12px',
-                      fill: '#ff0000',
-                      fontWeight: 'bold',
-                      fontFamily: 'monospace'
-                    }, `ELK: ${elkNode.id}`),
-                    // Draw ELK-proposed port positions
-                    ...(elkNode.ports || []).map(port => 
-                      React.createElement('circle', {
-                        key: `elk-port-${elkNode.id}-${port.id}`,
-                        cx: elkNode.x + port.x,
-                        cy: elkNode.y + port.y,
-                        r: 3,
-                        fill: port.isRelationship ? '#ff6600' : 
-                              port.isScalar ? '#9966ff' : 
-                              port.id.includes('target') ? '#0066ff' : '#cccccc',
-                        stroke: '#000',
-                        strokeWidth: 1
-                      })
-                    )
-                  ]).flat(),
-                  
-                  // Draw ELK edges
-                  ...(elkDebugData.edges || []).map(elkEdge => {
-                    if (!elkEdge.sections || elkEdge.sections.length === 0) return null;
-                    const section = elkEdge.sections[0];
-                    let pathData = `M ${section.startPoint.x} ${section.startPoint.y}`;
-                    
-                    if (section.bendPoints && section.bendPoints.length > 0) {
-                      section.bendPoints.forEach(point => {
-                        pathData += ` L ${point.x} ${point.y}`;
-                      });
-                    }
-                    pathData += ` L ${section.endPoint.x} ${section.endPoint.y}`;
-                    
-                    return React.createElement('path', {
-                      key: `elk-edge-${elkEdge.id}`,
-                      d: pathData,
-                      stroke: '#00ff00',
-                      strokeWidth: 2,
-                      strokeDasharray: '5,5',
-                      fill: 'none',
-                      opacity: 0.8
-                    });
-                  })
-                ])
-              ]),
-              
-              // Custom controls
-              React.createElement('div', {
-                key: 'custom-controls',
-                style: {
-                  position: 'absolute',
-                  bottom: '20px',
-                  left: '20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                  zIndex: 10
-                }
-              }, [
-                React.createElement('button', {
-                  key: 'zoom-in',
-                  onClick: (e) => {
-                    const zoomFactor = 1.2;
-                    const newZoom = Math.min(1.5, viewport.zoom * zoomFactor);
-                    
-                    // Get viewport center for zooming
-                    const viewportEl = e.target.closest('[key="custom-viewport"]') || document.querySelector('[style*="position: relative"][style*="width: 100%"]');
-                    if (viewportEl) {
-                      const rect = viewportEl.getBoundingClientRect();
-                      const centerX = rect.width / 2;
-                      const centerY = rect.height / 2;
-                      
-                      // Zoom towards center
-                      const zoomRatio = newZoom / viewport.zoom;
-                      setViewport({
-                        x: centerX - (centerX - viewport.x) * zoomRatio,
-                        y: centerY - (centerY - viewport.y) * zoomRatio,
-                        zoom: newZoom
-                      });
-                    } else {
-                      setViewport({ ...viewport, zoom: newZoom });
-                    }
-                  },
-                  style: {
-                    width: '32px',
-                    height: '32px',
-                    border: '1px solid #d1d5da',
-                    backgroundColor: 'white',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }
-                }, '+'),
-                React.createElement('button', {
-                  key: 'zoom-out',
-                  onClick: (e) => {
-                    const zoomFactor = 0.8;
-                    const newZoom = Math.max(0.1, viewport.zoom * zoomFactor);
-                    
-                    // Get viewport center for zooming
-                    const viewportEl = e.target.closest('[key="custom-viewport"]') || document.querySelector('[style*="position: relative"][style*="width: 100%"]');
-                    if (viewportEl) {
-                      const rect = viewportEl.getBoundingClientRect();
-                      const centerX = rect.width / 2;
-                      const centerY = rect.height / 2;
-                      
-                      // Zoom towards center
-                      const zoomRatio = newZoom / viewport.zoom;
-                      setViewport({
-                        x: centerX - (centerX - viewport.x) * zoomRatio,
-                        y: centerY - (centerY - viewport.y) * zoomRatio,
-                        zoom: newZoom
-                      });
-                    } else {
-                      setViewport({ ...viewport, zoom: newZoom });
-                    }
-                  },
-                  style: {
-                    width: '32px',
-                    height: '32px',
-                    border: '1px solid #d1d5da',
-                    backgroundColor: 'white',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }
-                }, '−')
-              ])
+              React.createElement(Controls, {
+                key: 'controls',
+                showInteractive: false
+              })
             ]),
-
-            // Removed - ELK debug overlay moved to viewport content
             
-            // Add debug legend
+            // ELK Debug legend - positioned relative to viewport, not the custom node
             showELKDebug && React.createElement('div', {
               key: 'elk-legend-overlay',
               style: {
