@@ -1731,13 +1731,13 @@
                     if (nodeEl && rect.height > 0) {
                       const nodeRect = nodeEl.getBoundingClientRect();
                       
-                      // Calculate exact port position - right edge center of the field
+                      // Calculate exact port position - right edge center of the main field row (top line)
                       // Get React Flow's zoom to compensate for scaling
                       const currentZoom = data.reactFlowViewport?.zoom || 1;
                       
                       // Calculate field position relative to node in screen pixels, then compensate for zoom
                       const fieldTopRelative = rect.top - nodeRect.top;
-                      const fieldCenterYRelative = fieldTopRelative + (rect.height / 2);
+                      const fieldCenterYRelative = fieldTopRelative + 22.5; // Center of the 45px main field row
                       const portX = (rect.right - nodeRect.left) / currentZoom; // Right edge of field relative to node
                       const portY = fieldCenterYRelative / currentZoom;
                       
@@ -1764,64 +1764,103 @@
                 }
               },
               style: {
-                padding: '8px 16px',
+                padding: '0',
                 borderBottom: fieldIndex < totalItems - 1 ? '1px solid #f1f3f4' : 'none',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
                 backgroundColor: isRelationship ? '#f8f9ff' : 'white',
                 cursor: 'default',
-                position: 'relative',
-                height: '45px'
+                position: 'relative'
               },
             }, [
-              React.createElement('span', {
-                key: 'name',
-                style: { 
-                  color: '#24292e',
-                  fontWeight: '500',
-                  fontSize: isRootType ? '21px' : '19.5px'
+              // Main field row
+              React.createElement('div', {
+                key: 'field-main',
+                style: {
+                  padding: '8px 16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  height: '45px'
                 }
-              }, field.name),
-              !isEnumValue && React.createElement('span', {
-                key: 'type',
-                style: { 
-                  color: isRelationship ? '#0366d6' : '#656d76',
-                  fontWeight: isRelationship ? '600' : '400',
-                  fontSize: '18px',
-                  fontFamily: 'SFMono-Regular, Consolas, monospace',
-                  cursor: isRelationship ? 'pointer' : 'default'
-                },
-                onClick: isRelationship ? (e) => {
-                  e.stopPropagation();
-                  const targetTypeId = `type-${coreTypeName}`;
-                  if (onFieldClick) {
-                    console.log('Field type clicked:', field.name, '-> target:', targetTypeId);
-                    onFieldClick(targetTypeId);
+              }, [
+                React.createElement('span', {
+                  key: 'name',
+                  style: { 
+                    color: '#24292e',
+                    fontWeight: '500',
+                    fontSize: isRootType ? '21px' : '19.5px'
                   }
-                } : undefined
-              }, fieldTypeString),
+                }, field.name),
+                !isEnumValue && React.createElement('span', {
+                  key: 'type',
+                  style: { 
+                    color: isRelationship ? '#0366d6' : '#656d76',
+                    fontWeight: isRelationship ? '600' : '400',
+                    fontSize: '18px',
+                    fontFamily: 'SFMono-Regular, Consolas, monospace',
+                    cursor: isRelationship ? 'pointer' : 'default'
+                  },
+                  onClick: isRelationship ? (e) => {
+                    e.stopPropagation();
+                    const targetTypeId = `type-${coreTypeName}`;
+                    if (onFieldClick) {
+                      console.log('Field type clicked:', field.name, '-> target:', targetTypeId);
+                      onFieldClick(targetTypeId);
+                    }
+                  } : undefined
+                }, fieldTypeString)
+              ]),
               
-              // Removed React Flow Handle - handles are now managed by ELK ports
-              // !isEnumValue && React.createElement(Handle, {
-              //   key: 'handle',
-              //   type: 'source',
-              //   position: 'right',
-              //   id: `${data.nodeId}-field-${field.name}`,
-              //   style: {
-              //     right: '-6px',
-              //     top: '50%',
-              //     transform: 'translateY(-50%)',
-              //     width: '4px',
-              //     height: '4px',
-              //     backgroundColor: 'transparent',
-              //     borderRadius: '50%',
-              //     border: 'none',
-              //     boxShadow: 'none',
-              //     opacity: 0,
-              //     pointerEvents: isRelationship ? 'auto' : 'none' // Only relationship handles are interactive
-              //   }
-              // })
+              // Arguments section (only for fields with arguments)
+              !isEnumValue && field.args && field.args.length > 0 && React.createElement('div', {
+                key: 'field-args',
+                style: {
+                  padding: '0 16px 8px 32px', // Indent arguments
+                  backgroundColor: 'white' // Always white background for arguments
+                }
+              }, field.args.map((arg, argIndex) => {
+                // Check if argument type is a relationship (not scalar)
+                const argCoreTypeName = getCoreTypeName(arg.type);
+                const isArgRelationship = argCoreTypeName && !argCoreTypeName.startsWith('__') && !isScalarType(argCoreTypeName);
+                
+                return React.createElement('div', {
+                  key: `arg-${arg.name}`,
+                  style: {
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '4px 0',
+                    fontSize: '16px',
+                    color: '#586069'
+                  }
+                }, [
+                  React.createElement('span', {
+                    key: 'arg-name',
+                    style: {
+                      color: '#8c959f', // Lighter color for argument names
+                      fontWeight: '400',
+                      fontSize: '16px'
+                    }
+                  }, arg.name),
+                  React.createElement('span', {
+                    key: 'arg-type',
+                    style: {
+                      color: isArgRelationship ? '#7c9eff' : '#9ca3af', // Faded blue for relationships, lighter gray for scalars
+                      fontWeight: '400',
+                      fontSize: '16px',
+                      fontFamily: 'SFMono-Regular, Consolas, monospace',
+                      cursor: isArgRelationship ? 'pointer' : 'default'
+                    },
+                    onClick: isArgRelationship ? (e) => {
+                      e.stopPropagation();
+                      const targetTypeId = `type-${argCoreTypeName}`;
+                      if (onFieldClick) {
+                        console.log('Argument type clicked:', arg.name, '-> target:', targetTypeId);
+                        onFieldClick(targetTypeId);
+                      }
+                    } : undefined
+                  }, getTypeString(arg.type))
+                ]);
+              }))
             ]);
           })),
 
