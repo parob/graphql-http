@@ -181,6 +181,9 @@
             return;
           }
           
+          // Mark that we're now in root types view
+          window._isRootTypesView = true;
+          
           const currentNodes = window._cachedLayoutData?.nodes || window._lastELKLayoutData?.nodes || [];
           
           const rootTypeNodes = currentNodes.filter(node => 
@@ -405,6 +408,9 @@
           
           window._smoothFitView = () => {
             console.log('Smooth Fit View called');
+            
+            // Mark that we're now in full view
+            window._isRootTypesView = false;
             
             // Use stored ELK layout data if available
             const layoutData = window._getLatestLayoutData();
@@ -1261,12 +1267,19 @@
 
       // Custom GraphQL Type Node Component
       const GraphQLTypeNode = ({ data }) => {
-        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected, isDownstreamOfSelected } = data;
+        const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected, isDownstreamOfSelected, schemaData } = data;
         const isQueryType = data.isQueryType;
         const isMutationType = data.isMutationType;
         const isSubscriptionType = data.isSubscriptionType;
 
         const isRootType = isQueryType || isMutationType || isSubscriptionType;
+        
+        // Helper function to get target type description for relationships
+        const getTargetTypeDescription = (fieldTypeName) => {
+          if (!schemaData || !fieldTypeName) return null;
+          const targetType = schemaData.__schema.types.find(t => t.name === fieldTypeName);
+          return targetType?.description || null;
+        };
         
         const nodeContent = React.createElement('div', {
           onDoubleClick: (e) => {
@@ -1486,7 +1499,13 @@
                     fontFamily: 'SFMono-Regular, Consolas, monospace',
                     cursor: isRelationship ? 'pointer' : 'default'
                   },
-                  title: field.description || undefined,
+                  title: isRelationship ? 
+                    (() => {
+                      const fieldDesc = field.description || 'No field description';
+                      const targetTypeDesc = getTargetTypeDescription(coreTypeName) || 'No type description';
+                      return `${fieldDesc}\n\n${coreTypeName}\n${targetTypeDesc}`;
+                    })() : 
+                    (field.description || undefined),
                   onClick: isRelationship ? (e) => {
                     e.stopPropagation();
                     const targetTypeId = `type-${coreTypeName}`;
@@ -1593,7 +1612,13 @@
                       fontFamily: 'SFMono-Regular, Consolas, monospace',
                       cursor: isArgRelationship ? 'pointer' : 'default'
                     },
-                    title: arg.description || undefined,
+                    title: isArgRelationship ? 
+                      (() => {
+                        const argDesc = arg.description || 'No argument description';
+                        const targetTypeDesc = getTargetTypeDescription(argCoreTypeName) || 'No type description';
+                        return `${argDesc}\n\n${argCoreTypeName}\n${targetTypeDesc}`;
+                      })() : 
+                      (arg.description || undefined),
                     onClick: isArgRelationship ? (e) => {
                       e.stopPropagation();
                       const targetTypeId = `type-${argCoreTypeName}`;
@@ -3029,7 +3054,8 @@
                   isSelected,
                   isDownstreamOfSelected,
                   isTransitioning,
-                  hidden: !isVisible // Add hidden property for DOM stability
+                  hidden: !isVisible, // Add hidden property for DOM stability
+                  schemaData // Add schema data for relationship tooltips
                 }
               });
 
@@ -3369,13 +3395,31 @@
                     const timeSinceLastClick = now - lastFitViewTime;
                     window._lastFitViewClickTime = now;
                     
-                    // If clicked within 1 second, zoom to root types instead
+                    // If clicked within 1 second, toggle between root types and full view
                     if (timeSinceLastClick < 1000) {
-                      if (window._centerOnRootTypes) {
-                        window._centerOnRootTypes();
+                      // Toggle between root types view and full view
+                      const isCurrentlyRootView = window._isRootTypesView || false;
+                      
+                      if (isCurrentlyRootView) {
+                        // Currently showing root types, switch to full view
+                        window._isRootTypesView = false;
+                        // Clear any selection when fit view is clicked
+                        if (setSelectedNodeId) {
+                          setSelectedNodeId(null);
+                        }
+                        if (window._smoothFitView) {
+                          window._smoothFitView();
+                        }
+                      } else {
+                        // Currently showing full view, switch to root types
+                        window._isRootTypesView = true;
+                        if (window._centerOnRootTypes) {
+                          window._centerOnRootTypes();
+                        }
                       }
                     } else {
-                      // Normal fitview behavior
+                      // Normal fitview behavior - go to full view
+                      window._isRootTypesView = false;
                       // Clear any selection when fit view is clicked
                       if (setSelectedNodeId) {
                         setSelectedNodeId(null);
