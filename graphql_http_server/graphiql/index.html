@@ -94,6 +94,7 @@
       }
 
       .react-flow__node {
+        outline: 0px !important;
         z-index: 10 !important;
         background: transparent !important;
         box-shadow: none !important;
@@ -770,7 +771,7 @@
           ]),
           
           // Bounding Box Visualization - shows the area that fit view will target
-          boundingBox && React.createElement('div', {
+          boundingBox && showELKDebug && React.createElement('div', {
             key: 'bounding-box-overlay',
             style: {
               position: 'absolute',
@@ -1924,30 +1925,18 @@
           // Keyboard event handler for ELK debug toggle
           React.useEffect(() => {
             const handleKeyDown = (event) => {
-              // Add key to sequence
-              keySequenceRef.current += event.key.toLowerCase();
-              
-              // Keep only last 10 characters to prevent memory issues
-              if (keySequenceRef.current.length > 10) {
-                keySequenceRef.current = keySequenceRef.current.slice(-10);
+              // Toggle ELK debug overlay and bounding box with 'd' key
+              if (event.key.toLowerCase() === 'd' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                // Only toggle if not typing in an input field
+                if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
+                  setShowELKDebug(prev => {
+                    const newValue = !prev;
+                    console.log(`ELK debug overlay ${newValue ? 'enabled' : 'disabled'}`);
+                    return newValue;
+                  });
+                  event.preventDefault(); // Prevent default behavior
+                }
               }
-              
-              // Check for "elk" sequence
-              if (keySequenceRef.current.includes('elk')) {
-                setShowELKDebug(true);
-                keySequenceRef.current = ''; // Reset sequence
-              }
-              
-              // Check for Escape key to hide debug
-              if (event.key === 'Escape') {
-                setShowELKDebug(false);
-                keySequenceRef.current = ''; // Reset sequence
-              }
-              
-              // Reset sequence after 2 seconds of inactivity
-              setTimeout(() => {
-                keySequenceRef.current = '';
-              }, 2000);
             };
 
             document.addEventListener('keydown', handleKeyDown);
