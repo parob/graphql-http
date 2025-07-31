@@ -708,12 +708,13 @@
         const calculateRootTypesBoundingBox = createRootTypesBoundingBoxCalculator();
         const rootTypesBoundingBox = calculateRootTypesBoundingBox();
 
-        // Calculate the bounding box of all nodes to size the container appropriately
+        // Calculate the bounding box of all nodes and edges to size the container appropriately
         const calculateBounds = () => {
           if (!nodes || nodes.length === 0) return { width: 1000, height: 800 };
           
           let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
           
+          // Include all visible nodes
           nodes.forEach(node => {
             if (!node.data?.hidden && node.position) {
               // Try to get actual measured dimensions, otherwise use reasonable estimates
@@ -730,6 +731,29 @@
               minY = Math.min(minY, node.position.y);
               maxX = Math.max(maxX, node.position.x + nodeWidth);
               maxY = Math.max(maxY, node.position.y + nodeHeight);
+            }
+          });
+          
+          // Include all edge path points to ensure edges are within bounds
+          edges.forEach(edge => {
+            if (!edge.data?.hidden && edge.data?.pathData) {
+              // Parse SVG path data to get all coordinates
+              const pathData = edge.data.pathData;
+              const coordinates = pathData.match(/[\d.-]+/g);
+              
+              if (coordinates) {
+                for (let i = 0; i < coordinates.length; i += 2) {
+                  const x = parseFloat(coordinates[i]);
+                  const y = parseFloat(coordinates[i + 1]);
+                  
+                  if (!isNaN(x) && !isNaN(y)) {
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                  }
+                }
+              }
             }
           });
           
@@ -1814,7 +1838,7 @@
               !isEnumValue && field.args && field.args.length > 0 && React.createElement('div', {
                 key: 'field-args',
                 style: {
-                  padding: '0 16px 8px 32px', // Indent arguments
+                  padding: '0 16px 8px 48px', // More inset for arguments
                   backgroundColor: 'white' // Always white background for arguments
                 }
               }, field.args.map((arg, argIndex) => {
@@ -1824,6 +1848,47 @@
                 
                 return React.createElement('div', {
                   key: `arg-${arg.name}`,
+                  ref: (el) => {
+                    if (el && !data.hidden) {
+                      // Use requestAnimationFrame to ensure measurement happens after layout
+                      requestAnimationFrame(() => {
+                        const rect = el.getBoundingClientRect();
+                        const nodeEl = el.closest('[data-node-id]');
+                        if (nodeEl && rect.height > 0) {
+                          const nodeRect = nodeEl.getBoundingClientRect();
+                          
+                          // Calculate exact argument port position - right edge center of the argument row
+                          // Get React Flow's zoom to compensate for scaling
+                          const currentZoom = data.reactFlowViewport?.zoom || 1;
+                          
+                          // Calculate argument position relative to node in screen pixels, then compensate for zoom
+                          const argTopRelative = rect.top - nodeRect.top;
+                          const argCenterYRelative = argTopRelative + (rect.height / 2); // Center of the argument row
+                          const portX = (rect.right - nodeRect.left) / currentZoom; // Right edge of argument relative to node
+                          const portY = argCenterYRelative / currentZoom;
+                          
+                          // Add small offset adjustment to account for any CSS discrepancies
+                          const adjustedPortY = portY - 2; // Adjust down by 2 pixels to account for potential border/margin differences
+                          
+                          if (!window.measuredArgumentPositions) {
+                            window.measuredArgumentPositions = new Map();
+                          }
+                          const argKey = `${data.nodeId}-${field.name}-arg-${arg.name}`;
+                          // Only update if position has changed significantly
+                          const existing = window.measuredArgumentPositions.get(argKey);
+                          if (!existing || Math.abs(existing.y - adjustedPortY) > 1) {
+                            window.measuredArgumentPositions.set(argKey, {
+                              y: adjustedPortY,
+                              x: portX,
+                              height: rect.height,
+                              width: rect.width
+                            });
+                            console.log(`Measured argument port ${argKey}: x=${portX.toFixed(1)}, y=${adjustedPortY.toFixed(1)} (raw: ${portY.toFixed(1)}, zoom: ${currentZoom.toFixed(2)})`);
+                          }
+                        }
+                      });
+                    }
+                  },
                   style: {
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -1918,6 +1983,7 @@
           const [showOnlyRootTypes, setShowOnlyRootTypes] = React.useState(false);
           const [layoutedData, setLayoutedData] = React.useState({ nodes: [], edges: [] });
           const [showELKDebug, setShowELKDebug] = React.useState(false); // Hidden by default
+        const [showArgumentEdges, setShowArgumentEdges] = React.useState(true); // Always enabled by default
           const [elkDebugData, setElkDebugData] = React.useState(null);
           const [selectedNodeId, setSelectedNodeId] = React.useState(() => {
             // Restore previous selection if returning to tab
@@ -2011,7 +2077,7 @@
               await new Promise(resolve => setTimeout(resolve, 300));
               
               // Second pass: apply ELK layout with measured widths
-              const layouted = await getLayoutedElements(nodes, edges, true);
+                              const layouted = await getLayoutedElements(nodes, edges, true, true);
               
               // Cache the layout data globally
               window._cachedLayoutData = layouted;
@@ -2204,6 +2270,8 @@
                 }
                 event.preventDefault();
               }
+              
+
             };
 
             document.addEventListener('keydown', handleKeyDown);
@@ -2264,7 +2332,7 @@
           };
 
           // ELK layout with debugging
-          const getLayoutedElements = async (nodes, edges, waitForMeasurements = false) => {
+          const getLayoutedElements = async (nodes, edges, waitForMeasurements = false, showArgs = false) => {
             const elk = new ELK();
             
             // Wait for node measurements if requested
@@ -2303,7 +2371,19 @@
                 // Fallback calculations
                 const minContentWidth = isRootType ? 350 : 280;
                 nodeWidth = minContentWidth + (borderWidth * 2);
-                nodeHeight = Math.max(100, 60 + (itemCount * 45) + rootTypeHeaderHeight + 20);
+                // Calculate height including arguments
+                let totalHeight = 60 + (itemCount * 45) + rootTypeHeaderHeight + 20;
+                
+                // Add extra height for fields with arguments
+                const items = node.data.type.fields || node.data.type.inputFields || node.data.type.enumValues || [];
+                items.forEach(item => {
+                  if (item.args && item.args.length > 0) {
+                    // Add height for each argument (roughly 20px per argument)
+                    totalHeight += item.args.length * 20;
+                  }
+                });
+                
+                nodeHeight = Math.max(100, totalHeight);
                 console.log(`ELK using calculated dimensions for ${node.id}: ${nodeWidth} x ${nodeHeight}px (isRoot: ${isRootType})`);
               }
               
@@ -2390,6 +2470,64 @@
                   });
                 }
               });
+              
+              // Add argument ports (always enabled)
+              {
+                items.forEach((item, itemIndex) => {
+                  const isEnumValue = !item.type;
+                  
+                  if (!isEnumValue && item.args && item.args.length > 0) {
+                    // Create ports for each argument that is a relationship
+                    item.args.forEach((arg, argIndex) => {
+                      const argCoreTypeName = getCoreTypeName(arg.type);
+                      const isArgRelationship = argCoreTypeName && !argCoreTypeName.startsWith('__') && !isScalarType(argCoreTypeName);
+                      
+                      if (isArgRelationship) {
+                        // Calculate argument port position using measured positions
+                        const argKey = `${node.id}-${item.name}-arg-${arg.name}`;
+                        let argPortX, argPortY;
+                        
+                        if (window.measuredArgumentPositions && window.measuredArgumentPositions.has(argKey)) {
+                          const measured = window.measuredArgumentPositions.get(argKey);
+                          argPortX = measured.x - 2; // Slightly outside the argument for better visual connection
+                          argPortY = measured.y;
+                          console.log(`Using measured argument port position for ${argKey}: (${argPortX.toFixed(1)}, ${argPortY.toFixed(1)})`);
+                        } else {
+                          // Fallback calculation - position below the field
+                          const fieldKey = `${node.id}-${item.name}`;
+                          if (window.measuredFieldPositions && window.measuredFieldPositions.has(fieldKey)) {
+                            const fieldMeasured = window.measuredFieldPositions.get(fieldKey);
+                            argPortX = fieldMeasured.x - 2;
+                            argPortY = fieldMeasured.y + 20 + (argIndex * 12); // Below field port, stacked for multiple args
+                          } else {
+                            // Final fallback calculation
+                            argPortX = nodeWidth - 10;
+                            argPortY = 60 + rootTypeHeaderHeight + (itemIndex * 45) + 22 + 22.5 + 20 + (argIndex * 12);
+                          }
+                          console.log(`Using calculated argument port position for ${argKey}: (${argPortX}, ${argPortY})`);
+                        }
+                        
+                        ports.push({
+                          id: `${node.id}-arg-${item.name}-${arg.name}`,
+                          width: 3, // Slightly smaller than field ports
+                          height: 3,
+                          x: argPortX,
+                          y: argPortY,
+                          // Preserve metadata for debugging
+                          isArgumentPort: true,
+                          isRelationship: isArgRelationship,
+                          fieldName: item.name,
+                          argName: arg.name,
+                          argType: argCoreTypeName,
+                          argIndex: argIndex
+                        });
+                        
+                        console.log(`Created argument port: ${node.id}-arg-${item.name}-${arg.name} at (${argPortX}, ${argPortY})`);
+                      }
+                    });
+                  }
+                });
+              }
               
               // Give root types fixed positions on the left with specific ordering
               // isRootType already declared above
@@ -3432,6 +3570,64 @@
                         hidden: !isEdgeVisible // Add hidden property for DOM stability
                       }
                     });
+                    
+                    // Generate argument edges for this field (always enabled)
+                    if (field.args && field.args.length > 0) {
+                      field.args.forEach(arg => {
+                        const argCoreTypeName = getCoreTypeName(arg.type);
+                        const isArgRelationship = argCoreTypeName && !argCoreTypeName.startsWith('__') && !isScalarType(argCoreTypeName);
+                        
+                        if (isArgRelationship) {
+                          const targetTypeId = `type-${argCoreTypeName}`;
+                          const edgeId = `${typeNodeId}-arg-${field.name}-${arg.name}`;
+                          
+                          // Check if target type is visible
+                          const isTargetVisible = visibleTypeNames.has(argCoreTypeName);
+                          const isEdgeVisible = isSourceVisible && isTargetVisible;
+                          
+                          edges.push({
+                            id: edgeId,
+                            source: typeNodeId,
+                            target: targetTypeId,
+                            sourceHandle: `${typeNodeId}-arg-${field.name}-${arg.name}`,
+                            targetHandle: `${targetTypeId}-target`,
+                            type: 'elk',
+                            animated: false,
+                            style: {
+                              stroke: '#7c9eff', // Faded blue to match argument type color
+                              strokeWidth: 1,
+                              strokeDasharray: '3,3', // Dashed line to distinguish from field edges
+                              opacity: 0.6
+                            },
+                            markerEnd: {
+                              type: 'arrowclosed',
+                              color: '#7c9eff',
+                              width: 10,
+                              height: 10
+                            },
+                            label: `${field.name}.${arg.name}`,
+                            labelStyle: {
+                              fontSize: '9px',
+                              color: '#7c9eff',
+                              background: 'rgba(124, 158, 255, 0.1)',
+                              padding: '1px 4px',
+                              borderRadius: '2px',
+                              border: '1px solid #7c9eff',
+                              opacity: 0.8
+                            },
+                            labelBgPadding: [2, 1],
+                            labelBgBorderRadius: 2,
+                            data: {
+                              elkEdgeData: true,
+                              isArgumentEdge: true,
+                              hidden: !isEdgeVisible
+                            }
+                          });
+                          
+                          console.log(`Created argument edge: ${edgeId} from ${typeNodeId} to ${targetTypeId}`);
+                        }
+                      });
+                    }
                   }
                 });
               }
@@ -3561,6 +3757,13 @@
                 id: 'graph-container',
                 type: 'graphVisualization',
                 position: { x: 0, y: 0 },
+                // Set node dimensions to accommodate all content
+                style: {
+                  width: '3000px',
+                  height: '4000px',
+                  minWidth: '3000px',
+                  minHeight: '4000px'
+                },
                 data: {
                   nodes,
                   edges,
@@ -3570,8 +3773,12 @@
                   onNodeDoubleClick,
                   showELKDebug,
                   elkDebugData,
+                  showArgumentEdges,
                   edgesFading,
-                  setGraphVisible
+                  setGraphVisible,
+                  // Add container dimensions to data for the custom node component
+                  containerWidth: 3000,
+                  containerHeight: 4000
                 },
                 draggable: false,
                 selectable: false
