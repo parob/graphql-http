@@ -2609,25 +2609,25 @@
           
           // Handle node click
           const onNodeClick = React.useCallback((event, node) => {
-            // Clear any existing timeout
-            if (clickTimeoutRef.current) {
-              clearTimeout(clickTimeoutRef.current);
-              clickTimeoutRef.current = null;
-            }
+            console.log('Node clicked:', node.id);
             
-            // Set a timeout to handle single click
-            clickTimeoutRef.current = setTimeout(() => {
-              console.log('Node clicked:', node.id);
-              if (selectedNodeId === node.id) {
+            // Handle single click immediately - no delay needed
+            // Use functional update to avoid dependency on selectedNodeId
+            setSelectedNodeId(currentSelectedId => {
+              if (currentSelectedId === node.id) {
                 console.log('Deselecting node');
-                setSelectedNodeId(null); // Deselect if clicking the same node
+                return null; // Deselect if clicking the same node
               } else {
                 console.log('Selecting node:', node.id);
-                setSelectedNodeId(node.id);
+                return node.id;
               }
+            });
+            
+            // Set a flag to prevent double-click from re-selecting after deselection
+            clickTimeoutRef.current = setTimeout(() => {
               clickTimeoutRef.current = null;
-            }, 200); // 200ms delay to wait for potential double-click
-          }, [selectedNodeId]);
+            }, 300); // Slightly longer window for double-click detection
+          }, []); // No dependencies needed now
 
           // Handle clicking on empty space to deselect
           const onPaneClick = React.useCallback(() => {
@@ -2637,7 +2637,7 @@
           
           // Handle node double-click to center and zoom to fit downstream nodes
           const onNodeDoubleClick = React.useCallback((event, node) => {
-            // Cancel single click timeout
+            // Clear the click timeout to prevent any interference
             if (clickTimeoutRef.current) {
               clearTimeout(clickTimeoutRef.current);
               clickTimeoutRef.current = null;
@@ -3228,8 +3228,11 @@
               minZoom: 0.1,
               maxZoom: 2,
               zoomOnDoubleClick: false, // Disable React Flow's double-click zoom
-              panOnDrag: true,
+              panOnDrag: true, // Enable normal left-click panning
+              nodeDragThreshold: 15, // Require 15px movement before considering it a drag
+              selectionOnDrag: false, // Disable selection box on drag
               zoomOnScroll: true,
+              onPaneClick,
               zoomActivationKeyCode: null, // Disable zoom activation key
               deleteKeyCode: null, // Disable delete key
               selectionKeyCode: null, // Disable selection key
