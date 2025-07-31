@@ -176,6 +176,102 @@
         const { getViewport, fitBounds, setViewport, zoomIn, zoomOut } = useReactFlow();
         const reactFlowViewport = getViewport();
         
+        // Function to center viewport on root types - defined early to access React Flow functions
+        const centerOnRootTypes = React.useCallback(() => {
+          // Safety check - ensure React Flow functions are available
+          if (typeof fitBounds !== 'function' || typeof setViewport !== 'function') {
+            console.log('React Flow functions not available yet, skipping root types centering');
+            return;
+          }
+          
+          // Get current nodes from global cache or fallback to empty array
+          const currentNodes = window._cachedLayoutData?.nodes || window._lastELKLayoutData?.nodes || [];
+          
+          // Find root type nodes (Query, Mutation, Subscription)
+          const rootTypeNodes = currentNodes.filter(node => 
+            !node.data?.hidden && 
+            node.position && 
+            (node.data?.isQueryType || node.data?.isMutationType || node.data?.isSubscriptionType)
+          );
+          
+          console.log('centerOnRootTypes - found root nodes:', { 
+            totalNodes: currentNodes.length,
+            rootTypeNodes: rootTypeNodes.length,
+            rootTypeIds: rootTypeNodes.map(n => n.id)
+          });
+          
+          if (rootTypeNodes.length === 0) {
+            console.log('No root type nodes found for centering');
+            return;
+          }
+          
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          
+          // Calculate bounds around all root type nodes
+          rootTypeNodes.forEach(node => {
+            const x = node.position.x;
+            const y = node.position.y;
+            
+            // Try to get measured dimensions, fallback to defaults
+            let width = 300, height = 200;
+            if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(node.id)) {
+              const measured = window.measuredNodeDimensions.get(node.id);
+              width = measured.width;
+              height = measured.height;
+            }
+            
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x + width);
+            maxY = Math.max(maxY, y + height);
+          });
+          
+          if (minX === Infinity) {
+            console.log('No valid coordinates found for root types bounding box');
+            return;
+          }
+          
+          const rootBounds = {
+            x: minX - 50,
+            y: minY - 50,
+            width: maxX - minX + 100,
+            height: maxY - minY + 100
+          };
+          
+          console.log('Centering viewport on root types:', rootBounds);
+          
+          // Use React Flow's fitBounds to center on the root types bounding box
+          try {
+            fitBounds(rootBounds, { duration: 800, padding: 0.2 });
+            console.log('Successfully centered on root types using fitBounds');
+          } catch (error) {
+            console.log('fitBounds failed for root types, trying manual viewport calculation:', error);
+            
+            // Manual viewport calculation as fallback
+            const containerWidth = 1000;
+            const containerHeight = 800;
+            
+            const scaleX = containerWidth / (rootBounds.width + 100);
+            const scaleY = containerHeight / (rootBounds.height + 100);
+            const scale = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x zoom
+            
+            const x = -(rootBounds.x + rootBounds.width / 2) * scale + containerWidth / 2;
+            const y = -(rootBounds.y + rootBounds.height / 2) * scale + containerHeight / 2;
+            
+            console.log('Manual viewport calculation for root types:', { x, y, zoom: scale });
+            setViewport({ x, y, zoom: scale }, { duration: 600 });
+          }
+        }, [fitBounds, setViewport]);
+        
+        // Make centerOnRootTypes available globally for keyboard handler
+        React.useEffect(() => {
+          window._centerOnRootTypes = centerOnRootTypes;
+          
+          return () => {
+            delete window._centerOnRootTypes;
+          };
+        }, [centerOnRootTypes]);
+        
         // Handle focus bounds changes
         React.useEffect(() => {
           const checkFocusBounds = () => {
@@ -247,13 +343,27 @@
               
               if (window._smoothFitView) {
                 window._smoothFitView();
-                // Show the graph after fit view completes
+                // Show the graph after fit view completes, then center on root types
                 setTimeout(() => {
                   setGraphVisible(true);
+                  // Auto-center on root types after initial load
+                  setTimeout(() => {
+                    if (window._centerOnRootTypes) {
+                      console.log('Auto-centering on root types after initial load');
+                      window._centerOnRootTypes();
+                    }
+                  }, 800); // Delay to let the graph become visible first
                 }, 500); // Small delay to let fit view complete
               } else {
                 console.log('_smoothFitView not available yet');
                 setGraphVisible(true); // Show anyway if fit view isn't available
+                // Auto-center on root types after initial load (fallback)
+                setTimeout(() => {
+                  if (window._centerOnRootTypes) {
+                    console.log('Auto-centering on root types after initial load (fallback)');
+                    window._centerOnRootTypes();
+                  }
+                }, 800); // Delay to let the graph become visible first
               }
             } else {
               console.log('ELK data not ready yet, will check again...');
@@ -532,6 +642,72 @@
         
         const boundingBox = calculateBoundingBox();
 
+        // Create a bounding box calculator specifically for root types
+        const createRootTypesBoundingBoxCalculator = () => {
+          return () => {
+            const currentNodes = data.nodes || [];
+            
+            // Find root type nodes (Query, Mutation, Subscription)
+            const rootTypeNodes = currentNodes.filter(node => 
+              !node.data?.hidden && 
+              node.position && 
+              (node.data?.isQueryType || node.data?.isMutationType || node.data?.isSubscriptionType)
+            );
+            
+            console.log('calculateRootTypesBoundingBox:', { 
+              totalNodes: currentNodes.length,
+              rootTypeNodes: rootTypeNodes.length,
+              rootTypeIds: rootTypeNodes.map(n => n.id)
+            });
+            
+            if (rootTypeNodes.length === 0) {
+              console.log('No root type nodes found for bounding box');
+              return null;
+            }
+            
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            
+            // Calculate bounds around all root type nodes
+            rootTypeNodes.forEach(node => {
+              const x = node.position.x;
+              const y = node.position.y;
+              
+              // Try to get measured dimensions, fallback to defaults
+              let width = 300, height = 200;
+              if (window.measuredNodeDimensions && window.measuredNodeDimensions.has(node.id)) {
+                const measured = window.measuredNodeDimensions.get(node.id);
+                width = measured.width;
+                height = measured.height;
+              }
+              
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x + width);
+              maxY = Math.max(maxY, y + height);
+              
+              console.log(`Root node ${node.id}: (${x}, ${y}) ${width}x${height}`);
+            });
+            
+            if (minX === Infinity) {
+              console.log('No valid coordinates found for root types bounding box');
+              return null;
+            }
+            
+            const bounds = {
+              x: minX - 50,
+              y: minY - 50,
+              width: maxX - minX + 100,
+              height: maxY - minY + 100
+            };
+            
+            console.log('Calculated root types bounding box:', bounds);
+            return bounds;
+          };
+        };
+        
+        const calculateRootTypesBoundingBox = createRootTypesBoundingBoxCalculator();
+        const rootTypesBoundingBox = calculateRootTypesBoundingBox();
+
         // Calculate the bounding box of all nodes to size the container appropriately
         const calculateBounds = () => {
           if (!nodes || nodes.length === 0) return { width: 1000, height: 800 };
@@ -805,7 +981,44 @@
               pointerEvents: 'none',
               zIndex: 1002
             }
-          }, `FIT VIEW BOUNDS: ${Math.round(boundingBox.width)}×${Math.round(boundingBox.height)}`)
+          }, `FIT VIEW BOUNDS: ${Math.round(boundingBox.width)}×${Math.round(boundingBox.height)}`),
+          
+          // Root Types Bounding Box Visualization
+          rootTypesBoundingBox && showELKDebug && React.createElement('div', {
+            key: 'root-types-bounding-box-overlay',
+            style: {
+              position: 'absolute',
+              left: `${rootTypesBoundingBox.x}px`,
+              top: `${rootTypesBoundingBox.y}px`,
+              width: `${rootTypesBoundingBox.width}px`,
+              height: `${rootTypesBoundingBox.height}px`,
+              border: '3px dashed #00ff80',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(0, 255, 128, 0.05)',
+              pointerEvents: 'none',
+              zIndex: 1001,
+              boxSizing: 'border-box'
+            }
+          }),
+          
+          // Root Types Bounding Box Label
+          rootTypesBoundingBox && showELKDebug && React.createElement('div', {
+            key: 'root-types-bounding-box-label',
+            style: {
+              position: 'absolute',
+              left: `${rootTypesBoundingBox.x + 10}px`,
+              top: `${rootTypesBoundingBox.y - 25}px`,
+              background: 'rgba(0, 255, 128, 0.9)',
+              color: 'white',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              pointerEvents: 'none',
+              zIndex: 1002
+            }
+          }, `ROOT TYPES: ${Math.round(rootTypesBoundingBox.width)}×${Math.round(rootTypesBoundingBox.height)}`)
         ]);
       };
 
@@ -1922,20 +2135,35 @@
             };
           }, []);
 
-          // Keyboard event handler for ELK debug toggle
+
+
+          // Keyboard event handler for ELK debug toggle and root types centering
           React.useEffect(() => {
             const handleKeyDown = (event) => {
+              // Only handle keys if not typing in an input field
+              if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+                return;
+              }
+              
               // Toggle ELK debug overlay and bounding box with 'd' key
               if (event.key.toLowerCase() === 'd' && !event.ctrlKey && !event.metaKey && !event.altKey) {
-                // Only toggle if not typing in an input field
-                if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
-                  setShowELKDebug(prev => {
-                    const newValue = !prev;
-                    console.log(`ELK debug overlay ${newValue ? 'enabled' : 'disabled'}`);
-                    return newValue;
-                  });
-                  event.preventDefault(); // Prevent default behavior
+                setShowELKDebug(prev => {
+                  const newValue = !prev;
+                  console.log(`ELK debug overlay ${newValue ? 'enabled' : 'disabled'}`);
+                  return newValue;
+                });
+                event.preventDefault();
+              }
+              
+              // Center viewport on root types with 'r' key
+              if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                console.log('Root types centering triggered by R key');
+                if (window._centerOnRootTypes) {
+                  window._centerOnRootTypes();
+                } else {
+                  console.log('centerOnRootTypes not available yet');
                 }
+                event.preventDefault();
               }
             };
 
