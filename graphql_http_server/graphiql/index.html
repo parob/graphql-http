@@ -2766,10 +2766,10 @@
               layoutOptions: {
                 'elk.algorithm': 'layered',
                 'elk.direction': 'RIGHT',
-                'elk.spacing.nodeNode': '60',
-                'elk.layered.spacing.nodeNodeBetweenLayers': '120',
-                'elk.spacing.edgeNode': '80',
-                'elk.spacing.edgeEdge': '30',
+                'elk.spacing.nodeNode': '40',
+                'elk.layered.spacing.nodeNodeBetweenLayers': '220',
+                'elk.spacing.edgeNode': '120',
+                'elk.spacing.edgeEdge': '50',
                 'elk.edgeRouting': 'POLYLINE',
                 'elk.layered.mergeEdges': 'false',
                 'elk.layered.unnecessaryBendpoints': 'false',
@@ -2777,7 +2777,7 @@
                 'elk.layered.edgeRouting.polyline.slopedEdgeZoneWidth': '4',
                 'elk.spacing.portPort': '18',
                 'elk.portAlignment.default': 'DISTRIBUTED',
-                'elk.layered.edgeRouting.multiEdgeSpacing': '30',
+                'elk.layered.edgeRouting.multiEdgeSpacing': '45',
                 'elk.layered.edgeRouting.sloppySplineRouting': 'false',
                 'elk.separateConnectedComponents': 'false',
                 'elk.padding': '[top=30,left=30,bottom=30,right=30]',
@@ -3011,7 +3011,87 @@
                 const section = elkEdge.sections[0];
                 const startPoint = section.startPoint;
                 const endPoint = section.endPoint;
-                const bendPoints = section.bendPoints || [];
+                const originalBendPoints = section.bendPoints || [];
+                
+                // Post-process: Create smooth corner rounding with proper arc generation
+                const createSmoothCorners = (points) => {
+                  if (points.length < 3) return points;
+                  
+                  const newPoints = [points[0]]; // Always keep first point
+                  
+                  for (let i = 1; i < points.length - 1; i++) {
+                    const prev = points[i - 1];
+                    const current = points[i];
+                    const next = points[i + 1];
+                    
+                    // Calculate vectors and angle
+                    const v1 = { x: current.x - prev.x, y: current.y - prev.y };
+                    const v2 = { x: next.x - current.x, y: next.y - current.y };
+                    
+                    const len1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+                    const len2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+                    
+                    if (len1 > 0 && len2 > 0) {
+                      const dot = (v1.x * v2.x + v1.y * v2.y) / (len1 * len2);
+                      const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+                      
+                      // Apply rounding to any corner > 30 degrees
+                      if (angle > Math.PI / 6) {
+                        const unit1 = { x: v1.x / len1, y: v1.y / len1 };
+                        const unit2 = { x: v2.x / len2, y: v2.y / len2 };
+                        
+                        // Dynamic radius based on angle and available space
+                        const maxRadius = Math.min(len1, len2) * 0.4;
+                        const angleStrength = Math.pow(angle / Math.PI, 0.7); // Non-linear scaling
+                        const radius = maxRadius * angleStrength;
+                        
+                        // Find the corner rounding points
+                        const cornerStart = {
+                          x: current.x - unit1.x * radius,
+                          y: current.y - unit1.y * radius
+                        };
+                        
+                        const cornerEnd = {
+                          x: current.x + unit2.x * radius,
+                          y: current.y + unit2.y * radius
+                        };
+                        
+                        // Generate multiple points along a smooth arc
+                        const numArcPoints = Math.max(3, Math.floor(angle * 4)); // More points for sharper turns
+                        const arcPoints = [];
+                        
+                        for (let j = 0; j <= numArcPoints; j++) {
+                          const t = j / numArcPoints;
+                          
+                          // Create a smooth arc using quadratic bezier with the original corner as control point
+                          const arcPoint = {
+                            x: (1 - t) * (1 - t) * cornerStart.x + 2 * (1 - t) * t * current.x + t * t * cornerEnd.x,
+                            y: (1 - t) * (1 - t) * cornerStart.y + 2 * (1 - t) * t * current.y + t * t * cornerEnd.y
+                          };
+                          
+                          arcPoints.push(arcPoint);
+                        }
+                        
+                        // Add all arc points (this creates a smooth rounded corner)
+                        newPoints.push(...arcPoints);
+                      } else {
+                        newPoints.push(current);
+                      }
+                    } else {
+                      newPoints.push(current);
+                    }
+                  }
+                  
+                  newPoints.push(points[points.length - 1]); // Always keep last point
+                  return newPoints;
+                };
+                
+                // Apply smooth corner rounding to the full point sequence
+                const allOriginalPoints = [startPoint, ...originalBendPoints, endPoint];
+                const processedPoints = createSmoothCorners(allOriginalPoints);
+                
+                // Extract the processed bend points (excluding start and end)
+                const bendPoints = processedPoints.slice(1, -1);
                 
                 if (bendPoints.length === 0) {
                   // Simple direct connection with smooth S-curve
