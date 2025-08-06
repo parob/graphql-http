@@ -1110,11 +1110,22 @@
               gap: '16px'
             }
           }, [
-            React.createElement('h3', { key: 'title', style: { margin: '0 0 8px 0', fontSize: '29px', fontWeight: 'bold' } }, 'SDL'),
+            React.createElement('h3', { 
+              key: 'title', 
+              style: { 
+                margin: '0 0 4px 0', 
+                fontSize: '29px', 
+                fontWeight: 'bold' 
+              } 
+            }, 'Schema Download'),
             React.createElement('p', { 
-              key: 'description', 
-              style: { margin: '0 0 16px 0', fontSize: '12px', color: '#666', lineHeight: '1.4' } 
-            }, 'Generate and download the GraphQL schema definition in SDL (Schema Definition Language) format using introspection.'),
+              key: 'description',
+              className: 'graphiql-markdown-description',
+              style: { 
+                margin: '0 0 20px 0',
+                color: 'rgba(59, 75, 104, 0.76)'
+              } 
+            }, 'Download your GraphQL schema as SDL (Schema Definition Language).'),
             
             // Schema Preview Section
             React.createElement('div', {
@@ -3235,20 +3246,19 @@
             React.createElement('h3', { 
               key: 'title', 
               style: { 
-                margin: '0 0 8px 0', 
+                margin: '0 0 4px 0', 
                 fontSize: '29px', 
                 fontWeight: 'bold' 
               } 
             }, 'Graph Visualizer'),
             React.createElement('p', { 
-              key: 'description', 
+              key: 'description',
+              className: 'graphiql-markdown-description',
               style: { 
-                margin: '0 0 16px 0', 
-                fontSize: '12px', 
-                color: '#666', 
-                lineHeight: '1.4' 
+                margin: '0 0 20px 0',
+                color: 'rgba(59, 75, 104, 0.76)'
               } 
-            }, 'Interactive visualization of your GraphQL schema with type relationships and field connections.'),
+            }, 'Explore your GraphQL schema with an interactive visual graph.'),
             
             // Main visualization container
             React.createElement('div', {
