@@ -209,7 +209,7 @@ class GraphQLHTTPServer:
                         auth_header = request.headers.get("Authorization")
                         if not auth_header or not auth_header.startswith("Bearer "):
                             raise InvalidTokenError(
-                                "Authorization header is missing or not Bearer"
+                                "Unauthorized: Authorization header is missing or not Bearer"
                             )
                         if not self.jwks_client:
                             return self.error_response(
