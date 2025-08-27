@@ -1339,9 +1339,10 @@
             outline: isSelected ? '5px solid #0366d6' : 
                     isDownstreamOfSelected ? '3px solid #0366d6' : 'none',
             borderRadius: '8px',
-            overflow: 'hidden',
+            overflow: 'visible',
             minWidth: isRootType ? '350px' : '280px',
-            maxWidth: isRootType ? '400px' : '320px',
+            maxWidth: 'none',
+            width: 'fit-content',
             boxShadow: isSelected ? '0 8px 24px rgba(3,102,214,0.4), 0 0 0 1px rgba(3,102,214,0.1)' : 
                        isDownstreamOfSelected ? '0 4px 12px rgba(3,102,214,0.2), 0 0 0 1px rgba(3,102,214,0.05)' :
                        shouldDim ? '0 1px 3px rgba(0,0,0,0.05)' : '0 2px 8px rgba(0,0,0,0.1)',
@@ -1449,7 +1450,7 @@
                       // Calculate field position relative to node in screen pixels, then compensate for zoom
                       const fieldTopRelative = rect.top - nodeRect.top;
                       const fieldCenterYRelative = fieldTopRelative + 22.5; // Center of the 45px main field row
-                      const portX = (rect.right - nodeRect.left) / currentZoom; // Right edge of field relative to node
+                      const portX = (nodeRect.width) / currentZoom; // Use actual node width for consistent positioning
                       const portY = fieldCenterYRelative / currentZoom;
                       
                       // Add small offset adjustment to account for any CSS discrepancies
@@ -1488,8 +1489,10 @@
                   padding: '8px 16px',
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'center',
-                  height: '45px'
+                  alignItems: 'flex-start',
+                  minHeight: '45px',
+                  gap: '8px',
+                  flexWrap: 'nowrap'
                 }
               }, [
                 React.createElement('span', {
@@ -1497,7 +1500,12 @@
                   style: { 
                     color: '#24292e',
                     fontWeight: '500',
-                    fontSize: isRootType ? '21px' : '19.5px'
+                    fontSize: isRootType ? '21px' : '19.5px',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                    whiteSpace: 'normal',
+                    flex: '1 1 auto',
+                    marginRight: '8px'
                   },
                   title: field.description || undefined
                 }, field.name),
@@ -1508,7 +1516,11 @@
                     fontWeight: isRelationship ? '600' : '400',
                     fontSize: '18px',
                     fontFamily: 'SFMono-Regular, Consolas, monospace',
-                    cursor: isRelationship ? 'pointer' : 'default'
+                    cursor: isRelationship ? 'pointer' : 'default',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                    whiteSpace: 'normal',
+                    flex: '0 0 auto'
                   },
                   title: isRelationship ? 
                     (() => {
@@ -1572,7 +1584,7 @@
                           // Calculate argument position relative to node in screen pixels, then compensate for zoom
                           const argTopRelative = rect.top - nodeRect.top;
                           const argCenterYRelative = argTopRelative + (rect.height / 2); // Center of the argument row
-                          const portX = (rect.right - nodeRect.left) / currentZoom; // Right edge of argument relative to node
+                          const portX = (nodeRect.width) / currentZoom; // Use actual node width for consistent positioning
                           const portY = argCenterYRelative / currentZoom;
                           
                           // Add small offset adjustment to account for any CSS discrepancies
@@ -1973,14 +1985,26 @@
                 nodeHeight = measured.height;
                 console.log(`ELK using measured dimensions for ${node.id}: ${nodeWidth.toFixed(1)} x ${nodeHeight.toFixed(1)}px`);
               } else {
-                // Fallback calculations
+                // Dynamic width calculation based on content
                 const minContentWidth = isRootType ? 350 : 280;
-                nodeWidth = minContentWidth + (borderWidth * 2);
+                
+                // Calculate required width based on longest field name and type
+                let maxRequiredWidth = minContentWidth;
+                const items = node.data.type.fields || node.data.type.inputFields || node.data.type.enumValues || [];
+                
+                items.forEach(item => {
+                  // Estimate text width: field name + type string + padding
+                  const fieldName = item.name || '';
+                  const fieldType = item.type ? getTypeString(item.type) : '';
+                  const estimatedTextWidth = (fieldName.length * (isRootType ? 14 : 13)) + (fieldType.length * 11) + 80; // 80px for padding and spacing
+                  maxRequiredWidth = Math.max(maxRequiredWidth, estimatedTextWidth);
+                });
+                
+                nodeWidth = Math.min(maxRequiredWidth + (borderWidth * 2), 600); // Cap at 600px for very long names
                 // Calculate height including arguments
                 let totalHeight = 60 + (itemCount * 45) + rootTypeHeaderHeight + 20;
                 
                 // Add extra height for fields with arguments
-                const items = node.data.type.fields || node.data.type.inputFields || node.data.type.enumValues || [];
                 items.forEach(item => {
                   if (item.args && item.args.length > 0) {
                     // Add height for each argument (roughly 20px per argument)
