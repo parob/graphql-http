@@ -1489,7 +1489,7 @@
                   padding: '8px 16px',
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'flex-start',
+                  alignItems: 'center',
                   minHeight: '45px',
                   gap: '8px',
                   flexWrap: 'nowrap'
@@ -2514,9 +2514,44 @@
                 
                 // Use ELK routing data to create smooth curved path
                 const section = elkEdge.sections[0];
-                const startPoint = section.startPoint;
+                let startPoint = section.startPoint;
                 const endPoint = section.endPoint;
                 const originalBendPoints = section.bendPoints || [];
+                
+                // Try to use measured port position for more accurate start point
+                const sourceNodeData = edges.find(e => e.id === elkEdge.id);
+                if (sourceNodeData && window.measuredFieldPositions) {
+                  // Extract field name from sourceHandle (format: nodeId-field-fieldName or nodeId-arg-fieldName-argName)
+                  const sourceHandle = sourceNodeData.sourceHandle;
+                  if (sourceHandle) {
+                    let fieldKey = sourceHandle.replace('-field-', '-').replace('-arg-', '-arg-');
+                    const measuredPos = window.measuredFieldPositions.get(fieldKey);
+                    if (!measuredPos && sourceHandle.includes('-arg-')) {
+                      // Try argument positions map
+                      const argKey = sourceHandle.replace(sourceNodeData.source + '-', sourceNodeData.source + '-');
+                      const argMeasuredPos = window.measuredArgumentPositions?.get(argKey);
+                      if (argMeasuredPos) {
+                        // Adjust start point to use measured position
+                        const sourceNode = elkNodes.find(n => n.id === sourceNodeData.source);
+                        if (sourceNode) {
+                          startPoint = {
+                            x: sourceNode.x + argMeasuredPos.x,
+                            y: sourceNode.y + argMeasuredPos.y
+                          };
+                        }
+                      }
+                    } else if (measuredPos) {
+                      // Adjust start point to use measured field position
+                      const sourceNode = elkNodes.find(n => n.id === sourceNodeData.source);
+                      if (sourceNode) {
+                        startPoint = {
+                          x: sourceNode.x + measuredPos.x,
+                          y: sourceNode.y + measuredPos.y
+                        };
+                      }
+                    }
+                  }
+                }
                 
                 // Post-process: Create smooth corner rounding with proper arc generation
                 const createSmoothCorners = (points) => {
