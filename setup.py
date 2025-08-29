@@ -11,18 +11,18 @@ with io.open("VERSION") as version_file:
         version = version[1:]
 
 setup(
-    name="graphql_http_server",
+    name="graphql_http",
     version=version,
     license="MIT",
     packages=find_packages(),
     include_package_data=True,
     author="Robert Parker",
     author_email="rob@parob.com",
-    url="https://gitlab.com/parob/graphql-http-server",
-    download_url=f"https://gitlab.com/parob/graphql-http-server/-/"
-    f"archive/master/graphql-http-server-v{version}.zip",
-    keywords=["GraphQL", "HTTPServer", "werkzeug"],
-    description="HTTPServer for GraphQL.",
+    url="https://gitlab.com/parob/graphql-http",
+    download_url=f"https://gitlab.com/parob/graphql-http/-/"
+    f"archive/master/graphql-http-v{version}.zip",
+    keywords=["GraphQL", "HTTP", "Server", "werkzeug"],
+    description="HTTP Server for GraphQL.",
     long_description=readme,
     long_description_content_type="text/markdown",
     install_requires=[

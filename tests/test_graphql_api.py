@@ -5,7 +5,7 @@ from graphql import GraphQLError
 
 from requests import request, ConnectTimeout, ReadTimeout
 
-from graphql_http_server import GraphQLHTTPServer
+from graphql_http import GraphQLHTTP
 
 
 def is_graphql_api_installed():
@@ -48,7 +48,7 @@ class TestGraphQLAPI:
             def hello(self, name: str) -> str:
                 return f"hey {name}"
 
-        server = GraphQLHTTPServer.from_api(api=api)
+        server = GraphQLHTTP.from_api(api=api)
 
         response = server.client().get('/?query={hello(name:"rob")}')
 
@@ -79,7 +79,7 @@ class TestGraphQLAPI:
             def raise_hello(self) -> str:
                 raise Exception("optional hello error")
 
-        server = GraphQLHTTPServer.from_api(api=api)
+        server = GraphQLHTTP.from_api(api=api)
 
         response = server.client().get("/?query={hello}")
 
@@ -106,11 +106,12 @@ class TestGraphQLAPI:
         class Root:
             @field
             def hello(self, context: GraphQLContext) -> str:
-                key = context.meta.get("http_request").headers.get("key")
+                if http_request := context.meta.get("http_request"):
+                    key = http_request.headers.get("key")
                 return key
 
         api = GraphQLAPI(root_type=Root)
-        server = GraphQLHTTPServer.from_api(api=api)
+        server = GraphQLHTTP.from_api(api=api)
 
         response = server.client().get("/?query={hello}", headers={"key": "123"})
 
@@ -150,7 +151,7 @@ class TestGraphQLAPI:
             return next_response
 
         api = GraphQLAPI(root_type=Root, middleware=[auth_middleware])
-        server = GraphQLHTTPServer.from_api(api=api)
+        server = GraphQLHTTP.from_api(api=api)
 
         response = server.client().get("/?query={hello}")
         no_auth_response = server.client().get("/?query={restrictedHello}")

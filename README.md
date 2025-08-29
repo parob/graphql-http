@@ -1,3 +1,3 @@
-# GraphQL HTTP Server
+# GraphQL HTTP Web Server
 
 Minimal adapter to respond to HTTP requests with a GraphQL schema.

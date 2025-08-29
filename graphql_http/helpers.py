@@ -14,6 +14,7 @@ from typing import (
 )
 
 from graphql.execution import ExecutionResult
+from graphql.pyutils.awaitable_or_value import AwaitableOrValue
 
 from graphql import (
     GraphQLError,
@@ -45,7 +46,7 @@ def run_http_query(
     catch: bool = False,
     allow_post_query: bool = True,
     **execute_options,
-):
+) -> Tuple[List[AwaitableOrValue[ExecutionResult]], List[GraphQLParams]]:
     if not isinstance(schema, GraphQLSchema):
         raise TypeError(f"Expected a GraphQL schema, but received {schema!r}.")
     if request_method not in ("get", "post"):
@@ -104,9 +105,9 @@ def encode_execution_results(
     encode: Callable[[Dict], Any] = json_encode,
 ) -> Tuple[Any, int]:
     if not format_error:
-        from graphql_http_server import GraphQLHTTPServer
+        from graphql_http import GraphQLHTTP
 
-        format_error = GraphQLHTTPServer.format_error
+        format_error = GraphQLHTTP.format_error  # type: ignore
 
     responses = [
         format_execution_result(execution_result, format_error)
@@ -144,13 +145,13 @@ def get_response(
     catch: Type[BaseException],
     allow_only_query: bool = False,
     **kwargs,
-) -> Optional[ExecutionResult]:
+) -> AwaitableOrValue[ExecutionResult]:
     try:
         execution_result = execute_graphql_request(
             schema, params, allow_only_query, **kwargs
         )
     except catch:
-        return None
+        return ExecutionResult(data=None, errors=[GraphQLError(str(catch))])
 
     return execution_result
 
@@ -160,9 +161,9 @@ def format_execution_result(
     format_error: Optional[Callable[[GraphQLError], Dict]] = None,
 ) -> GraphQLResponse:
     if not format_error:
-        from graphql_http_server import GraphQLHTTPServer
+        from graphql_http import GraphQLHTTP
 
-        format_error = GraphQLHTTPServer.format_error
+        format_error = GraphQLHTTP.format_error
 
     if execution_result:
         response = {}

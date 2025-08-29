@@ -12,7 +12,7 @@ from graphql import (
     GraphQLArgument,
     GraphQLNonNull,
 )
-from graphql_http_server import GraphQLHTTPServer
+from graphql_http import GraphQLHTTP
 
 def create_test_schema():
     def resolve_hello_world(obj, info, name):
@@ -35,7 +35,7 @@ def create_test_schema():
 
 if __name__ == "__main__":
     test_schema = create_test_schema()
-    server = GraphQLHTTPServer(schema=test_schema)
+    server = GraphQLHTTP(schema=test_schema)
     print("Starting server on http://127.0.0.1:8000")
     print("Open http://127.0.0.1:8000 in your browser and check the console for Voyager debugging output")
     server.run(host='127.0.0.1', port=8000)

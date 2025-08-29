@@ -21,7 +21,7 @@ from graphql_api.federation.directives import (
     composeDirective,
 )
 
-from graphql_http_server import GraphQLHTTPServer
+from graphql_http import GraphQLHTTP
 
 dimension = {
     "size": "small",
@@ -346,7 +346,7 @@ class TestGraphQLAPI:
     def test_federation_example_api(self):
         api = federation_example_api()
 
-        server = GraphQLHTTPServer.from_api(api=api)
+        server = GraphQLHTTP.from_api(api=api)
 
         response = server.client().get("/?query={_service{sdl}}")
 

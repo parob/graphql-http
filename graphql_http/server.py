@@ -2,9 +2,9 @@ import os
 import copy
 import json
 
-from typing import Any, List, Callable, Optional, Type, Dict
+from typing import Any, List, Callable, Optional, Type, Dict, Awaitable
 
-from graphql import GraphQLError
+from graphql import GraphQLError, ExecutionResult
 from graphql_api.context import GraphQLContext
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -21,7 +21,7 @@ from graphql.type.schema import GraphQLSchema
 from graphql.execution.execute import ExecutionContext
 import uvicorn
 
-from graphql_http_server.helpers import (
+from graphql_http.helpers import (
     HttpQueryError,
     encode_execution_results,
     json_encode,
@@ -37,9 +37,9 @@ from jwt import (
 graphiql_dir = os.path.join(os.path.dirname(__file__), "graphiql")
 
 
-class GraphQLHTTPServer:
+class GraphQLHTTP:
     @classmethod
-    def from_api(cls, api, root_value: Any = None, **kwargs) -> "GraphQLHTTPServer":
+    def from_api(cls, api, root_value: Any = None, **kwargs) -> "GraphQLHTTP":
         try:
             from graphql_api import GraphQLAPI
             from graphql_api.context import GraphQLContext
@@ -58,7 +58,7 @@ class GraphQLHTTPServer:
         middleware = executor.middleware
         context = GraphQLContext(schema=schema, meta=meta, executor=executor)
 
-        return GraphQLHTTPServer(
+        return GraphQLHTTP(
             schema=schema,
             root_value=root_value,
             middleware=middleware,
@@ -252,8 +252,18 @@ class GraphQLHTTPServer:
                 context_value=context_value,
                 execution_context_class=self.execution_context_class,
             )
+
+            results = []
+            for execution_result in execution_results:
+                if isinstance(execution_result, Awaitable):
+                    awaited_execution_result: ExecutionResult = await execution_result
+                else:
+                    awaited_execution_result = execution_result or ExecutionResult(data=None, errors=[])
+
+                results.append(awaited_execution_result)
+
             result, status_code = encode_execution_results(
-                execution_results, is_batch=isinstance(data, list), encode=lambda x: x
+                results, is_batch=isinstance(data, list), encode=lambda x: x
             )
 
             return JSONResponse(
