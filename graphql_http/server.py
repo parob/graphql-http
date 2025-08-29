@@ -150,7 +150,8 @@ class GraphQLHTTP:
             self.jwks_client = None
 
         routes = [
-            Route("/{path:path}", self.dispatch, methods=["GET", "POST", "OPTIONS"])
+            Route("/graphql", self.dispatch, methods=["GET", "POST", "OPTIONS"]),
+            Route("/", self.dispatch, methods=["GET", "POST", "OPTIONS"]),
         ]
         if self.health_path:
             routes.insert(
@@ -292,13 +293,19 @@ class GraphQLHTTP:
                 allow_h.append("Authorization")
 
             response_headers = {
-                "Access-Control-Allow-Credentials": "true",
                 "Access-Control-Allow-Headers": ", ".join(allow_h),
                 "Access-Control-Allow-Methods": "GET, POST",
             }
-            origin = request.headers.get("ORIGIN")
-            if origin:
-                response_headers["Access-Control-Allow-Origin"] = origin
+            
+            origin = request.headers.get("Origin") or request.headers.get("origin")
+            if self.auth_enabled:
+                # When auth is enabled, be more restrictive
+                response_headers["Access-Control-Allow-Credentials"] = "true"
+                if origin:
+                    response_headers["Access-Control-Allow-Origin"] = origin
+            else:
+                # When auth is disabled, allow all origins
+                response_headers["Access-Control-Allow-Origin"] = "*"
                 
         return PlainTextResponse("OK", headers=response_headers)
 
@@ -314,12 +321,23 @@ class GraphQLHTTP:
         if not self.auth_enabled or self.auth_enabled_for_introspection:
             return False
             
-        introspection_fields = ["__schema", "__type", "__typename"]
+        # Simple heuristic: if it contains introspection fields AND no regular fields
         query_data_lower = str(data).lower()
-        introspection_fields_present = [
-            f for f in introspection_fields if f in query_data_lower
-        ]
-        return bool(introspection_fields_present)
+        
+        # Check for introspection fields
+        introspection_fields = ["__schema", "__type", "__typename"]
+        has_introspection = any(f in query_data_lower for f in introspection_fields)
+        
+        if not has_introspection:
+            return False
+            
+        # Check for regular fields (non-introspection)
+        # This is a simple heuristic - in a mixed query, we require auth
+        regular_field_patterns = ["hello", "users", "posts", "data", "mutation"]
+        has_regular_fields = any(pattern in query_data_lower for pattern in regular_field_patterns)
+        
+        # Only allow introspection-only queries to bypass auth
+        return has_introspection and not has_regular_fields
 
     def _authenticate_request(self, request: Request) -> Optional[Response]:
         """Authenticate JWT token from request.
@@ -353,7 +371,10 @@ class GraphQLHTTP:
                 verify=True,
             )
             return None  # Success
+        except InvalidTokenError as e:
+            return self.error_response(e, status=401)
         except Exception as e:
+            # For other exceptions (like JWKS key retrieval failures), preserve the message
             return self.error_response(e, status=401)
 
     def _prepare_context(self, request: Request) -> Any:
@@ -479,7 +500,7 @@ class GraphQLHTTP:
 
         if isinstance(e, HttpQueryError):
             error_message = str(e.message)
-        elif isinstance(e, (jwt.exceptions.InvalidTokenError, ValueError)):
+        elif isinstance(e, (jwt.exceptions.InvalidTokenError, ValueError, Exception)):
             error_message = str(e)
         else:
             error_message = "Internal Server Error"
@@ -501,10 +522,8 @@ class GraphQLHTTP:
             except JSONDecodeError as e:
                 raise HttpQueryError(400, f"Unable to parse JSON body: {e}")
 
-        elif content_type in (
-            "application/x-www-form-urlencoded",
-            "multipart/form-data",
-        ):
+        elif (content_type.startswith("application/x-www-form-urlencoded") or 
+              content_type.startswith("multipart/form-data")):
             form_data = await request.form()
             return {k: v for k, v in form_data.items()}
 

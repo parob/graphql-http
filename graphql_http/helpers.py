@@ -1,40 +1,34 @@
 import json
 from collections import namedtuple
 from collections.abc import MutableMapping
-
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
-
-from graphql.execution import ExecutionResult
-from graphql.pyutils.awaitable_or_value import AwaitableOrValue
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from graphql import (
     GraphQLError,
     GraphQLSchema,
+    FieldNode,
     execute,
     get_operation_ast,
     parse,
     validate,
-    FieldNode
 )
+from graphql.execution import ExecutionResult
+from graphql.pyutils.awaitable_or_value import AwaitableOrValue
 
 from .error import HttpQueryError
 
-
+# Type definitions
 class SkipException(Exception):
+    """Exception for skipping execution."""
     pass
 
 
 GraphQLParams = namedtuple("GraphQLParams", "query,variables,operation_name")
 GraphQLResponse = namedtuple("GraphQLResponse", "result,status_code")
+
+# HTTP method constants
+HTTP_GET = "get"
+HTTP_POST = "post"
 
 
 def run_http_query(
@@ -47,34 +41,35 @@ def run_http_query(
     allow_post_query: bool = True,
     **execute_options,
 ) -> Tuple[List[AwaitableOrValue[ExecutionResult]], List[GraphQLParams]]:
-    if not isinstance(schema, GraphQLSchema):
-        raise TypeError(f"Expected a GraphQL schema, but received {schema!r}.")
-    if request_method not in ("get", "post"):
-        raise HttpQueryError(
-            405,
-            "GraphQL only supports GET and POST requests.",
-            headers={"Allow": "GET, POST"},
-        )
-    if catch:
-        catch_exc: Union[Type[HttpQueryError], Type[SkipException]] = HttpQueryError
-    else:
-        catch_exc = SkipException
+    """Execute GraphQL queries over HTTP.
+    
+    Args:
+        schema: GraphQL schema to execute against
+        request_method: HTTP method (get/post)
+        data: Request data containing queries
+        query_data: Additional query parameters
+        batch_enabled: Whether to allow batch queries
+        catch: Whether to catch execution exceptions
+        allow_post_query: Whether to allow queries in POST requests
+        **execute_options: Additional execution options
+        
+    Returns:
+        Tuple of execution results and parsed parameters
+        
+    Raises:
+        TypeError: If schema is invalid
+        HttpQueryError: If request is invalid
+    """
+    _validate_schema(schema)
+    _validate_request_method(request_method)
+    
+    catch_exc = HttpQueryError if catch else SkipException
     is_batch = isinstance(data, list)
-
-    is_get_request = request_method == "get"
+    is_get_request = request_method == HTTP_GET
     allow_only_query = is_get_request and not allow_post_query
 
-    if not is_batch:
-        if not isinstance(data, (dict, MutableMapping)):
-            raise HttpQueryError(
-                400, f"GraphQL params should be a dict. Received {data!r}."
-            )
-        data = [data]
-    elif not batch_enabled:
-        raise HttpQueryError(400, "Batch GraphQL requests are not enabled.")
-
-    if not data:
-        raise HttpQueryError(400, "Received an empty list in the batch request.")
+    # Normalize data to list format
+    data = _normalize_request_data(data, is_batch, batch_enabled)
 
     extra_data: Dict[str, Any] = {}
     # If is a batch request, we don't consume the data from the query
@@ -245,7 +240,85 @@ def execute_graphql_request(
 
 
 def load_json_body(data: str) -> Union[Dict, List]:
+    """Load JSON from request body.
+    
+    Args:
+        data: JSON string to parse
+        
+    Returns:
+        Parsed JSON data
+        
+    Raises:
+        HttpQueryError: If JSON is invalid
+    """
     try:
         return json.loads(data)
-    except Exception:
-        raise HttpQueryError(400, f"POST body sent invalid JSON. {data}")
+    except json.JSONDecodeError as e:
+        raise HttpQueryError(400, f"POST body sent invalid JSON: {e}")
+    except Exception as e:
+        raise HttpQueryError(400, f"Failed to parse request body: {e}")
+
+
+# Helper functions
+def _validate_schema(schema: GraphQLSchema) -> None:
+    """Validate GraphQL schema.
+    
+    Args:
+        schema: Schema to validate
+        
+    Raises:
+        TypeError: If schema is invalid
+    """
+    if not isinstance(schema, GraphQLSchema):
+        raise TypeError(f"Expected a GraphQL schema, but received {schema!r}.")
+
+
+def _validate_request_method(request_method: str) -> None:
+    """Validate HTTP request method.
+    
+    Args:
+        request_method: HTTP method to validate
+        
+    Raises:
+        HttpQueryError: If method is not supported
+    """
+    if request_method not in (HTTP_GET, HTTP_POST):
+        raise HttpQueryError(
+            405,
+            "GraphQL only supports GET and POST requests.",
+            headers={"Allow": "GET, POST"},
+        )
+
+
+def _normalize_request_data(
+    data: Union[Dict, List[Dict]], 
+    is_batch: bool, 
+    batch_enabled: bool
+) -> List[Dict]:
+    """Normalize request data to list format.
+    
+    Args:
+        data: Request data
+        is_batch: Whether request is batch
+        batch_enabled: Whether batch is enabled
+        
+    Returns:
+        Normalized data as list
+        
+    Raises:
+        HttpQueryError: If data format is invalid
+    """
+    if not is_batch:
+        if not isinstance(data, (dict, MutableMapping)):
+            raise HttpQueryError(
+                400, f"GraphQL params should be a dict. Received {data!r}."
+            )
+        return [data]
+    
+    if not batch_enabled:
+        raise HttpQueryError(400, "Batch GraphQL requests are not enabled.")
+        
+    if not data:
+        raise HttpQueryError(400, "Received an empty list in the batch request.")
+        
+    return data

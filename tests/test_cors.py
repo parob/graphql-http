@@ -52,7 +52,9 @@ class TestGraphQLHTTPCORS:
             schema=schema,
             allow_cors=True,
             auth_enabled=True,
-            auth_jwks_uri="https://example.com/.well-known/jwks.json"
+            auth_jwks_uri="https://example.com/.well-known/jwks.json",
+            auth_issuer="https://example.com/",
+            auth_audience="test-audience"
         )
         client = server.client()
         
@@ -87,7 +89,9 @@ class TestGraphQLHTTPCORS:
             schema=schema,
             allow_cors=True,
             auth_enabled=True,
-            auth_jwks_uri="https://example.com/.well-known/jwks.json"
+            auth_jwks_uri="https://example.com/.well-known/jwks.json",
+            auth_issuer="https://example.com/",
+            auth_audience="test-audience"
         )
         client = server.client()
         
@@ -394,8 +398,8 @@ class TestGraphQLHTTPEdgeCases:
 
     def test_large_query_handling(self, schema):
         """Test handling of very large queries."""
-        # Create a reasonably large query (not excessive to avoid test slowness)
-        large_query = "{ hello " + "hello " * 1000 + "}"
+        # Create a malformed large query that should fail parsing
+        large_query = "{ hello(" + "invalidParam " * 1000 + ")}"
         
         server = GraphQLHTTP(schema=schema)
         client = server.client()

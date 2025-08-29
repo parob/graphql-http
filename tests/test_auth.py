@@ -1,7 +1,7 @@
 import pytest
 import jwt
 from unittest.mock import patch, MagicMock
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from graphql import GraphQLSchema, GraphQLObjectType, GraphQLField, GraphQLString
 
@@ -99,7 +99,7 @@ class TestGraphQLHTTPAuthentication:
             "sub": "user123",
             "aud": "test-audience",
             "iss": "https://example.com/",
-            "exp": datetime.utcnow() + timedelta(hours=1)
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
         }
         
         server = GraphQLHTTP(
@@ -233,25 +233,15 @@ class TestGraphQLHTTPAuthentication:
 
     def test_jwks_client_initialization_failure(self, schema):
         """Test server initialization when JWKS URI is not provided."""
-        server = GraphQLHTTP(
-            schema=schema,
-            auth_enabled=True,
-            # No auth_jwks_uri provided
-            auth_issuer="https://example.com/",
-            auth_audience="test-audience"
-        )
-        client = server.client()
-        
-        response = client.post(
-            "/graphql",
-            json={"query": "{ hello }"},
-            headers={"Authorization": "Bearer some_token"}
-        )
-        
-        assert response.status_code == 500
-        result = response.json()
-        assert "errors" in result
-        assert "JWKS client not configured" in result["errors"][0]["message"]
+        # This should raise a ValueError during initialization now due to validation
+        with pytest.raises(ValueError, match="auth_jwks_uri is required when auth_enabled=True"):
+            GraphQLHTTP(
+                schema=schema,
+                auth_enabled=True,
+                # No auth_jwks_uri provided
+                auth_issuer="https://example.com/",
+                auth_audience="test-audience"
+            )
 
     @patch('graphql_http.server.PyJWKClient')
     def test_jwks_key_retrieval_failure(self, mock_jwks_client_class, schema):
