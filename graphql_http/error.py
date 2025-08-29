@@ -1,20 +1,20 @@
 class HttpQueryError(Exception):
     """HTTP-specific GraphQL error with status code and headers.
-    
+
     This exception is raised when there's an issue with the HTTP request
     that prevents GraphQL execution, such as invalid JSON, unsupported
     methods, or authentication failures.
     """
-    
+
     def __init__(
-        self, 
-        status_code: int, 
-        message: str = None, 
-        is_graphql_error: bool = False, 
+        self,
+        status_code: int,
+        message: str = None,
+        is_graphql_error: bool = False,
         headers: dict = None
     ):
         """Initialize HTTP query error.
-        
+
         Args:
             status_code: HTTP status code
             message: Error message
@@ -40,7 +40,7 @@ class HttpQueryError(Exception):
         """Generate hash for use in sets and as dict keys."""
         headers_hash = tuple(sorted(self.headers.items())) if self.headers else ()
         return hash((self.status_code, self.message, headers_hash))
-        
+
     def __repr__(self) -> str:
         """String representation for debugging."""
         return f"HttpQueryError({self.status_code}, {self.message!r})"

@@ -17,7 +17,10 @@ from graphql.pyutils.awaitable_or_value import AwaitableOrValue
 
 from .error import HttpQueryError
 
+
 # Type definitions
+
+
 class SkipException(Exception):
     """Exception for skipping execution."""
     pass
@@ -42,7 +45,7 @@ def run_http_query(
     **execute_options,
 ) -> Tuple[List[AwaitableOrValue[ExecutionResult]], List[GraphQLParams]]:
     """Execute GraphQL queries over HTTP.
-    
+
     Args:
         schema: GraphQL schema to execute against
         request_method: HTTP method (get/post)
@@ -52,17 +55,17 @@ def run_http_query(
         catch: Whether to catch execution exceptions
         allow_post_query: Whether to allow queries in POST requests
         **execute_options: Additional execution options
-        
+
     Returns:
         Tuple of execution results and parsed parameters
-        
+
     Raises:
         TypeError: If schema is invalid
         HttpQueryError: If request is invalid
     """
     _validate_schema(schema)
     _validate_request_method(request_method)
-    
+
     catch_exc = HttpQueryError if catch else SkipException
     is_batch = isinstance(data, list)
     is_get_request = request_method == HTTP_GET
@@ -241,13 +244,13 @@ def execute_graphql_request(
 
 def load_json_body(data: str) -> Union[Dict, List]:
     """Load JSON from request body.
-    
+
     Args:
         data: JSON string to parse
-        
+
     Returns:
         Parsed JSON data
-        
+
     Raises:
         HttpQueryError: If JSON is invalid
     """
@@ -258,14 +261,15 @@ def load_json_body(data: str) -> Union[Dict, List]:
     except Exception as e:
         raise HttpQueryError(400, f"Failed to parse request body: {e}")
 
-
 # Helper functions
+
+
 def _validate_schema(schema: GraphQLSchema) -> None:
     """Validate GraphQL schema.
-    
+
     Args:
         schema: Schema to validate
-        
+
     Raises:
         TypeError: If schema is invalid
     """
@@ -275,10 +279,10 @@ def _validate_schema(schema: GraphQLSchema) -> None:
 
 def _validate_request_method(request_method: str) -> None:
     """Validate HTTP request method.
-    
+
     Args:
         request_method: HTTP method to validate
-        
+
     Raises:
         HttpQueryError: If method is not supported
     """
@@ -291,20 +295,20 @@ def _validate_request_method(request_method: str) -> None:
 
 
 def _normalize_request_data(
-    data: Union[Dict, List[Dict]], 
-    is_batch: bool, 
+    data: Union[Dict, List[Dict]],
+    is_batch: bool,
     batch_enabled: bool
 ) -> List[Dict]:
     """Normalize request data to list format.
-    
+
     Args:
         data: Request data
         is_batch: Whether request is batch
         batch_enabled: Whether batch is enabled
-        
+
     Returns:
         Normalized data as list
-        
+
     Raises:
         HttpQueryError: If data format is invalid
     """
@@ -314,11 +318,11 @@ def _normalize_request_data(
                 400, f"GraphQL params should be a dict. Received {data!r}."
             )
         return [data]
-    
+
     if not batch_enabled:
         raise HttpQueryError(400, "Batch GraphQL requests are not enabled.")
-        
+
     if not data:
         raise HttpQueryError(400, "Received an empty list in the batch request.")
-        
+
     return data

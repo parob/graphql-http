@@ -41,7 +41,7 @@ DEFAULT_PORT = 5000
 
 class GraphQLHTTP:
     """GraphQL HTTP server for serving GraphQL schemas over HTTP.
-    
+
     This class provides a complete HTTP server for GraphQL APIs with support for:
     - GraphiQL interface for development
     - JWT authentication with JWKS
@@ -97,7 +97,7 @@ class GraphQLHTTP:
         auth_enabled_for_introspection: bool = False,
     ) -> None:
         """Initialize GraphQL HTTP server.
-        
+
         Args:
             schema: GraphQL schema to serve
             root_value: Root value passed to resolvers
@@ -113,7 +113,7 @@ class GraphQLHTTP:
             auth_audience: Expected JWT audience
             auth_enabled: Whether to enable JWT authentication
             auth_enabled_for_introspection: Whether auth is required for introspection
-            
+
         Raises:
             ValueError: If invalid configuration is provided
             ImportError: If required dependencies are missing
@@ -173,7 +173,7 @@ class GraphQLHTTP:
         health_path: Optional[str],
     ) -> None:
         """Validate server configuration.
-        
+
         Args:
             schema: GraphQL schema to validate
             auth_enabled: Whether authentication is enabled
@@ -181,13 +181,13 @@ class GraphQLHTTP:
             auth_issuer: JWT issuer
             auth_audience: JWT audience
             health_path: Health check path
-            
+
         Raises:
             ValueError: If configuration is invalid
         """
         if not isinstance(schema, GraphQLSchema):
             raise ValueError(f"Expected GraphQLSchema, got {type(schema)}")
-            
+
         if auth_enabled:
             if not auth_jwks_uri:
                 raise ValueError("auth_jwks_uri is required when auth_enabled=True")
@@ -195,22 +195,24 @@ class GraphQLHTTP:
                 raise ValueError("auth_issuer is required when auth_enabled=True")
             if not auth_audience:
                 raise ValueError("auth_audience is required when auth_enabled=True")
-                
+
         if health_path is not None:
             if not isinstance(health_path, str):
                 raise ValueError("health_path must be a string")
             if not health_path.startswith('/'):
                 raise ValueError("health_path must start with '/'")
-                
-    def _setup_cors_middleware(self, middleware_stack: List[StarletteMiddleware]) -> None:
+
+    def _setup_cors_middleware(
+        self, middleware_stack: List[StarletteMiddleware]
+    ) -> None:
         """Setup CORS middleware if enabled.
-        
+
         Args:
             middleware_stack: List to append CORS middleware to
         """
         if not self.allow_cors:
             return
-            
+
         allow_headers_list = ["Content-Type"]
         if self.auth_enabled:
             allow_headers_list.append("Authorization")
@@ -236,10 +238,10 @@ class GraphQLHTTP:
 
     def _handle_health_check(self, request: Request) -> Optional[Response]:
         """Handle health check requests.
-        
+
         Args:
             request: HTTP request
-            
+
         Returns:
             Response if this is a health check request, None otherwise
         """
@@ -249,18 +251,18 @@ class GraphQLHTTP:
 
     def _handle_graphiql(self, request: Request) -> Optional[Response]:
         """Handle GraphiQL interface requests.
-        
+
         Args:
             request: HTTP request
-            
+
         Returns:
             HTMLResponse with GraphiQL if appropriate, None otherwise
         """
         if request.method.lower() != "get" or not self.should_serve_graphiql(request):
             return None
-            
+
         graphiql_path = os.path.join(GRAPHIQL_DIR, "index.html")
-        
+
         default_query = ''
         if self.graphiql_default_query:
             if isinstance(self.graphiql_default_query, str):
@@ -276,16 +278,16 @@ class GraphQLHTTP:
 
     def _handle_options(self, request: Request) -> Optional[Response]:
         """Handle CORS preflight OPTIONS requests.
-        
+
         Args:
             request: HTTP request
-            
+
         Returns:
             Response for OPTIONS request, None if not OPTIONS
         """
         if request.method.lower() != "options":
             return None
-            
+
         response_headers = {}
         if self.allow_cors:
             allow_h = ["Content-Type"]
@@ -296,7 +298,7 @@ class GraphQLHTTP:
                 "Access-Control-Allow-Headers": ", ".join(allow_h),
                 "Access-Control-Allow-Methods": "GET, POST",
             }
-            
+
             origin = request.headers.get("Origin") or request.headers.get("origin")
             if self.auth_enabled:
                 # When auth is enabled, be more restrictive
@@ -306,45 +308,47 @@ class GraphQLHTTP:
             else:
                 # When auth is disabled, allow all origins
                 response_headers["Access-Control-Allow-Origin"] = "*"
-                
+
         return PlainTextResponse("OK", headers=response_headers)
 
     def _check_introspection_only(self, data: Union[Dict, List]) -> bool:
         """Check if request contains only introspection queries.
-        
+
         Args:
             data: Request data
-            
+
         Returns:
             True if request is introspection-only
         """
         if not self.auth_enabled or self.auth_enabled_for_introspection:
             return False
-            
+
         # Simple heuristic: if it contains introspection fields AND no regular fields
         query_data_lower = str(data).lower()
-        
+
         # Check for introspection fields
         introspection_fields = ["__schema", "__type", "__typename"]
         has_introspection = any(f in query_data_lower for f in introspection_fields)
-        
+
         if not has_introspection:
             return False
-            
+
         # Check for regular fields (non-introspection)
         # This is a simple heuristic - in a mixed query, we require auth
         regular_field_patterns = ["hello", "users", "posts", "data", "mutation"]
-        has_regular_fields = any(pattern in query_data_lower for pattern in regular_field_patterns)
-        
+        has_regular_fields = any(
+            pattern in query_data_lower for pattern in regular_field_patterns
+        )
+
         # Only allow introspection-only queries to bypass auth
         return has_introspection and not has_regular_fields
 
     def _authenticate_request(self, request: Request) -> Optional[Response]:
         """Authenticate JWT token from request.
-        
+
         Args:
             request: HTTP request
-            
+
         Returns:
             Error response if authentication fails, None if successful
         """
@@ -354,7 +358,7 @@ class GraphQLHTTP:
                 raise InvalidTokenError(
                     "Unauthorized: Authorization header is missing or not Bearer"
                 )
-                
+
             if not self.jwks_client:
                 return self.error_response(
                     ValueError("JWKS client not configured"), status=500
@@ -374,15 +378,16 @@ class GraphQLHTTP:
         except InvalidTokenError as e:
             return self.error_response(e, status=401)
         except Exception as e:
-            # For other exceptions (like JWKS key retrieval failures), preserve the message
+            # For other exceptions (like JWKS key retrieval failures),
+            # preserve the message
             return self.error_response(e, status=401)
 
     def _prepare_context(self, request: Request) -> Any:
         """Prepare context value for GraphQL execution.
-        
+
         Args:
             request: HTTP request
-            
+
         Returns:
             Context value for GraphQL execution
         """
@@ -402,10 +407,10 @@ class GraphQLHTTP:
 
     async def dispatch(self, request: Request) -> Response:
         """Handle HTTP requests and route them appropriately.
-        
+
         Args:
             request: HTTP request
-            
+
         Returns:
             HTTP response
         """
@@ -433,7 +438,7 @@ class GraphQLHTTP:
             allow_only_introspection = False
             if self.auth_enabled:
                 allow_only_introspection = self._check_introspection_only(data)
-                
+
                 if not allow_only_introspection:
                     auth_error = self._authenticate_request(request)
                     if auth_error:
@@ -465,7 +470,9 @@ class GraphQLHTTP:
                 if isinstance(execution_result, Awaitable):
                     awaited_execution_result: ExecutionResult = await execution_result
                 else:
-                    awaited_execution_result = execution_result or ExecutionResult(data=None, errors=[])
+                    awaited_execution_result = execution_result or ExecutionResult(
+                        data=None, errors=[]
+                    )
 
                 results.append(awaited_execution_result)
 
@@ -522,8 +529,8 @@ class GraphQLHTTP:
             except JSONDecodeError as e:
                 raise HttpQueryError(400, f"Unable to parse JSON body: {e}")
 
-        elif (content_type.startswith("application/x-www-form-urlencoded") or 
-              content_type.startswith("multipart/form-data")):
+        elif (content_type.startswith("application/x-www-form-urlencoded")
+              or content_type.startswith("multipart/form-data")):
             form_data = await request.form()
             return {k: v for k, v in form_data.items()}
 
@@ -564,15 +571,17 @@ class GraphQLHTTP:
 
     def client(self) -> TestClient:
         """Get a test client for the GraphQL server.
-        
+
         Returns:
             Starlette TestClient instance for testing
         """
         return TestClient(self.app)
 
-    def run(self, host: Optional[str] = None, port: Optional[int] = None, **kwargs) -> None:
+    def run(
+        self, host: Optional[str] = None, port: Optional[int] = None, **kwargs
+    ) -> None:
         """Run the GraphQL HTTP server.
-        
+
         Args:
             host: Host to bind to (default: 127.0.0.1)
             port: Port to bind to (default: 5000)
@@ -586,5 +595,5 @@ class GraphQLHTTP:
             print(f"GraphiQL interface: http://{hostname}:{port_num}/graphql")
         if self.health_path:
             print(f"Health check: http://{hostname}:{port_num}{self.health_path}")
-            
+
         uvicorn.run(self.app, host=hostname, port=port_num, **kwargs)
