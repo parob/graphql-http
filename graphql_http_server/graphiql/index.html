@@ -1987,20 +1987,28 @@
               } else {
                 // Dynamic width calculation based on content
                 const minContentWidth = isRootType ? 350 : 280;
+                const maxContentWidth = isRootType ? 500 : 400; // Reasonable maximum
                 
                 // Calculate required width based on longest field name and type
                 let maxRequiredWidth = minContentWidth;
                 const items = node.data.type.fields || node.data.type.inputFields || node.data.type.enumValues || [];
                 
-                items.forEach(item => {
-                  // Estimate text width: field name + type string + padding
-                  const fieldName = item.name || '';
-                  const fieldType = item.type ? getTypeString(item.type) : '';
-                  const estimatedTextWidth = (fieldName.length * (isRootType ? 14 : 13)) + (fieldType.length * 11) + 80; // 80px for padding and spacing
-                  maxRequiredWidth = Math.max(maxRequiredWidth, estimatedTextWidth);
-                });
+                if (items && items.length > 0) {
+                  items.forEach(item => {
+                    if (item && item.name) {
+                      // Estimate text width: field name + type string + padding
+                      const fieldName = item.name || '';
+                      const fieldType = item.type ? getTypeString(item.type) : '';
+                      const estimatedTextWidth = (fieldName.length * (isRootType ? 13 : 12)) + (fieldType.length * 10) + 100; // Conservative estimate with padding
+                      maxRequiredWidth = Math.max(maxRequiredWidth, estimatedTextWidth);
+                    }
+                  });
+                }
                 
-                nodeWidth = Math.min(maxRequiredWidth + (borderWidth * 2), 600); // Cap at 600px for very long names
+                // Apply reasonable bounds and add border width
+                nodeWidth = Math.min(Math.max(maxRequiredWidth, minContentWidth), maxContentWidth) + (borderWidth * 2);
+                console.log(`ELK calculated width for ${node.id}: ${nodeWidth}px (isRoot: ${isRootType}, items: ${items?.length || 0})`);
+                
                 // Calculate height including arguments
                 let totalHeight = 60 + (itemCount * 45) + rootTypeHeaderHeight + 20;
                 
@@ -2521,32 +2529,34 @@
                 // Try to use measured port position for more accurate start point
                 const sourceNodeData = edges.find(e => e.id === elkEdge.id);
                 if (sourceNodeData && window.measuredFieldPositions) {
-                  // Extract field name from sourceHandle (format: nodeId-field-fieldName or nodeId-arg-fieldName-argName)
                   const sourceHandle = sourceNodeData.sourceHandle;
                   if (sourceHandle) {
-                    let fieldKey = sourceHandle.replace('-field-', '-').replace('-arg-', '-arg-');
-                    const measuredPos = window.measuredFieldPositions.get(fieldKey);
-                    if (!measuredPos && sourceHandle.includes('-arg-')) {
-                      // Try argument positions map
-                      const argKey = sourceHandle.replace(sourceNodeData.source + '-', sourceNodeData.source + '-');
-                      const argMeasuredPos = window.measuredArgumentPositions?.get(argKey);
-                      if (argMeasuredPos) {
-                        // Adjust start point to use measured position
-                        const sourceNode = elkNodes.find(n => n.id === sourceNodeData.source);
-                        if (sourceNode) {
-                          startPoint = {
-                            x: sourceNode.x + argMeasuredPos.x,
-                            y: sourceNode.y + argMeasuredPos.y
-                          };
-                        }
-                      }
-                    } else if (measuredPos) {
-                      // Adjust start point to use measured field position
+                    // Try to get measured position - handle both field and argument formats
+                    let measuredPos = window.measuredFieldPositions.get(sourceHandle);
+                    
+                    // If not found and it's an argument, try the argument positions map
+                    if (!measuredPos && sourceHandle.includes('-arg-') && window.measuredArgumentPositions) {
+                      measuredPos = window.measuredArgumentPositions.get(sourceHandle);
+                    }
+                    
+                    if (measuredPos) {
                       const sourceNode = elkNodes.find(n => n.id === sourceNodeData.source);
                       if (sourceNode) {
+                        // Use measured position for precise alignment
                         startPoint = {
                           x: sourceNode.x + measuredPos.x,
                           y: sourceNode.y + measuredPos.y
+                        };
+                        console.log(`Using measured start point for ${sourceHandle}: (${startPoint.x.toFixed(1)}, ${startPoint.y.toFixed(1)})`);
+                      }
+                    } else {
+                      // If no measured position yet, use a more conservative fallback that works better with timing issues
+                      const sourceNode = elkNodes.find(n => n.id === sourceNodeData.source);
+                      if (sourceNode) {
+                        // Use node right edge as fallback - more reliable than ELK's calculated position
+                        startPoint = {
+                          x: sourceNode.x + sourceNode.width - 2, // 2px margin from edge
+                          y: startPoint.y // Keep ELK's Y position
                         };
                       }
                     }
@@ -2775,6 +2785,21 @@
                 }
                 return edge;
               });
+              
+              // Check if we have any measured positions - if not, schedule a retry after a delay
+              const hasMeasuredPositions = window.measuredFieldPositions && window.measuredFieldPositions.size > 0;
+              if (!hasMeasuredPositions && !window.layoutRetryScheduled) {
+                window.layoutRetryScheduled = true;
+                console.log('No measured positions found, scheduling layout retry in 500ms');
+                setTimeout(() => {
+                  window.layoutRetryScheduled = false;
+                  if (window.measuredFieldPositions && window.measuredFieldPositions.size > 0) {
+                    console.log('Retrying layout with measured positions');
+                    // Trigger a re-layout if we now have measurements
+                    setNodes(currentNodes => [...currentNodes]);
+                  }
+                }, 500);
+              }
 
               // Store the final layout data for fit view functionality
               window._lastELKLayoutData = {
