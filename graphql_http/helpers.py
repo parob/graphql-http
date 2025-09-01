@@ -298,7 +298,7 @@ def _normalize_request_data(
     data: Union[Dict, List[Dict]],
     is_batch: bool,
     batch_enabled: bool
-) -> List[Dict]:
+) -> Union[Dict, List[Dict]]:
     """Normalize request data to list format.
 
     Args:
