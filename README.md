@@ -16,6 +16,11 @@ A lightweight, production-ready HTTP server for GraphQL APIs built on top of Sta
 ## Installation
 
 ```bash
+uv add graphql_http
+```
+
+Or with pip:
+```bash
 pip install graphql_http
 ```
 
@@ -214,6 +219,12 @@ The server provides comprehensive error handling:
 
 ### Running Tests
 
+With UV:
+```bash
+uv run pytest tests/ -v
+```
+
+Or with Python directly:
 ```bash
 python -m pytest tests/ -v
 ```
