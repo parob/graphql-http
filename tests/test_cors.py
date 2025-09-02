@@ -26,7 +26,7 @@ class TestGraphQLHTTPCORS:
         """Test that CORS is disabled by default."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.options("/graphql")
         assert response.status_code == 200
         # Should not have CORS headers when disabled
@@ -36,7 +36,7 @@ class TestGraphQLHTTPCORS:
         """Test basic CORS functionality."""
         server = GraphQLHTTP(schema=schema, allow_cors=True)
         client = server.client()
-        
+
         response = client.options("/graphql")
         assert response.status_code == 200
         assert "Access-Control-Allow-Origin" in response.headers
@@ -57,15 +57,15 @@ class TestGraphQLHTTPCORS:
             auth_audience="test-audience"
         )
         client = server.client()
-        
+
         response = client.options("/graphql")
         assert response.status_code == 200
-        
+
         # Should include Authorization header when auth is enabled
         allow_headers = response.headers["Access-Control-Allow-Headers"]
         assert "Content-Type" in allow_headers
         assert "Authorization" in allow_headers
-        
+
         # Should use regex pattern instead of * when auth is enabled
         assert "Access-Control-Allow-Origin" not in response.headers
         assert "Access-Control-Allow-Credentials" in response.headers
@@ -75,7 +75,7 @@ class TestGraphQLHTTPCORS:
         """Test CORS preflight with Origin header."""
         server = GraphQLHTTP(schema=schema, allow_cors=True)
         client = server.client()
-        
+
         response = client.options(
             "/graphql",
             headers={"Origin": "https://example.com"}
@@ -94,7 +94,7 @@ class TestGraphQLHTTPCORS:
             auth_audience="test-audience"
         )
         client = server.client()
-        
+
         response = client.options(
             "/graphql",
             headers={"Origin": "https://example.com"}
@@ -107,7 +107,7 @@ class TestGraphQLHTTPCORS:
         """Test CORS on actual GraphQL request."""
         server = GraphQLHTTP(schema=schema, allow_cors=True)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             json={"query": "{ hello }"},
@@ -121,7 +121,7 @@ class TestGraphQLHTTPCORS:
         """Test CORS on GET request."""
         server = GraphQLHTTP(schema=schema, allow_cors=True)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?query={hello}",
             headers={"Origin": "https://example.com"}
@@ -152,7 +152,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test that GraphiQL is enabled by default."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.get(
             "/graphql",
             headers={"Accept": "text/html"}
@@ -165,7 +165,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test GraphiQL disabled."""
         server = GraphQLHTTP(schema=schema, serve_graphiql=False)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?query={hello}",
             headers={"Accept": "text/html"}
@@ -178,7 +178,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test that JSON is returned when Accept: application/json."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?query={hello}",
             headers={"Accept": "application/json"}
@@ -191,7 +191,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test Accept header with JSON preferred."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?query={hello}",
             headers={"Accept": "application/json, text/html"}
@@ -203,7 +203,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test Accept header with HTML preferred."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.get(
             "/graphql",
             headers={"Accept": "text/html, application/json"}
@@ -215,7 +215,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test Accept header with wildcard."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?query={hello}",
             headers={"Accept": "*/*"}
@@ -232,7 +232,7 @@ class TestGraphQLHTTPGraphiQL:
             graphiql_default_query=default_query
         )
         client = server.client()
-        
+
         response = client.get(
             "/graphql",
             headers={"Accept": "text/html"}
@@ -245,7 +245,7 @@ class TestGraphQLHTTPGraphiQL:
         """Test that ?raw parameter bypasses GraphiQL."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?raw&query={hello}",
             headers={"Accept": "text/html"}
@@ -261,7 +261,7 @@ class TestGraphQLHTTPGraphiQL:
             health_path="/health"
         )
         client = server.client()
-        
+
         response = client.get(
             "/health",
             headers={"Accept": "text/html"}
@@ -293,7 +293,7 @@ class TestGraphQLHTTPEdgeCases:
         """Test request with empty body."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.post("/graphql", content="")
         assert response.status_code == 400
         result = response.json()
@@ -304,7 +304,7 @@ class TestGraphQLHTTPEdgeCases:
         """Test non-JSON content with JSON content type."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             content="not json",
@@ -319,7 +319,7 @@ class TestGraphQLHTTPEdgeCases:
         """Test invalid JSON in variables."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             json={
@@ -336,10 +336,10 @@ class TestGraphQLHTTPEdgeCases:
         """Test multipart form data handling."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         files = {"query": (None, "{ hello }")}
         response = client.post("/graphql", files=files)
-        
+
         assert response.status_code == 200
         assert response.json() == {"data": {"hello": "Hello, World!"}}
 
@@ -347,7 +347,7 @@ class TestGraphQLHTTPEdgeCases:
         """Test URL-encoded form data."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             data={"query": "{ hello }"},
@@ -360,7 +360,7 @@ class TestGraphQLHTTPEdgeCases:
         """Test fallback to query parameter parsing for malformed body."""
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             content="{ hello }",
@@ -385,10 +385,10 @@ class TestGraphQLHTTPEdgeCases:
                 },
             )
         )
-        
+
         server = GraphQLHTTP(schema=unicode_schema)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             json={"query": "{ unicode }"}
@@ -400,10 +400,10 @@ class TestGraphQLHTTPEdgeCases:
         """Test handling of very large queries."""
         # Create a malformed large query that should fail parsing
         large_query = "{ hello(" + "invalidParam " * 1000 + ")}"
-        
+
         server = GraphQLHTTP(schema=schema)
         client = server.client()
-        
+
         response = client.post(
             "/graphql",
             json={"query": large_query}
@@ -416,7 +416,7 @@ class TestGraphQLHTTPEdgeCases:
     def test_error_response_status_codes(self, schema):
         """Test various error response status codes."""
         server = GraphQLHTTP(schema=schema)
-        
+
         # Test format_error with status code in extensions
         from graphql import GraphQLError
         error_with_status = GraphQLError(
@@ -429,19 +429,19 @@ class TestGraphQLHTTPEdgeCases:
     def test_custom_execution_context_class(self, schema):
         """Test custom execution context class."""
         from graphql.execution import ExecutionContext
-        
+
         class CustomExecutionContext(ExecutionContext):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 # Add custom behavior if needed
                 pass
-        
+
         server = GraphQLHTTP(
             schema=schema,
             execution_context_class=CustomExecutionContext
         )
         client = server.client()
-        
+
         response = client.post("/graphql", json={"query": "{ hello }"})
         assert response.status_code == 200
         assert response.json() == {"data": {"hello": "Hello, World!"}}
@@ -449,7 +449,7 @@ class TestGraphQLHTTPEdgeCases:
     def test_server_run_method_parameters(self, schema):
         """Test server run method with custom parameters."""
         server = GraphQLHTTP(schema=schema)
-        
+
         # Test that the run method accepts parameters correctly
         # (We can't actually run the server in tests, but we can check the method exists)
         assert hasattr(server, 'run')

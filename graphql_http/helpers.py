@@ -82,7 +82,8 @@ def run_http_query(
     all_params = [get_graphql_params(entry, extra_data) for entry in data]
 
     responses = [
-        get_response(schema, params, catch_exc, allow_only_query, **execute_options)
+        get_response(schema, params, catch_exc,
+                     allow_only_query, **execute_options)
         for params in all_params
     ]
 
@@ -132,7 +133,8 @@ def load_json_variables(variables: Optional[Union[str, Dict]]) -> Optional[Dict]
 def get_graphql_params(data: Dict, query_data: Dict) -> GraphQLParams:
     query = data.get("query") or query_data.get("query")
     variables = data.get("variables") or query_data.get("variables")
-    operation_name = data.get("operationName") or query_data.get("operationName")
+    operation_name = data.get(
+        "operationName") or query_data.get("operationName")
 
     return GraphQLParams(query, load_json_variables(variables), operation_name)
 
@@ -167,7 +169,8 @@ def format_execution_result(
         response = {}
 
         if execution_result.errors:
-            response["errors"] = [format_error(e) for e in execution_result.errors]
+            response["errors"] = [format_error(e)
+                                  for e in execution_result.errors]
         if execution_result.data:
             response["data"] = execution_result.data
         status_code = 200
@@ -323,6 +326,7 @@ def _normalize_request_data(
         raise HttpQueryError(400, "Batch GraphQL requests are not enabled.")
 
     if not data:
-        raise HttpQueryError(400, "Received an empty list in the batch request.")
+        raise HttpQueryError(
+            400, "Received an empty list in the batch request.")
 
     return data

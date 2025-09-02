@@ -22,7 +22,8 @@ def schema():
                 "hello": GraphQLField(type_=GraphQLString, resolve=lambda *_: "world"),
                 "helloWorld": GraphQLField(
                     type_=GraphQLString,
-                    args={"name": GraphQLArgument(GraphQLNonNull(GraphQLString))},
+                    args={"name": GraphQLArgument(
+                        GraphQLNonNull(GraphQLString))},
                     resolve=resolve_hello_world,
                 ),
             },

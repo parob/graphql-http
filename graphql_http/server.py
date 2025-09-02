@@ -150,7 +150,8 @@ class GraphQLHTTP:
             self.jwks_client = None
 
         routes = [
-            Route("/graphql", self.dispatch, methods=["GET", "POST", "OPTIONS"]),
+            Route("/graphql", self.dispatch,
+                  methods=["GET", "POST", "OPTIONS"]),
             Route("/", self.dispatch, methods=["GET", "POST", "OPTIONS"]),
         ]
         if self.health_path:
@@ -190,11 +191,14 @@ class GraphQLHTTP:
 
         if auth_enabled:
             if not auth_jwks_uri:
-                raise ValueError("auth_jwks_uri is required when auth_enabled=True")
+                raise ValueError(
+                    "auth_jwks_uri is required when auth_enabled=True")
             if not auth_issuer:
-                raise ValueError("auth_issuer is required when auth_enabled=True")
+                raise ValueError(
+                    "auth_issuer is required when auth_enabled=True")
             if not auth_audience:
-                raise ValueError("auth_audience is required when auth_enabled=True")
+                raise ValueError(
+                    "auth_audience is required when auth_enabled=True")
 
         if health_path is not None:
             if not isinstance(health_path, str):
@@ -299,7 +303,8 @@ class GraphQLHTTP:
                 "Access-Control-Allow-Methods": "GET, POST",
             }
 
-            origin = request.headers.get("Origin") or request.headers.get("origin")
+            origin = request.headers.get(
+                "Origin") or request.headers.get("origin")
             if self.auth_enabled:
                 # When auth is enabled, be more restrictive
                 response_headers["Access-Control-Allow-Credentials"] = "true"
@@ -328,14 +333,16 @@ class GraphQLHTTP:
 
         # Check for introspection fields
         introspection_fields = ["__schema", "__type", "__typename"]
-        has_introspection = any(f in query_data_lower for f in introspection_fields)
+        has_introspection = any(
+            f in query_data_lower for f in introspection_fields)
 
         if not has_introspection:
             return False
 
         # Check for regular fields (non-introspection)
         # This is a simple heuristic - in a mixed query, we require auth
-        regular_field_patterns = ["hello", "users", "posts", "data", "mutation"]
+        regular_field_patterns = [
+            "hello", "users", "posts", "data", "mutation"]
         has_regular_fields = any(
             pattern in query_data_lower for pattern in regular_field_patterns
         )
@@ -590,10 +597,12 @@ class GraphQLHTTP:
         hostname = host or DEFAULT_HOST
         port_num = port or DEFAULT_PORT
 
-        print(f"GraphQL server running at http://{hostname}:{port_num}/graphql")
+        print(
+            f"GraphQL server running at http://{hostname}:{port_num}/graphql")
         if self.serve_graphiql:
             print(f"GraphiQL interface: http://{hostname}:{port_num}/graphql")
         if self.health_path:
-            print(f"Health check: http://{hostname}:{port_num}{self.health_path}")
+            print(
+                f"Health check: http://{hostname}:{port_num}{self.health_path}")
 
         uvicorn.run(self.app, host=hostname, port=port_num, **kwargs)

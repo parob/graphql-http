@@ -6,17 +6,20 @@ from datetime import datetime
 
 api = GraphQLAPI()
 
+
 class UserRole(Enum):
     READER = "READER"
     AUTHOR = "AUTHOR"
     LIBRARIAN = "LIBRARIAN"
     ADMIN = "ADMIN"
 
+
 class BookStatus(Enum):
     AVAILABLE = "AVAILABLE"
     CHECKED_OUT = "CHECKED_OUT"
     RESERVED = "RESERVED"
     MAINTENANCE = "MAINTENANCE"
+
 
 @api.type
 class Address:
@@ -51,6 +54,7 @@ class Address:
     def full_address(self) -> str:
         return f"{self._street}, {self._city}, {self._state} {self._zip_code}, {self._country}"
 
+
 @api.type
 class User:
     def __init__(self, id: str, name: str, email: str, role: UserRole, address: Optional[Address] = None):
@@ -80,6 +84,7 @@ class User:
     def address(self) -> Optional[Address]:
         return self._address
 
+
 @api.type
 class Genre:
     def __init__(self, id: str, name: str, description: str):
@@ -98,6 +103,7 @@ class Genre:
     @api.field
     def description(self) -> str:
         return self._description
+
 
 @api.type
 class Publisher:
@@ -126,6 +132,7 @@ class Publisher:
     @api.field
     def age(self) -> int:
         return datetime.now().year - self._founded_year
+
 
 @api.type
 class Author:
@@ -157,6 +164,7 @@ class Author:
             return datetime.now().year - self._birth_year
         return None
 
+
 @api.type
 class Review:
     def __init__(self, id: str, reviewer: User, rating: int, comment: str, book_id: str):
@@ -185,6 +193,7 @@ class Review:
     @api.field
     def book_id(self) -> str:
         return self._book_id
+
 
 @api.type
 class Book:
@@ -248,6 +257,7 @@ class Book:
                    4, f"{self._title} was a solid read with good character development.", self._id)
         ]
 
+
 @api.type
 class Library:
     def __init__(self, id: str, name: str, address: Address, established_year: int):
@@ -281,6 +291,7 @@ class Library:
     def available_books(self) -> list[Book]:
         return [book for book in self.books() if book.status() == BookStatus.AVAILABLE]
 
+
 def get_sample_books() -> list[Book]:
     # Create sample data
     address_ny = Address("123 Publisher St", "New York", "NY", "10001")
@@ -289,26 +300,34 @@ def get_sample_books() -> list[Book]:
     publisher = Publisher("pub1", "Penguin Random House", 1927, address_ny)
 
     fiction_genre = Genre("genre1", "Fiction", "Literary fiction and novels")
-    dystopian_genre = Genre("genre2", "Dystopian", "Dystopian and post-apocalyptic fiction")
+    dystopian_genre = Genre("genre2", "Dystopian",
+                            "Dystopian and post-apocalyptic fiction")
     classic_genre = Genre("genre3", "Classic", "Classic literature")
 
-    user_fitzgerald = User("u1", "F. Scott Fitzgerald", "fscott@example.com", UserRole.AUTHOR, address_user)
-    author_fitzgerald = Author("auth1", user_fitzgerald, "American novelist and short story writer", 1896)
+    user_fitzgerald = User("u1", "F. Scott Fitzgerald",
+                           "fscott@example.com", UserRole.AUTHOR, address_user)
+    author_fitzgerald = Author(
+        "auth1", user_fitzgerald, "American novelist and short story writer", 1896)
 
-    user_orwell = User("u4", "George Orwell", "gorwell@example.com", UserRole.AUTHOR)
-    author_orwell = Author("auth2", user_orwell, "English novelist and essayist", 1903)
+    user_orwell = User("u4", "George Orwell",
+                       "gorwell@example.com", UserRole.AUTHOR)
+    author_orwell = Author("auth2", user_orwell,
+                           "English novelist and essayist", 1903)
 
     book1 = Book(
         "book1", "The Great Gatsby", author_fitzgerald, "978-0-7432-7356-5",
-        publisher, [fiction_genre, classic_genre], BookStatus.AVAILABLE, 180, 1925
+        publisher, [fiction_genre,
+                    classic_genre], BookStatus.AVAILABLE, 180, 1925
     )
 
     book2 = Book(
         "book2", "1984", author_orwell, "978-0-452-28423-4",
-        publisher, [fiction_genre, dystopian_genre, classic_genre], BookStatus.CHECKED_OUT, 328, 1949
+        publisher, [fiction_genre, dystopian_genre,
+                    classic_genre], BookStatus.CHECKED_OUT, 328, 1949
     )
 
     return [book1, book2]
+
 
 @api.type(is_root_type=True)
 class HelloWorld:
@@ -323,10 +342,9 @@ class HelloWorld:
 
     @api.field(mutable=True)
     def update_book(self, id: str, title: str, author: Author, isbn: str,
-                 publisher: Publisher, genres: list[Genre], status: BookStatus = BookStatus.AVAILABLE,
-                 page_count: Optional[int] = None, publication_year: Optional[int] = None) -> Optional[Book]:
+                    publisher: Publisher, genres: list[Genre], status: BookStatus = BookStatus.AVAILABLE,
+                    page_count: Optional[int] = None, publication_year: Optional[int] = None) -> Optional[Book]:
         return None
-
 
     @api.field
     def user(self) -> User:
@@ -358,20 +376,23 @@ class HelloWorld:
             Genre("genre1", "Fiction", "Literary fiction and novels"),
             Genre("genre2", "Dystopian", "Dystopian and post-apocalyptic fiction"),
             Genre("genre3", "Classic", "Classic literature"),
-            Genre("genre4", "Science Fiction", "Science fiction and speculative fiction"),
+            Genre("genre4", "Science Fiction",
+                  "Science fiction and speculative fiction"),
             Genre("genre5", "Mystery", "Mystery and thriller novels")
         ]
 
     @api.field
     def users_by_role(self, role: UserRole) -> list[User]:
         all_users = [
-            User("u1", "F. Scott Fitzgerald", "fscott@example.com", UserRole.AUTHOR),
+            User("u1", "F. Scott Fitzgerald",
+                 "fscott@example.com", UserRole.AUTHOR),
             User("u2", "Alice Reader", "alice@example.com", UserRole.READER),
             User("u3", "Bob Critic", "bob@example.com", UserRole.READER),
             User("u4", "George Orwell", "gorwell@example.com", UserRole.AUTHOR),
             User("u5", "Library Admin", "admin@library.com", UserRole.LIBRARIAN)
         ]
         return [user for user in all_users if user.role() == role]
+
 
 default_query = "query HelloQuery($name: String!){  helloWorld(name: $name) }"
 

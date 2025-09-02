@@ -38,7 +38,8 @@ class HttpQueryError(Exception):
 
     def __hash__(self) -> int:
         """Generate hash for use in sets and as dict keys."""
-        headers_hash = tuple(sorted(self.headers.items())) if self.headers else ()
+        headers_hash = tuple(sorted(self.headers.items())
+                             ) if self.headers else ()
         return hash((self.status_code, self.message, headers_hash))
 
     def __repr__(self) -> str:

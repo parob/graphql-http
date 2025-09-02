@@ -88,7 +88,8 @@ class TestGraphQLAPI:
         assert "data" not in response.json()
         assert "errors" in response.json()
 
-        response = server.client().get("/?query={hello(error: false) optionalHello}")
+        response = server.client().get(
+            "/?query={hello(error: false) optionalHello}")
 
         assert response.status_code == 200
         assert response.json()
@@ -113,7 +114,8 @@ class TestGraphQLAPI:
         api = GraphQLAPI(root_type=Root)
         server = GraphQLHTTP.from_api(api=api)
 
-        response = server.client().get("/?query={hello}", headers={"key": "123"})
+        response = server.client().get(
+            "/?query={hello}", headers={"key": "123"})
 
         assert response.status_code == 200
         assert response.json() == {"data": {"hello": "123"}}
@@ -145,7 +147,8 @@ class TestGraphQLAPI:
                         "password"
                     )
                     if password != "123":
-                        raise AuthenticationException(message="unauthenticated")
+                        raise AuthenticationException(
+                            message="unauthenticated")
 
             next_response = next_(root, info, **args)
             return next_response

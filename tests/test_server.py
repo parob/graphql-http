@@ -1,6 +1,4 @@
 import pytest
-import json
-from unittest.mock import patch, MagicMock
 
 from graphql import (
     GraphQLSchema,
@@ -8,13 +6,11 @@ from graphql import (
     GraphQLField,
     GraphQLString,
     GraphQLArgument,
-    GraphQLNonNull,
     GraphQLError,
 )
 from starlette.testclient import TestClient
 
 from graphql_http import GraphQLHTTP
-from graphql_http.error import HttpQueryError
 
 
 class TestGraphQLHTTPCore:
@@ -177,7 +173,7 @@ class TestGraphQLHTTPCore:
         """Test health check when enabled."""
         server = GraphQLHTTP(schema=schema, health_path="/health")
         client = server.client()
-        
+
         response = client.get("/health")
         assert response.status_code == 200
         assert response.text == "OK"
@@ -198,13 +194,13 @@ class TestGraphQLHTTPCore:
                 },
             )
         )
-        
+
         server = GraphQLHTTP(
             schema=schema_with_root,
             root_value={"version": "1.0.0"}
         )
         client = server.client()
-        
+
         response = client.post("/graphql", json={"query": "{ info }"})
         assert response.status_code == 200
         assert response.json() == {"data": {"info": "Version: 1.0.0"}}
@@ -270,12 +266,12 @@ class TestGraphQLHTTPMiddleware:
 
         response = client.post("/graphql", json={"query": "{ protected }"})
         assert response.status_code == 200
-        
+
         # Middleware should execute in reverse order (onion layers)
         # First middleware in list executes outermost
         assert execution_order == [
             "middleware2_start",
-            "middleware1_start", 
+            "middleware1_start",
             "middleware1_end",
             "middleware2_end"
         ]
@@ -320,8 +316,9 @@ class TestGraphQLHTTPConfiguration:
         """Test GraphiQL disabled."""
         server = GraphQLHTTP(schema=basic_schema, serve_graphiql=False)
         client = server.client()
-        
-        response = client.get("/graphql?query={hello}", headers={"Accept": "text/html"})
+
+        response = client.get(
+            "/graphql?query={hello}", headers={"Accept": "text/html"})
         assert response.status_code == 200
         # Should return JSON, not HTML when GraphiQL is disabled
         assert "application/json" in response.headers["content-type"]
@@ -334,7 +331,7 @@ class TestGraphQLHTTPConfiguration:
             graphiql_default_query=default_query
         )
         client = server.client()
-        
+
         response = client.get("/graphql", headers={"Accept": "text/html"})
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
@@ -344,7 +341,7 @@ class TestGraphQLHTTPConfiguration:
         """Test that ?raw parameter bypasses GraphiQL."""
         server = GraphQLHTTP(schema=basic_schema, serve_graphiql=True)
         client = server.client()
-        
+
         response = client.get(
             "/graphql?raw&query={hello}",
             headers={"Accept": "text/html"}
@@ -369,13 +366,13 @@ class TestGraphQLHTTPConfiguration:
                 },
             )
         )
-        
+
         server = GraphQLHTTP(
             schema=schema,
             context_value={"user": "alice"}
         )
         client = server.client()
-        
+
         response = client.post("/graphql", json={"query": "{ user }"})
         assert response.status_code == 200
         assert response.json() == {"data": {"user": "User: alice"}}
@@ -384,7 +381,7 @@ class TestGraphQLHTTPConfiguration:
         """Test format_error method."""
         error = GraphQLError("Test error", extensions={"code": "TEST_ERROR"})
         formatted = GraphQLHTTP.format_error(error)
-        
+
         assert formatted["message"] == "Test error"
         assert formatted["extensions"]["code"] == "TEST_ERROR"
 

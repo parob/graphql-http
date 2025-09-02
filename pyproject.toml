@@ -40,6 +40,7 @@ dev = [
     "coverage",
     "flake8",
     "flake8-pyproject",
+    "autopep8>=2.3.2",
 ]
 
 [tool.uv]
@@ -67,7 +68,10 @@ graphql_http = [
 version = {file = "VERSION"}
 
 [tool.flake8]
-max-line-length = 140
-ignore = ["E203", "W503"]
+max-line-length = 170
+ignore = [
+    "E203",  # whitespace before ':' (conflicts with black)
+    "W503",  # line break before binary operator (conflicts with black)
+]
 exclude = [".venv"]
 
