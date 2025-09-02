@@ -35,7 +35,7 @@ jobs:
       run: uv sync --dev
 
     - name: Lint with Flake8
-      run: uv run flake8 graphql_http
+      run: uv run flake8 graphql_http tests
 
     - name: Test with Pytest
       run: uv run pytest
