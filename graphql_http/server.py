@@ -321,7 +321,7 @@ class GraphQLHTTP:
 
     def _check_introspection_only(self, data: Union[Dict, List]) -> bool:
         """Check if request contains only introspection queries using GraphQL's built-in validation.
-        
+
         This approach uses GraphQL's execution preparation to determine if a query
         is introspection-only by checking what fields would actually be resolved.
 
@@ -332,9 +332,7 @@ class GraphQLHTTP:
             True if all queries are introspection-only
         """
         try:
-            from graphql import (
-                parse, validate, get_introspection_query, GraphQLError
-            )
+            from graphql import parse, validate
             from graphql.type.introspection import is_introspection_type
             # Try to import execution context functions, fall back gracefully if not available
             try:
@@ -362,7 +360,7 @@ class GraphQLHTTP:
         query_stripped = query_str.strip()
         if not query_stripped:
             return False
-            
+
         # Basic syntax validation - ensure query looks structurally sound
         if query_stripped.count('{') != query_stripped.count('}'):
             return False
@@ -373,15 +371,15 @@ class GraphQLHTTP:
             # Parse and validate the query - this will catch syntax errors
             document = parse(query_str)
             validation_errors = validate(self.schema, document)
-            
+
             # If query has validation errors, it's not a valid introspection query
             if validation_errors:
                 return False
-            
+
             # If execution context is not available, fall back to AST method
             if not has_execution_context:
                 return self._check_introspection_only_ast(data)
-            
+
             # Additional security checks before execution analysis
             # Check if document contains only query operations (no mutations/subscriptions)
             for definition in document.definitions:
@@ -389,13 +387,13 @@ class GraphQLHTTP:
                     # Only allow query operations for introspection bypass
                     if definition.operation != 'query':
                         return False
-            
+
             # Build execution context to analyze what fields would be resolved
             try:
                 context_value = {}
                 variable_values = data.get('variables') or {}
                 operation_name = data.get('operationName')
-                
+
                 exe_context = build_execution_context(
                     self.schema,
                     document,
@@ -403,16 +401,16 @@ class GraphQLHTTP:
                     variable_values=variable_values,
                     operation_name=operation_name
                 )
-                
+
                 # If execution context building fails, be conservative
                 if isinstance(exe_context, list):  # List of GraphQLError
                     return False
-                
+
                 # Get the operation
                 operation = exe_context.operation
                 if not operation or not operation.selection_set:
                     return False
-                
+
                 # Collect the fields that would be executed
                 fields = collect_fields(
                     exe_context,
@@ -421,19 +419,19 @@ class GraphQLHTTP:
                     set(),
                     set()
                 )
-                
+
                 # Strict validation: only allow official introspection fields
                 official_introspection_fields = {'__schema', '__type', '__typename'}
-                
+
                 for field_name in fields.keys():
                     # Must start with __ (introspection convention)
                     if not field_name.startswith('__'):
                         return False
-                    
+
                     # Must be an official introspection field
                     if field_name not in official_introspection_fields:
                         return False
-                
+
                 # Double-check by examining the field types being accessed
                 query_type = self.schema.query_type
                 for field_name in fields.keys():
@@ -443,20 +441,20 @@ class GraphQLHTTP:
                         # Unwrap non-null and list types to get the base type
                         while hasattr(field_type, 'of_type'):
                             field_type = field_type.of_type
-                        
+
                         # Check if the field type is an introspection type
                         if not is_introspection_type(field_type):
                             return False
                     else:
                         # Field doesn't exist in schema - should not happen with validation
                         return False
-                
+
                 return True
-                
+
             except Exception:
                 # If execution context fails, fall back to AST method
                 return self._check_introspection_only_ast(data)
-            
+
         except Exception:
             # If parsing fails, it's not a valid query - BLOCK IT
             # Parse errors indicate malformed GraphQL which should never bypass auth
@@ -464,12 +462,12 @@ class GraphQLHTTP:
 
     def _check_introspection_only_ast(self, data: Union[Dict, List]) -> bool:
         """AST-based fallback for introspection detection.
-        
+
         This is the previous implementation as a fallback when execution context
         analysis is not available.
         """
         try:
-            from graphql import parse, DocumentNode, FieldNode, visit, Visitor
+            from graphql import parse, FieldNode, visit, Visitor
         except ImportError:
             # Final fallback to string-based check
             return self._check_introspection_only_fallback(data)
@@ -488,71 +486,71 @@ class GraphQLHTTP:
         try:
             # Parse the GraphQL query into an AST
             document = parse(query_str)
-            
+
             # Extract only root-level field names from the query
             root_field_names = set()
-            
+
             class RootFieldCollector(Visitor):
                 def __init__(self):
                     super().__init__()
                     self.depth = 0
-                    
+
                 def enter_selection_set(self, node, *_):
                     self.depth += 1
-                    
+
                 def leave_selection_set(self, node, *_):
                     self.depth -= 1
-                
+
                 def enter_field(self, node: FieldNode, *_):
                     # Only collect fields at depth 1 (root level fields)
                     if self.depth == 1 and hasattr(node, 'name') and hasattr(node.name, 'value'):
                         root_field_names.add(node.name.value)
-            
+
             visit(document, RootFieldCollector())
-            
+
             # Check if all root fields are introspection fields
             introspection_fields = {'__schema', '__type', '__typename'}
-            
+
             # If no fields found, it's not a valid query
             if not root_field_names:
                 return False
-                
+
             # All root fields must be introspection fields
             return root_field_names.issubset(introspection_fields)
-            
+
         except Exception:
             # If AST parsing fails, it's not a valid query - BLOCK IT
             return False
 
     def _check_introspection_only_fallback(self, data: Union[Dict, List]) -> bool:
         """Fallback string-based introspection check for when GraphQL parsing fails.
-        
+
         Args:
             data: Request data
-            
+
         Returns:
             True if request appears to be introspection-only (conservative check)
         """
         # Handle batched queries
         if isinstance(data, list):
             return all(self._check_introspection_only_fallback(item) for item in data)
-            
+
         if not isinstance(data, dict) or 'query' not in data:
             return False
-            
+
         query_str = data.get('query', '')
         if not query_str or not isinstance(query_str, str):
             return False
-            
+
         query_lower = query_str.lower()
-        
+
         # Check for introspection fields
         introspection_fields = ['__schema', '__type', '__typename']
         has_introspection = any(field in query_lower for field in introspection_fields)
-        
+
         if not has_introspection:
             return False
-            
+
         # Conservative approach: check for common non-introspection patterns
         # Remove comments and strings to avoid false positives
         import re
@@ -560,14 +558,14 @@ class GraphQLHTTP:
         clean_query = re.sub(r'"[^"]*"', '', clean_query)  # Remove string literals
         clean_query = re.sub(r"'[^']*'", '', clean_query)  # Remove string literals
         clean_query = clean_query.lower()
-        
+
         # Look for non-introspection field patterns in clean query
         # Use word boundaries to avoid matching substrings
         suspicious_patterns = [
             r'\b(query|mutation|subscription)\s+\w+',  # Named operations
             r'\{[^}]*[a-z_][a-z0-9_]*\s*[({]',  # Regular field selections
         ]
-        
+
         # If we find suspicious patterns, be conservative and require auth
         for pattern in suspicious_patterns:
             if re.search(pattern, clean_query):
@@ -575,11 +573,11 @@ class GraphQLHTTP:
                 remaining = clean_query
                 for intro_field in introspection_fields:
                     remaining = remaining.replace(intro_field, '')
-                
+
                 # If there's still substantial content, likely has regular fields
                 if len(re.findall(r'\w+', remaining)) > 3:  # Threshold for field names
                     return False
-        
+
         return True
 
     def _authenticate_request(self, request: Request) -> Optional[Response]:
