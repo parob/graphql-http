@@ -320,7 +320,10 @@ class GraphQLHTTP:
         return PlainTextResponse("OK", headers=response_headers)
 
     def _check_introspection_only(self, data: Union[Dict, List]) -> bool:
-        """Check if request contains only introspection queries using proper GraphQL AST parsing.
+        """Check if request contains only introspection queries using GraphQL's built-in validation.
+        
+        This approach uses GraphQL's execution preparation to determine if a query
+        is introspection-only by checking what fields would actually be resolved.
 
         Args:
             data: Request data (dict for single query, list for batched queries)
@@ -329,10 +332,15 @@ class GraphQLHTTP:
             True if all queries are introspection-only
         """
         try:
-            from graphql import parse, DocumentNode, FieldNode, visit, Visitor
+            from graphql import (
+                parse, validate, build_execution_context, get_introspection_query,
+                is_introspection_type, GraphQLError
+            )
+            from graphql.execution.collect_fields import collect_fields
+            from graphql.type.introspection import is_introspection_type
         except ImportError:
-            # Fallback to simple string-based check if graphql-core not available
-            return self._check_introspection_only_fallback(data)
+            # Fallback to AST-based check if advanced GraphQL features not available
+            return self._check_introspection_only_ast(data)
 
         # Handle batched queries
         if isinstance(data, list):
@@ -346,28 +354,132 @@ class GraphQLHTTP:
             return False
 
         try:
+            # Parse and validate the query
+            document = parse(query_str)
+            validation_errors = validate(self.schema, document)
+            
+            # If query has validation errors, it's not a valid introspection query
+            if validation_errors:
+                return False
+            
+            # Build execution context to analyze what fields would be resolved
+            try:
+                context_value = {}
+                variable_values = data.get('variables') or {}
+                operation_name = data.get('operationName')
+                
+                exe_context = build_execution_context(
+                    self.schema,
+                    document,
+                    context_value=context_value,
+                    variable_values=variable_values,
+                    operation_name=operation_name
+                )
+                
+                # If execution context building fails, be conservative
+                if isinstance(exe_context, list):  # List of GraphQLError
+                    return False
+                
+                # Get the operation
+                operation = exe_context.operation
+                if not operation or not operation.selection_set:
+                    return False
+                
+                # Collect the fields that would be executed
+                fields = collect_fields(
+                    exe_context,
+                    exe_context.schema.query_type,
+                    operation.selection_set,
+                    set(),
+                    set()
+                )
+                
+                # Check if all fields are introspection fields
+                for field_name in fields.keys():
+                    if not field_name.startswith('__'):
+                        return False
+                
+                # Double-check by examining the field types being accessed
+                query_type = self.schema.query_type
+                for field_name in fields.keys():
+                    field_def = query_type.fields.get(field_name)
+                    if field_def:
+                        field_type = field_def.type
+                        # Unwrap non-null and list types to get the base type
+                        while hasattr(field_type, 'of_type'):
+                            field_type = field_type.of_type
+                        
+                        # Check if the field type is an introspection type
+                        if not is_introspection_type(field_type):
+                            return False
+                
+                return True
+                
+            except Exception:
+                # If execution context fails, fall back to AST method
+                return self._check_introspection_only_ast(data)
+            
+        except Exception:
+            # If parsing fails, fall back to AST-based check
+            return self._check_introspection_only_ast(data)
+
+    def _check_introspection_only_ast(self, data: Union[Dict, List]) -> bool:
+        """AST-based fallback for introspection detection.
+        
+        This is the previous implementation as a fallback when execution context
+        analysis is not available.
+        """
+        try:
+            from graphql import parse, DocumentNode, FieldNode, visit, Visitor
+        except ImportError:
+            # Final fallback to string-based check
+            return self._check_introspection_only_fallback(data)
+
+        # Handle batched queries
+        if isinstance(data, list):
+            return all(self._check_introspection_only_ast(item) for item in data)
+
+        if not isinstance(data, dict) or 'query' not in data:
+            return False
+
+        query_str = data.get('query', '')
+        if not query_str or not isinstance(query_str, str):
+            return False
+
+        try:
             # Parse the GraphQL query into an AST
             document = parse(query_str)
             
-            # Extract all field names from the query
-            field_names = set()
+            # Extract only root-level field names from the query
+            root_field_names = set()
             
-            class FieldCollector(Visitor):
+            class RootFieldCollector(Visitor):
+                def __init__(self):
+                    super().__init__()
+                    self.depth = 0
+                    
+                def enter_selection_set(self, node, *_):
+                    self.depth += 1
+                    
+                def leave_selection_set(self, node, *_):
+                    self.depth -= 1
+                
                 def enter_field(self, node: FieldNode, *_):
-                    if hasattr(node, 'name') and hasattr(node.name, 'value'):
-                        field_names.add(node.name.value)
+                    # Only collect fields at depth 1 (root level fields)
+                    if self.depth == 1 and hasattr(node, 'name') and hasattr(node.name, 'value'):
+                        root_field_names.add(node.name.value)
             
-            visit(document, FieldCollector())
+            visit(document, RootFieldCollector())
             
-            # Check if all fields are introspection fields
+            # Check if all root fields are introspection fields
             introspection_fields = {'__schema', '__type', '__typename'}
             
             # If no fields found, it's not a valid query
-            if not field_names:
+            if not root_field_names:
                 return False
                 
-            # All fields must be introspection fields
-            return field_names.issubset(introspection_fields)
+            # All root fields must be introspection fields
+            return root_field_names.issubset(introspection_fields)
             
         except Exception:
             # If parsing fails, fall back to string-based check for safety
