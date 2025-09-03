@@ -163,11 +163,11 @@ class TestGraphQLHTTPAuthentication:
         assert "Invalid token" in result["errors"][0]["message"]
 
     def test_introspection_without_auth_when_disabled(self, schema):
-        """Test introspection queries work without auth when auth_enabled_for_introspection=False."""
+        """Test introspection queries work without auth when auth_introspection_bypass=False."""
         server = GraphQLHTTP(
             schema=schema,
             auth_enabled=True,
-            auth_enabled_for_introspection=False,
+            auth_bypass_during_introspection=False,
             auth_jwks_uri="https://example.com/.well-known/jwks.json",
             auth_issuer="https://example.com/",
             auth_audience="test-audience"
@@ -179,18 +179,21 @@ class TestGraphQLHTTPAuthentication:
             "/graphql",
             json={"query": "{ __schema { queryType { name } } }"}
         )
-        assert response.status_code == 200
-        # Should get a valid introspection response, not an auth error
+        assert response.status_code == 401
+        result = response.json()
+        assert "errors" in result
+        assert "Authorization header is missing" in result["errors"][0]["message"]
+
 
     @patch('graphql_http.server.PyJWKClient')
     def test_introspection_with_auth_when_enabled(self, mock_jwks_client_class, schema):
-        """Test introspection queries require auth when auth_enabled_for_introspection=True."""
+        """Test introspection queries require auth when auth_introspection_bypass=True."""
         mock_jwks_client_class.return_value = MagicMock()
 
         server = GraphQLHTTP(
             schema=schema,
             auth_enabled=True,
-            auth_enabled_for_introspection=True,
+            auth_bypass_during_introspection=True,
             auth_jwks_uri="https://example.com/.well-known/jwks.json",
             auth_issuer="https://example.com/",
             auth_audience="test-audience"
@@ -202,17 +205,15 @@ class TestGraphQLHTTPAuthentication:
             "/graphql",
             json={"query": "{ __schema { queryType { name } } }"}
         )
-        assert response.status_code == 401
-        result = response.json()
-        assert "errors" in result
-        assert "Authorization header is missing" in result["errors"][0]["message"]
+        assert response.status_code == 200
+        # Should get a valid introspection response, not an auth error
 
     def test_regular_query_requires_auth(self, schema):
         """Test that regular queries always require auth when auth is enabled."""
         server = GraphQLHTTP(
             schema=schema,
             auth_enabled=True,
-            auth_enabled_for_introspection=False,  # Only introspection is exempt
+            auth_bypass_during_introspection=False,  # Only introspection is exempt
             auth_jwks_uri="https://example.com/.well-known/jwks.json",
             auth_issuer="https://example.com/",
             auth_audience="test-audience"
@@ -274,7 +275,7 @@ class TestGraphQLHTTPAuthentication:
         server = GraphQLHTTP(
             schema=schema,
             auth_enabled=True,
-            auth_enabled_for_introspection=False,
+            auth_bypass_during_introspection=False,
             auth_jwks_uri="https://example.com/.well-known/jwks.json",
             auth_issuer="https://example.com/",
             auth_audience="test-audience"

@@ -94,7 +94,7 @@ class GraphQLHTTP:
         auth_issuer: Optional[str] = None,
         auth_audience: Optional[str] = None,
         auth_enabled: bool = False,
-        auth_enabled_for_introspection: bool = False,
+        auth_bypass_during_introspection: bool = True,
     ) -> None:
         """Initialize GraphQL HTTP server.
 
@@ -112,7 +112,7 @@ class GraphQLHTTP:
             auth_issuer: Expected JWT issuer
             auth_audience: Expected JWT audience
             auth_enabled: Whether to enable JWT authentication
-            auth_enabled_for_introspection: Whether auth is required for introspection
+            auth_bypass_during_introspection: Whether auth is required for introspection only queries
 
         Raises:
             ValueError: If invalid configuration is provided
@@ -142,7 +142,7 @@ class GraphQLHTTP:
         self.auth_issuer = auth_issuer
         self.auth_audience = auth_audience
         self.auth_enabled = auth_enabled
-        self.auth_enabled_for_introspection = auth_enabled_for_introspection
+        self.auth_bypass_during_introspection = auth_bypass_during_introspection
 
         if auth_jwks_uri:
             self.jwks_client = PyJWKClient(auth_jwks_uri)
@@ -325,8 +325,6 @@ class GraphQLHTTP:
         Returns:
             True if request is introspection-only
         """
-        if not self.auth_enabled or self.auth_enabled_for_introspection:
-            return False
 
         # Simple heuristic: if it contains introspection fields AND no regular fields
         query_data_lower = str(data).lower()
@@ -444,9 +442,7 @@ class GraphQLHTTP:
             # Handle authentication
             allow_only_introspection = False
             if self.auth_enabled:
-                allow_only_introspection = self._check_introspection_only(data)
-
-                if not allow_only_introspection:
+                if not self.auth_bypass_during_introspection or not self._check_introspection_only(data):
                     auth_error = self._authenticate_request(request)
                     if auth_error:
                         return auth_error

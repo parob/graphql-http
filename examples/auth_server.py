@@ -92,7 +92,7 @@ schema = GraphQLSchema(
                 resolve=get_public_info,
                 description="Public information available without authentication",
             ),
-            
+
             # Protected fields - require authentication
             "me": GraphQLField(
                 UserType,
@@ -120,20 +120,20 @@ def create_server_with_auth():
     jwks_uri = os.getenv("JWKS_URI", "https://your-auth0-domain.auth0.com/.well-known/jwks.json")
     issuer = os.getenv("JWT_ISSUER", "https://your-auth0-domain.auth0.com/")
     audience = os.getenv("JWT_AUDIENCE", "your-api-identifier")
-    
+
     return GraphQLHTTP(
         schema=schema,
         serve_graphiql=True,
         allow_cors=True,  # Enable CORS for web applications
         health_path="/health",  # Health check endpoint
-        
+
         # JWT Authentication configuration
         auth_enabled=True,
         auth_jwks_uri=jwks_uri,
         auth_issuer=issuer,
         auth_audience=audience,
-        auth_enabled_for_introspection=False,  # Allow introspection without auth
-        
+        auth_bypass_during_introspection=False,
+
         graphiql_default_query="""
 # Try these queries:
 
@@ -160,7 +160,7 @@ def create_server_with_auth():
 #     role
 #   }
 # }
-# 
+#
 # {
 #   users {
 #     id
@@ -204,7 +204,7 @@ def main():
     """Run the GraphQL server."""
     # Check if authentication should be enabled
     enable_auth = os.getenv("ENABLE_AUTH", "false").lower() == "true"
-    
+
     if enable_auth:
         print("Starting GraphQL server with JWT authentication...")
         server = create_server_with_auth()
@@ -220,12 +220,12 @@ def main():
         server = create_server_without_auth()
         print("\nAuthentication disabled for development!")
         print("Set ENABLE_AUTH=true to enable authentication")
-    
+
     print(f"\nEndpoints:")
     print(f"  GraphiQL: http://localhost:8000/graphql")
     print(f"  Health:   http://localhost:8000/health")
     print(f"  API:      http://localhost:8000/graphql")
-    
+
     # Run the server
     server.run(host="0.0.0.0", port=8000)
 
