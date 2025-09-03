@@ -333,11 +333,16 @@ class GraphQLHTTP:
         """
         try:
             from graphql import (
-                parse, validate, build_execution_context, get_introspection_query,
-                is_introspection_type, GraphQLError
+                parse, validate, get_introspection_query, GraphQLError
             )
-            from graphql.execution.collect_fields import collect_fields
             from graphql.type.introspection import is_introspection_type
+            # Try to import execution context functions, fall back gracefully if not available
+            try:
+                from graphql.execution import build_execution_context
+                from graphql.execution.collect_fields import collect_fields
+                has_execution_context = True
+            except ImportError:
+                has_execution_context = False
         except ImportError:
             # Fallback to AST-based check if advanced GraphQL features not available
             return self._check_introspection_only_ast(data)
@@ -353,14 +358,37 @@ class GraphQLHTTP:
         if not query_str or not isinstance(query_str, str):
             return False
 
+        # Pre-validation security checks
+        query_stripped = query_str.strip()
+        if not query_stripped:
+            return False
+            
+        # Basic syntax validation - ensure query looks structurally sound
+        if query_stripped.count('{') != query_stripped.count('}'):
+            return False
+        if query_stripped.count('(') != query_stripped.count(')'):
+            return False
+
         try:
-            # Parse and validate the query
+            # Parse and validate the query - this will catch syntax errors
             document = parse(query_str)
             validation_errors = validate(self.schema, document)
             
             # If query has validation errors, it's not a valid introspection query
             if validation_errors:
                 return False
+            
+            # If execution context is not available, fall back to AST method
+            if not has_execution_context:
+                return self._check_introspection_only_ast(data)
+            
+            # Additional security checks before execution analysis
+            # Check if document contains only query operations (no mutations/subscriptions)
+            for definition in document.definitions:
+                if hasattr(definition, 'operation'):
+                    # Only allow query operations for introspection bypass
+                    if definition.operation != 'query':
+                        return False
             
             # Build execution context to analyze what fields would be resolved
             try:
@@ -394,9 +422,16 @@ class GraphQLHTTP:
                     set()
                 )
                 
-                # Check if all fields are introspection fields
+                # Strict validation: only allow official introspection fields
+                official_introspection_fields = {'__schema', '__type', '__typename'}
+                
                 for field_name in fields.keys():
+                    # Must start with __ (introspection convention)
                     if not field_name.startswith('__'):
+                        return False
+                    
+                    # Must be an official introspection field
+                    if field_name not in official_introspection_fields:
                         return False
                 
                 # Double-check by examining the field types being accessed
@@ -412,6 +447,9 @@ class GraphQLHTTP:
                         # Check if the field type is an introspection type
                         if not is_introspection_type(field_type):
                             return False
+                    else:
+                        # Field doesn't exist in schema - should not happen with validation
+                        return False
                 
                 return True
                 
@@ -420,8 +458,9 @@ class GraphQLHTTP:
                 return self._check_introspection_only_ast(data)
             
         except Exception:
-            # If parsing fails, fall back to AST-based check
-            return self._check_introspection_only_ast(data)
+            # If parsing fails, it's not a valid query - BLOCK IT
+            # Parse errors indicate malformed GraphQL which should never bypass auth
+            return False
 
     def _check_introspection_only_ast(self, data: Union[Dict, List]) -> bool:
         """AST-based fallback for introspection detection.
@@ -482,8 +521,8 @@ class GraphQLHTTP:
             return root_field_names.issubset(introspection_fields)
             
         except Exception:
-            # If parsing fails, fall back to string-based check for safety
-            return self._check_introspection_only_fallback(data)
+            # If AST parsing fails, it's not a valid query - BLOCK IT
+            return False
 
     def _check_introspection_only_fallback(self, data: Union[Dict, List]) -> bool:
         """Fallback string-based introspection check for when GraphQL parsing fails.
