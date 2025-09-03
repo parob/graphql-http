@@ -320,36 +320,116 @@ class GraphQLHTTP:
         return PlainTextResponse("OK", headers=response_headers)
 
     def _check_introspection_only(self, data: Union[Dict, List]) -> bool:
-        """Check if request contains only introspection queries.
+        """Check if request contains only introspection queries using proper GraphQL AST parsing.
 
         Args:
-            data: Request data
+            data: Request data (dict for single query, list for batched queries)
 
         Returns:
-            True if request is introspection-only
+            True if all queries are introspection-only
         """
+        try:
+            from graphql import parse, DocumentNode, FieldNode, visit, Visitor
+        except ImportError:
+            # Fallback to simple string-based check if graphql-core not available
+            return self._check_introspection_only_fallback(data)
 
-        # Simple heuristic: if it contains introspection fields AND no regular fields
-        query_data_lower = str(data).lower()
+        # Handle batched queries
+        if isinstance(data, list):
+            return all(self._check_introspection_only(item) for item in data)
 
-        # Check for introspection fields
-        introspection_fields = ["__schema", "__type", "__typename"]
-        has_introspection = any(
-            f in query_data_lower for f in introspection_fields)
-
-        if not has_introspection:
+        if not isinstance(data, dict) or 'query' not in data:
             return False
 
-        # Check for regular fields (non-introspection)
-        # This is a simple heuristic - in a mixed query, we require auth
-        regular_field_patterns = [
-            "hello", "users", "posts", "data", "mutation"]
-        has_regular_fields = any(
-            pattern in query_data_lower for pattern in regular_field_patterns
-        )
+        query_str = data.get('query', '')
+        if not query_str or not isinstance(query_str, str):
+            return False
 
-        # Only allow introspection-only queries to bypass auth
-        return has_introspection and not has_regular_fields
+        try:
+            # Parse the GraphQL query into an AST
+            document = parse(query_str)
+            
+            # Extract all field names from the query
+            field_names = set()
+            
+            class FieldCollector(Visitor):
+                def enter_field(self, node: FieldNode, *_):
+                    if hasattr(node, 'name') and hasattr(node.name, 'value'):
+                        field_names.add(node.name.value)
+            
+            visit(document, FieldCollector())
+            
+            # Check if all fields are introspection fields
+            introspection_fields = {'__schema', '__type', '__typename'}
+            
+            # If no fields found, it's not a valid query
+            if not field_names:
+                return False
+                
+            # All fields must be introspection fields
+            return field_names.issubset(introspection_fields)
+            
+        except Exception:
+            # If parsing fails, fall back to string-based check for safety
+            return self._check_introspection_only_fallback(data)
+
+    def _check_introspection_only_fallback(self, data: Union[Dict, List]) -> bool:
+        """Fallback string-based introspection check for when GraphQL parsing fails.
+        
+        Args:
+            data: Request data
+            
+        Returns:
+            True if request appears to be introspection-only (conservative check)
+        """
+        # Handle batched queries
+        if isinstance(data, list):
+            return all(self._check_introspection_only_fallback(item) for item in data)
+            
+        if not isinstance(data, dict) or 'query' not in data:
+            return False
+            
+        query_str = data.get('query', '')
+        if not query_str or not isinstance(query_str, str):
+            return False
+            
+        query_lower = query_str.lower()
+        
+        # Check for introspection fields
+        introspection_fields = ['__schema', '__type', '__typename']
+        has_introspection = any(field in query_lower for field in introspection_fields)
+        
+        if not has_introspection:
+            return False
+            
+        # Conservative approach: check for common non-introspection patterns
+        # Remove comments and strings to avoid false positives
+        import re
+        clean_query = re.sub(r'#.*', '', query_str)  # Remove comments
+        clean_query = re.sub(r'"[^"]*"', '', clean_query)  # Remove string literals
+        clean_query = re.sub(r"'[^']*'", '', clean_query)  # Remove string literals
+        clean_query = clean_query.lower()
+        
+        # Look for non-introspection field patterns in clean query
+        # Use word boundaries to avoid matching substrings
+        suspicious_patterns = [
+            r'\b(query|mutation|subscription)\s+\w+',  # Named operations
+            r'\{[^}]*[a-z_][a-z0-9_]*\s*[({]',  # Regular field selections
+        ]
+        
+        # If we find suspicious patterns, be conservative and require auth
+        for pattern in suspicious_patterns:
+            if re.search(pattern, clean_query):
+                # Double-check it's not just introspection
+                remaining = clean_query
+                for intro_field in introspection_fields:
+                    remaining = remaining.replace(intro_field, '')
+                
+                # If there's still substantial content, likely has regular fields
+                if len(re.findall(r'\w+', remaining)) > 3:  # Threshold for field names
+                    return False
+        
+        return True
 
     def _authenticate_request(self, request: Request) -> Optional[Response]:
         """Authenticate JWT token from request.
