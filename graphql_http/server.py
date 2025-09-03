@@ -4,7 +4,6 @@ import os
 from json import JSONDecodeError
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 from logging import getLogger
-logger = getLogger(__name__)
 
 import jwt
 import uvicorn
@@ -36,6 +35,7 @@ try:
 except ImportError:
     GraphQLContext = None  # type: ignore
 
+logger = getLogger(__name__)
 # Constants
 GRAPHIQL_DIR = os.path.join(os.path.dirname(__file__), "graphiql")
 DEFAULT_HOST = "127.0.0.1"
