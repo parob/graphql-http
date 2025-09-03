@@ -3,9 +3,12 @@ import json
 import os
 from json import JSONDecodeError
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
+from logging import getLogger
+logger = getLogger(__name__)
 
 import jwt
 import uvicorn
+
 from graphql import GraphQLError, ExecutionResult
 from graphql.execution.execute import ExecutionContext
 from graphql.type.schema import GraphQLSchema
@@ -442,9 +445,11 @@ class GraphQLHTTP:
             # Handle authentication
             allow_only_introspection = False
             if self.auth_enabled:
-                if not self.auth_bypass_during_introspection or not self._check_introspection_only(data):
-                    auth_error = self._authenticate_request(request)
-                    if auth_error:
+                auth_error = self._authenticate_request(request)
+                if auth_error:
+                    if self.auth_bypass_during_introspection and self._check_introspection_only(data):
+                        logger.info("Authentication bypassed as introspection only query.")
+                    else:
                         return auth_error
 
             # Prepare context for GraphQL execution

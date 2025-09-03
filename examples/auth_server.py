@@ -221,10 +221,10 @@ def main():
         print("\nAuthentication disabled for development!")
         print("Set ENABLE_AUTH=true to enable authentication")
 
-    print(f"\nEndpoints:")
-    print(f"  GraphiQL: http://localhost:8000/graphql")
-    print(f"  Health:   http://localhost:8000/health")
-    print(f"  API:      http://localhost:8000/graphql")
+    print("\nEndpoints:")
+    print("  GraphiQL: http://localhost:8000/graphql")
+    print("  Health:   http://localhost:8000/health")
+    print("  API:      http://localhost:8000/graphql")
 
     # Run the server
     server.run(host="0.0.0.0", port=8000)

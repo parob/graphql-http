@@ -12,8 +12,6 @@ This example demonstrates advanced features including:
 """
 
 import time
-import asyncio
-from typing import Any, Dict, List, Optional
 from graphql import (
     GraphQLSchema,
     GraphQLObjectType,
@@ -33,15 +31,15 @@ from graphql_http import GraphQLHTTP
 # Custom execution context for performance monitoring
 class PerformanceExecutionContext(ExecutionContext):
     """Custom execution context that tracks performance metrics."""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_time = time.time()
         self.field_count = 0
-        
+
     def __enter__(self):
         return super().__enter__()
-        
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         execution_time = time.time() - self.start_time
         print(f"Query executed in {execution_time:.3f}s with {self.field_count} fields")
@@ -51,20 +49,20 @@ class PerformanceExecutionContext(ExecutionContext):
 # Custom context class
 class RequestContext:
     """Custom context that provides request-specific information."""
-    
+
     def __init__(self, request=None):
         self.request = request
         self.start_time = time.time()
         self.user_id = None
         self.cache = {}
-        
+
     def get_user_id(self):
         """Extract user ID from request headers (simplified)."""
         if self.request and not self.user_id:
             # In real apps, this would decode JWT or session
             self.user_id = self.request.headers.get("X-User-ID", "anonymous")
         return self.user_id
-        
+
     def get_elapsed_time(self):
         """Get elapsed time since request started."""
         return time.time() - self.start_time
@@ -88,19 +86,19 @@ posts_data = [
 def performance_middleware(next_fn, root, info, **args):
     """Middleware that measures field resolution time."""
     field_start = time.time()
-    
+
     # Track field count in execution context
     if hasattr(info.context, 'field_count'):
         info.context.field_count += 1
-    
+
     try:
         result = next_fn(root, info, **args)
         field_time = time.time() - field_start
-        
+
         # Log slow fields
         if field_time > 0.1:  # 100ms threshold
             print(f"Slow field detected: {info.field_name} took {field_time:.3f}s")
-        
+
         return result
     except Exception as e:
         field_time = time.time() - field_start
@@ -112,40 +110,40 @@ def caching_middleware(next_fn, root, info, **args):
     """Simple in-memory caching middleware."""
     # Create cache key
     cache_key = f"{info.field_name}:{hash(str(args))}"
-    
+
     # Check if we have cached result
     if hasattr(info.context, 'cache') and cache_key in info.context.cache:
         print(f"Cache hit for {info.field_name}")
         return info.context.cache[cache_key]
-    
+
     # Execute and cache result
     result = next_fn(root, info, **args)
-    
+
     if hasattr(info.context, 'cache'):
         info.context.cache[cache_key] = result
         print(f"Cached result for {info.field_name}")
-    
+
     return result
 
 
 def auth_middleware(next_fn, root, info, **args):
     """Authentication middleware for protected fields."""
     field_name = info.field_name
-    
+
     # Check if field requires authentication
     protected_fields = ["adminData", "deletePost", "promoteUser"]
     if field_name in protected_fields:
         user_id = info.context.get_user_id() if hasattr(info.context, 'get_user_id') else None
         if not user_id or user_id == "anonymous":
             raise GraphQLError(f"Authentication required for field: {field_name}")
-        
+
         # Check admin role for admin fields
         admin_fields = ["adminData", "promoteUser"]
         if field_name in admin_fields:
             # In real apps, check user role from database/JWT
             if not user_id.startswith("admin"):
                 raise GraphQLError(f"Admin access required for field: {field_name}")
-    
+
     return next_fn(root, info, **args)
 
 
@@ -162,11 +160,11 @@ def get_user_by_id(obj, info, user_id):
     """Get user by ID with validation."""
     if user_id <= 0:
         raise GraphQLError("User ID must be positive")
-    
+
     user = next((u for u in users_data if u["id"] == user_id), None)
     if not user:
         raise GraphQLError(f"User with ID {user_id} not found")
-    
+
     return user
 
 
@@ -325,27 +323,27 @@ def create_custom_context(request):
 def main():
     """Run the advanced GraphQL server."""
     print("Starting advanced GraphQL server...")
-    
+
     # Create server with advanced configuration
     server = GraphQLHTTP(
         schema=schema,
         serve_graphiql=True,
         allow_cors=True,
         health_path="/health",
-        
+
         # Add middleware stack
         middleware=[
             auth_middleware,        # Authentication first
             performance_middleware, # Then performance monitoring
             caching_middleware,     # Finally caching
         ],
-        
+
         # Custom execution context
         execution_context_class=PerformanceExecutionContext,
-        
+
         # Custom context factory
         context_value=lambda: create_custom_context(None),
-        
+
         graphiql_default_query="""
 # Try these queries to see advanced features:
 
@@ -360,17 +358,17 @@ def main():
       likes
     }
   }
-  
+
   # Context information
   contextInfo {
     elapsedTime
     userId
     cacheSize
   }
-  
+
   # This will be slow and trigger performance warning
   # slowField
-  
+
   # This will demonstrate error handling
   # errorField
 }
@@ -384,7 +382,7 @@ def main():
 # }
         """.strip(),
     )
-    
+
     print("Advanced server features enabled:")
     print("  ✓ Performance monitoring middleware")
     print("  ✓ Simple in-memory caching")
@@ -392,17 +390,17 @@ def main():
     print("  ✓ Custom execution context")
     print("  ✓ Custom request context")
     print("  ✓ Error handling and validation")
-    
+
     print(f"\nTesting tips:")
     print(f"  • Set 'X-User-ID: admin123' header for admin access")
     print(f"  • Watch console for performance metrics")
     print(f"  • Try the slowField and errorField for testing")
     print(f"  • Run same query twice to see caching in action")
-    
+
     print(f"\nEndpoints:")
     print(f"  GraphiQL: http://localhost:8000/graphql")
     print(f"  Health:   http://localhost:8000/health")
-    
+
     # Run the server
     server.run(host="0.0.0.0", port=8000)
 

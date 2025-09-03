@@ -11,9 +11,8 @@ Install with: pip install graphql-api
 """
 
 try:
-    from graphql_api import GraphQLAPI, field, type
+    from graphql_api import GraphQLAPI, field
     from graphql_api.context import GraphQLContext
-    from graphql_api.mapper import GraphQLMetaKey
 except ImportError:
     print("This example requires graphql-api to be installed.")
     print("Install with: pip install graphql-api")
@@ -75,52 +74,52 @@ api = GraphQLAPI()
 @api.type
 class AuthorType:
     """Author type with automatic field resolution."""
-    
+
     @field
     def id(self) -> int:
-        return self.id
-    
+        return self._id
+
     @field
     def name(self) -> str:
-        return self.name
-    
+        return self._name
+
     @field
     def email(self) -> str:
-        return self.email
-    
+        return self._email
+
     @field
-    def posts(self) -> List["PostType"]:
+    def posts(self) -> List[Post]:
         """Get all posts by this author."""
-        return [post for post in posts if post.author_id == self.id]
+        return [post for post in posts if post.author_id == self._id]
 
 
 @api.type
 class PostType:
     """Post type with relationships."""
-    
+
     @field
     def id(self) -> int:
-        return self.id
-    
+        return self._id
+
     @field
     def title(self) -> str:
-        return self.title
-    
+        return self._title
+
     @field
     def content(self) -> str:
-        return self.content
-    
+        return self._content
+
     @field
     def published(self) -> bool:
-        return self.published
-    
+        return self._published
+
     @field
     def author(self) -> Optional[AuthorType]:
         """Get the author of this post."""
-        return next((author for author in authors if author.id == self.author_id), None)
-    
+        return next((author for author in authors if author.id == self._author_id), None)
+
     @field
-    def comments(self) -> List["CommentType"]:
+    def comments(self) -> List[Comment]:
         """Get all comments for this post."""
         return [comment for comment in comments if comment.post_id == self.id]
 
@@ -128,56 +127,56 @@ class PostType:
 @api.type
 class CommentType:
     """Comment type."""
-    
+
     @field
     def id(self) -> int:
-        return self.id
-    
+        return self._id
+
     @field
     def author_name(self) -> str:
-        return self.author_name
-    
+        return self._author_name
+
     @field
     def content(self) -> str:
-        return self.content
-    
+        return self._content
+
     @field
     def post(self) -> Optional[PostType]:
         """Get the post this comment belongs to."""
-        return next((post for post in posts if post.id == self.post_id), None)
+        return next((post for post in posts if post.id == self._post_id), None)
 
 
 @api.type(is_root_type=True)
 class Query:
     """Root Query type."""
-    
+
     @field
     def hello(self, name: str = "World") -> str:
         """Simple hello field for testing."""
         return f"Hello, {name}!"
-    
+
     @field
     def authors(self) -> List[AuthorType]:
         """Get all authors."""
         return authors
-    
+
     @field
     def author(self, author_id: int) -> Optional[AuthorType]:
         """Get an author by ID."""
         return next((author for author in authors if author.id == author_id), None)
-    
+
     @field
     def posts(self, published_only: bool = False) -> List[PostType]:
         """Get all posts, optionally filter by published status."""
         if published_only:
             return [post for post in posts if post.published]
         return posts
-    
+
     @field
     def post(self, post_id: int) -> Optional[PostType]:
         """Get a post by ID."""
         return next((post for post in posts if post.id == post_id), None)
-    
+
     @field
     def search_posts(self, query: str) -> List[PostType]:
         """Search posts by title or content."""
@@ -191,7 +190,7 @@ class Query:
 @api.type
 class Mutation:
     """Root Mutation type."""
-    
+
     @field
     def create_post(self, title: str, content: str, author_id: int, published: bool = False) -> PostType:
         """Create a new post."""
@@ -204,30 +203,30 @@ class Mutation:
         )
         posts.append(new_post)
         return new_post
-    
+
     @field
     def update_post(self, post_id: int, title: Optional[str] = None, content: Optional[str] = None, published: Optional[bool] = None) -> Optional[PostType]:
         """Update an existing post."""
         post = next((p for p in posts if p.id == post_id), None)
         if not post:
             return None
-        
+
         if title is not None:
             post.title = title
         if content is not None:
             post.content = content
         if published is not None:
             post.published = published
-        
+
         return post
-    
+
     @field
-    def add_comment(self, post_id: int, author_name: str, content: str) -> Optional["CommentType"]:
+    def add_comment(self, post_id: int, author_name: str, content: str) -> Optional[Comment]:
         """Add a comment to a post."""
         post = next((p for p in posts if p.id == post_id), None)
         if not post:
             return None
-        
+
         new_comment = Comment(
             id=max(comment.id for comment in comments) + 1,
             post_id=post_id,
@@ -247,12 +246,12 @@ def custom_middleware(next_fn, root, info, **args):
     # Log the field being accessed
     field_name = info.field_name
     print(f"Accessing field: {field_name}")
-    
+
     # You could add authentication logic here
     # if field_name in ["sensitive_field"]:
     #     # Check authentication
     #     pass
-    
+
     # Call the next resolver
     return next_fn(root, info, **args)
 
@@ -279,7 +278,7 @@ class ContextQuery:
 def main():
     """Run the GraphQL server with GraphQL-API integration."""
     print("Starting GraphQL server with GraphQL-API integration...")
-    
+
     # Create server from the GraphQL API
     server = GraphQLHTTP.from_api(
         api=api,
@@ -294,7 +293,7 @@ def main():
 {
   # Simple greeting
   hello(name: "GraphQL API User")
-  
+
   # Get all authors with their posts
   authors {
     id
@@ -311,7 +310,7 @@ def main():
       }
     }
   }
-  
+
   # Get only published posts
   posts(publishedOnly: true) {
     id
@@ -321,7 +320,7 @@ def main():
       email
     }
   }
-  
+
   # Search posts
   searchPosts(query: "GraphQL") {
     id
@@ -347,18 +346,18 @@ def main():
 # }
         """.strip(),
     )
-    
+
     print("GraphQL-API server features:")
     print("  ✓ Automatic type inference from Python types")
     print("  ✓ Dataclass integration")
     print("  ✓ Relationship resolution")
     print("  ✓ Context injection")
     print("  ✓ Custom middleware support")
-    
-    print(f"\nEndpoints:")
-    print(f"  GraphiQL: http://localhost:8000/graphql")
-    print(f"  Health:   http://localhost:8000/health")
-    
+
+    print("\nEndpoints:")
+    print("  GraphiQL: http://localhost:8000/graphql")
+    print("  Health:   http://localhost:8000/health")
+
     # Run the server
     server.run(host="0.0.0.0", port=8000)
 
