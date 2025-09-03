@@ -184,11 +184,8 @@ class TestGraphQLHTTPAuthentication:
         assert "errors" in result
         assert "Authorization header is missing" in result["errors"][0]["message"]
 
-
-    @patch('graphql_http.server.PyJWKClient')
-    def test_introspection_with_auth_when_enabled(self, mock_jwks_client_class, schema):
+    def test_introspection_with_auth_when_enabled(self, schema):
         """Test introspection queries require auth when auth_introspection_bypass=True."""
-        mock_jwks_client_class.return_value = MagicMock()
 
         server = GraphQLHTTP(
             schema=schema,
