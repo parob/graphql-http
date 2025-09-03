@@ -310,3 +310,44 @@ class TestGraphQLHTTPAuthentication:
         result = response.json()
         assert "errors" in result
         assert "Authorization header is missing" in result["errors"][0]["message"]
+
+    def test_full_introspection_query_with_auth_bypass(self, schema):
+        """Test that the standard full introspection query works with auth bypass.
+
+        This tests the large introspection query that GraphiQL and other tools use
+        to fetch the complete schema information.
+        """
+        from graphql import get_introspection_query
+
+        server = GraphQLHTTP(
+            schema=schema,
+            auth_enabled=True,
+            auth_bypass_during_introspection=True,
+            auth_jwks_uri="https://example.com/.well-known/jwks.json",
+            auth_issuer="https://example.com/",
+            auth_audience="test-audience"
+        )
+        client = server.client()
+
+        # Get the standard introspection query
+        introspection_query = get_introspection_query()
+
+        # This should work without authentication
+        response = client.post(
+            "/graphql",
+            json={"query": introspection_query}
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        # Should get valid introspection data, not an auth error
+        assert "errors" not in result or len(result["errors"]) == 0
+        assert "data" in result
+        assert "__schema" in result["data"]
+
+        # Verify we get expected introspection structure
+        schema_data = result["data"]["__schema"]
+        assert "queryType" in schema_data
+        assert "types" in schema_data
+        assert "directives" in schema_data

@@ -494,16 +494,31 @@ class GraphQLHTTP:
                 def __init__(self):
                     super().__init__()
                     self.depth = 0
+                    self.in_operation = False
+
+                def enter_operation_definition(self, node, *_):
+                    # We're now inside an operation (query/mutation/subscription)
+                    self.in_operation = True
+
+                def leave_operation_definition(self, node, *_):
+                    # Leaving the operation
+                    self.in_operation = False
+
+                def enter_fragment_definition(self, node, *_):
+                    # Skip fragment definitions - they're not part of the actual query execution
+                    return False
 
                 def enter_selection_set(self, node, *_):
-                    self.depth += 1
+                    if self.in_operation:
+                        self.depth += 1
 
                 def leave_selection_set(self, node, *_):
-                    self.depth -= 1
+                    if self.in_operation:
+                        self.depth -= 1
 
                 def enter_field(self, node: FieldNode, *_):
-                    # Only collect fields at depth 1 (root level fields)
-                    if self.depth == 1 and hasattr(node, 'name') and hasattr(node.name, 'value'):
+                    # Only collect fields at depth 1 within actual operations
+                    if self.in_operation and self.depth == 1 and hasattr(node, 'name') and hasattr(node.name, 'value'):
                         root_field_names.add(node.name.value)
 
             visit(document, RootFieldCollector())
