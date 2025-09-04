@@ -37,16 +37,11 @@ class PerformanceExecutionContext(ExecutionContext):
         self.start_time = time.time()
         self.field_count = 0
 
-    def __enter__(self):
-        return super().__enter__()
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         execution_time = time.time() - self.start_time
         print(f"Query executed in {execution_time:.3f}s with {self.field_count} fields")
-        return super().__exit__(exc_type, exc_val, exc_tb)
 
 
-# Custom context class
 class RequestContext:
     """Custom context that provides request-specific information."""
 
@@ -61,6 +56,8 @@ class RequestContext:
         if self.request and not self.user_id:
             # In real apps, this would decode JWT or session
             self.user_id = self.request.headers.get("X-User-ID", "anonymous")
+        elif not self.user_id:
+            self.user_id = "anonymous"
         return self.user_id
 
     def get_elapsed_time(self):
@@ -76,9 +73,18 @@ users_data = [
 ]
 
 posts_data = [
-    {"id": 1, "title": "GraphQL Basics", "content": "Learn GraphQL...", "author_id": 1, "likes": 42},
-    {"id": 2, "title": "Advanced Queries", "content": "Deep dive...", "author_id": 2, "likes": 28},
-    {"id": 3, "title": "Performance Tips", "content": "Optimize your...", "author_id": 1, "likes": 35},
+    {
+        "id": 1, "title": "GraphQL Basics", "content": "Learn GraphQL...",
+        "author_id": 1, "likes": 42
+    },
+    {
+        "id": 2, "title": "Advanced Queries", "content": "Deep dive...",
+        "author_id": 2, "likes": 28
+    },
+    {
+        "id": 3, "title": "Performance Tips", "content": "Optimize your...",
+        "author_id": 1, "likes": 35
+    },
 ]
 
 
@@ -133,7 +139,10 @@ def auth_middleware(next_fn, root, info, **args):
     # Check if field requires authentication
     protected_fields = ["adminData", "deletePost", "promoteUser"]
     if field_name in protected_fields:
-        user_id = info.context.get_user_id() if hasattr(info.context, 'get_user_id') else None
+        user_id = (
+            info.context.get_user_id()
+            if hasattr(info.context, 'get_user_id') else None
+        )
         if not user_id or user_id == "anonymous":
             raise GraphQLError(f"Authentication required for field: {field_name}")
 
@@ -307,7 +316,7 @@ schema = GraphQLSchema(
             "promoteUser": GraphQLField(
                 GraphQLBoolean,
                 args={"userId": GraphQLArgument(GraphQLInt)},
-                resolve=lambda obj, info, user_id: True,  # Simplified
+                resolve=lambda obj, info, **kwargs: True,  # Simplified
                 description="Promote user to admin (requires admin access)",
             ),
         },
@@ -333,9 +342,9 @@ def main():
 
         # Add middleware stack
         middleware=[
-            auth_middleware,        # Authentication first
-            performance_middleware, # Then performance monitoring
-            caching_middleware,     # Finally caching
+            auth_middleware,         # Authentication first
+            performance_middleware,  # Then performance monitoring
+            caching_middleware,      # Finally caching
         ],
 
         # Custom execution context
@@ -391,15 +400,15 @@ def main():
     print("  ✓ Custom request context")
     print("  ✓ Error handling and validation")
 
-    print(f"\nTesting tips:")
-    print(f"  • Set 'X-User-ID: admin123' header for admin access")
-    print(f"  • Watch console for performance metrics")
-    print(f"  • Try the slowField and errorField for testing")
-    print(f"  • Run same query twice to see caching in action")
+    print("\nTesting tips:")
+    print("  • Set 'X-User-ID: admin123' header for admin access")
+    print("  • Watch console for performance metrics")
+    print("  • Try the slowField and errorField for testing")
+    print("  • Run same query twice to see caching in action")
 
-    print(f"\nEndpoints:")
-    print(f"  GraphiQL: http://localhost:8000/graphql")
-    print(f"  Health:   http://localhost:8000/health")
+    print("\nEndpoints:")
+    print("  GraphiQL: http://localhost:8000/graphql")
+    print("  Health:   http://localhost:8000/health")
 
     # Run the server
     server.run(host="0.0.0.0", port=8000)

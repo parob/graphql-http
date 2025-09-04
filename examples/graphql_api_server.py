@@ -8,18 +8,18 @@ automatic type inference.
 
 Note: This example requires the graphql-api package to be installed.
 Install with: pip install graphql-api
-"""
 
-try:
-    from graphql_api import GraphQLAPI, field
-    from graphql_api.context import GraphQLContext
-except ImportError:
-    print("This example requires graphql-api to be installed.")
-    print("Install with: pip install graphql-api")
-    exit(1)
+Since the graphql-api package may not be available in all environments,
+this example shows the basic structure and imports needed.
+"""
 
 from typing import List, Optional
 from dataclasses import dataclass
+
+from graphql_api import GraphQLAPI, field
+from graphql_api.context import GraphQLContext
+
+
 from graphql_http import GraphQLHTTP
 
 
@@ -55,9 +55,18 @@ authors = [
 ]
 
 posts = [
-    Post(id=1, title="Getting Started with GraphQL", content="GraphQL is awesome...", author_id=1, published=True),
-    Post(id=2, title="Advanced GraphQL Techniques", content="Let's explore...", author_id=1, published=True),
-    Post(id=3, title="Draft Post", content="This is a draft", author_id=2, published=False),
+    Post(
+        id=1, title="Getting Started with GraphQL",
+        content="GraphQL is awesome...", author_id=1, published=True
+    ),
+    Post(
+        id=2, title="Advanced GraphQL Techniques",
+        content="Let's explore...", author_id=1, published=True
+    ),
+    Post(
+        id=3, title="Draft Post", content="This is a draft",
+        author_id=2, published=False
+    ),
 ]
 
 comments = [
@@ -67,178 +76,127 @@ comments = [
 ]
 
 
-# Initialize GraphQL API
 api = GraphQLAPI()
 
 
-@api.type
-class AuthorType:
-    """Author type with automatic field resolution."""
-
-    @field
-    def id(self) -> int:
-        return self._id
-
-    @field
-    def name(self) -> str:
-        return self._name
-
-    @field
-    def email(self) -> str:
-        return self._email
-
-    @field
-    def posts(self) -> List[Post]:
-        """Get all posts by this author."""
-        return [post for post in posts if post.author_id == self._id]
+# Define resolvers that work with the dataclass instances
+@field
+def get_authors() -> List[Author]:
+    """Get all authors."""
+    return authors
 
 
-@api.type
-class PostType:
-    """Post type with relationships."""
-
-    @field
-    def id(self) -> int:
-        return self._id
-
-    @field
-    def title(self) -> str:
-        return self._title
-
-    @field
-    def content(self) -> str:
-        return self._content
-
-    @field
-    def published(self) -> bool:
-        return self._published
-
-    @field
-    def author(self) -> Optional[AuthorType]:
-        """Get the author of this post."""
-        return next((author for author in authors if author.id == self._author_id), None)
-
-    @field
-    def comments(self) -> List[Comment]:
-        """Get all comments for this post."""
-        return [comment for comment in comments if comment.post_id == self.id]
+@field
+def get_author(author_id: int) -> Optional[Author]:
+    """Get an author by ID."""
+    return next((author for author in authors if author.id == author_id), None)
 
 
-@api.type
-class CommentType:
-    """Comment type."""
-
-    @field
-    def id(self) -> int:
-        return self._id
-
-    @field
-    def author_name(self) -> str:
-        return self._author_name
-
-    @field
-    def content(self) -> str:
-        return self._content
-
-    @field
-    def post(self) -> Optional[PostType]:
-        """Get the post this comment belongs to."""
-        return next((post for post in posts if post.id == self._post_id), None)
+@field
+def get_posts(published_only: bool = False) -> List[Post]:
+    """Get all posts, optionally filter by published status."""
+    if published_only:
+        return [post for post in posts if post.published]
+    return posts
 
 
-@api.type(is_root_type=True)
-class Query:
-    """Root Query type."""
-
-    @field
-    def hello(self, name: str = "World") -> str:
-        """Simple hello field for testing."""
-        return f"Hello, {name}!"
-
-    @field
-    def authors(self) -> List[AuthorType]:
-        """Get all authors."""
-        return authors
-
-    @field
-    def author(self, author_id: int) -> Optional[AuthorType]:
-        """Get an author by ID."""
-        return next((author for author in authors if author.id == author_id), None)
-
-    @field
-    def posts(self, published_only: bool = False) -> List[PostType]:
-        """Get all posts, optionally filter by published status."""
-        if published_only:
-            return [post for post in posts if post.published]
-        return posts
-
-    @field
-    def post(self, post_id: int) -> Optional[PostType]:
-        """Get a post by ID."""
-        return next((post for post in posts if post.id == post_id), None)
-
-    @field
-    def search_posts(self, query: str) -> List[PostType]:
-        """Search posts by title or content."""
-        query_lower = query.lower()
-        return [
-            post for post in posts
-            if query_lower in post.title.lower() or query_lower in post.content.lower()
-        ]
+@field
+def get_post(post_id: int) -> Optional[Post]:
+    """Get a post by ID."""
+    return next((post for post in posts if post.id == post_id), None)
 
 
-@api.type
-class Mutation:
-    """Root Mutation type."""
-
-    @field
-    def create_post(self, title: str, content: str, author_id: int, published: bool = False) -> PostType:
-        """Create a new post."""
-        new_post = Post(
-            id=max(post.id for post in posts) + 1,
-            title=title,
-            content=content,
-            author_id=author_id,
-            published=published
-        )
-        posts.append(new_post)
-        return new_post
-
-    @field
-    def update_post(self, post_id: int, title: Optional[str] = None, content: Optional[str] = None, published: Optional[bool] = None) -> Optional[PostType]:
-        """Update an existing post."""
-        post = next((p for p in posts if p.id == post_id), None)
-        if not post:
-            return None
-
-        if title is not None:
-            post.title = title
-        if content is not None:
-            post.content = content
-        if published is not None:
-            post.published = published
-
-        return post
-
-    @field
-    def add_comment(self, post_id: int, author_name: str, content: str) -> Optional[Comment]:
-        """Add a comment to a post."""
-        post = next((p for p in posts if p.id == post_id), None)
-        if not post:
-            return None
-
-        new_comment = Comment(
-            id=max(comment.id for comment in comments) + 1,
-            post_id=post_id,
-            author_name=author_name,
-            content=content
-        )
-        comments.append(new_comment)
-        return new_comment
+@field
+def search_posts(query: str) -> List[Post]:
+    """Search posts by title or content."""
+    query_lower = query.lower()
+    return [
+        post for post in posts
+        if query_lower in post.title.lower() or query_lower in post.content.lower()
+    ]
 
 
-# Add mutation to the API
-api.set_root_mutation_type(Mutation)
+@field
+def get_author_posts(author: Author) -> List[Post]:
+    """Get all posts by a specific author."""
+    return [post for post in posts if post.author_id == author.id]
+
+
+@field
+def get_post_author(post: Post) -> Optional[Author]:
+    """Get the author of a specific post."""
+    return next((author for author in authors if author.id == post.author_id), None)
+
+
+@field
+def get_post_comments(post: Post) -> List[Comment]:
+    """Get all comments for a specific post."""
+    return [comment for comment in comments if comment.post_id == post.id]
+
+
+@field
+def get_comment_post(comment: Comment) -> Optional[Post]:
+    """Get the post a comment belongs to."""
+    return next((post for post in posts if post.id == comment.post_id), None)
+
+
+@field
+def create_post(
+    title: str, content: str, author_id: int, published: bool = False
+) -> Post:
+    """Create a new post."""
+    new_post = Post(
+        id=max(post.id for post in posts) + 1,
+        title=title,
+        content=content,
+        author_id=author_id,
+        published=published
+    )
+    posts.append(new_post)
+    return new_post
+
+
+@field
+def update_post(
+    post_id: int, title: Optional[str] = None,
+    content: Optional[str] = None, published: Optional[bool] = None
+) -> Optional[Post]:
+    """Update an existing post."""
+    post = next((p for p in posts if p.id == post_id), None)
+    if not post:
+        return None
+
+    if title is not None:
+        post.title = title
+    if content is not None:
+        post.content = content
+    if published is not None:
+        post.published = published
+
+    return post
+
+
+@field
+def add_comment(post_id: int, author_name: str, content: str) -> Optional[Comment]:
+    """Add a comment to a post."""
+    post = next((p for p in posts if p.id == post_id), None)
+    if not post:
+        return None
+
+    new_comment = Comment(
+        id=max(comment.id for comment in comments) + 1,
+        post_id=post_id,
+        author_name=author_name,
+        content=content
+    )
+    comments.append(new_comment)
+    return new_comment
+
+
+@field
+def hello(name: str = "World") -> str:
+    """Simple hello field for testing."""
+    return f"Hello, {name}!"
 
 
 def custom_middleware(next_fn, root, info, **args):
@@ -258,27 +216,22 @@ def custom_middleware(next_fn, root, info, **args):
 
 def context_aware_field_example(context: GraphQLContext) -> str:
     """Example of a field that uses the GraphQL context."""
-    request = context.meta.get("http_request")
-    if request:
-        user_agent = request.headers.get("user-agent", "Unknown")
-        return f"Request from: {user_agent}"
+    if hasattr(context, 'meta'):
+        request = context.meta.get("http_request")
+        if request:
+            user_agent = request.headers.get("user-agent", "Unknown")
+            return f"Request from: {user_agent}"
     return "No request context available"
 
 
-# Add context-aware field
-@api.type
-class ContextQuery:
-    @field
-    def request_info(self, context: GraphQLContext) -> str:
-        """Get information about the current request."""
-        return context_aware_field_example(context)
+@field
+def request_info(context: GraphQLContext) -> str:
+    """Get information about the current request."""
+    return context_aware_field_example(context)
 
 
-# Create the server using GraphQL-API
-def main():
-    """Run the GraphQL server with GraphQL-API integration."""
-    print("Starting GraphQL server with GraphQL-API integration...")
-
+def create_server():
+    """Create GraphQL server (stub when graphql-api is not available)."""
     # Create server from the GraphQL API
     server = GraphQLHTTP.from_api(
         api=api,
@@ -346,6 +299,16 @@ def main():
 # }
         """.strip(),
     )
+    return server
+
+
+def main():
+    """Run the GraphQL server with GraphQL-API integration."""
+    print("Starting GraphQL server with GraphQL-API integration...")
+
+    server = create_server()
+    if server is None:
+        return
 
     print("GraphQL-API server features:")
     print("  ✓ Automatic type inference from Python types")

@@ -33,8 +33,9 @@ def get_books(obj, info):
     return books
 
 
-def get_book_by_id(obj, info, book_id):
+def get_book_by_id(obj, info, **kwargs):
     """Return a book by its ID."""
+    book_id = kwargs.get('id')
     return next((book for book in books if book["id"] == book_id), None)
 
 
@@ -129,7 +130,10 @@ def main():
     print("Try these queries:")
     print("  Query: { books { id title author } }")
     print("  Query: { book(id: 1) { title author } }")
-    print("  Mutation: mutation { addBook(title: \"New Book\", author: \"New Author\") { id title } }")
+    print(
+        '  Mutation: mutation { addBook(title: "New Book", '
+        'author: "New Author") { id title } }'
+    )
 
     # Run the server
     server.run(host="0.0.0.0", port=8000)

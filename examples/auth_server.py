@@ -117,7 +117,10 @@ schema = GraphQLSchema(
 def create_server_with_auth():
     """Create server with JWT authentication enabled."""
     # In production, use real values from your auth provider
-    jwks_uri = os.getenv("JWKS_URI", "https://your-auth0-domain.auth0.com/.well-known/jwks.json")
+    jwks_uri = os.getenv(
+        "JWKS_URI",
+        "https://your-auth0-domain.auth0.com/.well-known/jwks.json"
+    )
     issuer = os.getenv("JWT_ISSUER", "https://your-auth0-domain.auth0.com/")
     audience = os.getenv("JWT_AUDIENCE", "your-api-identifier")
 
@@ -132,7 +135,7 @@ def create_server_with_auth():
         auth_jwks_uri=jwks_uri,
         auth_issuer=issuer,
         auth_audience=audience,
-        auth_bypass_during_introspection=False,
+        auth_bypass_during_introspection=True,
 
         graphiql_default_query="""
 # Try these queries:
