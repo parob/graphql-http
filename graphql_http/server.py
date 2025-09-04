@@ -86,7 +86,7 @@ class GraphQLHTTP:
         self,
         schema: GraphQLSchema,
         root_value: Any = None,
-        middleware: Optional[List[Callable[[Callable, Any], Any]]] = None,
+        middleware: Optional[List[Callable[[Callable, Any, Any], Any]]] = None,
         context_value: Any = None,
         serve_graphiql: bool = True,
         graphiql_default_query: Optional[str] = None,
