@@ -70,7 +70,7 @@ class TestBasicServerExample:
         assert new_book['title'] == "Test Book"
         assert new_book['author'] == "Test Author"
 
-    @patch('basic_server.GraphQLHTTP.run')
+    @patch('examples.basic_server.GraphQLHTTP.run')
     def test_basic_server_main_function(self, mock_run):
         """Test that main function creates server correctly."""
 
@@ -180,7 +180,7 @@ class TestAuthServerExample:
         assert 'data' in data
         assert 'publicInfo' in data['data']
 
-    @patch('auth_server.GraphQLHTTP.run')
+    @patch('examples.auth_server.GraphQLHTTP.run')
     def test_auth_server_main_function(self, mock_run):
         """Test main function with different auth modes."""
         import os
@@ -230,7 +230,7 @@ class TestGraphQLAPIServerExample:
         except ImportError:
             pytest.skip("graphql-api package not installed")
 
-    @patch('graphql_api_server.GraphQLHTTP.run')
+    @patch('examples.graphql_api_server.GraphQLHTTP.run')
     def test_graphql_api_server_main_function(self, mock_run):
         """Test main function creates server correctly."""
         try:
@@ -367,7 +367,7 @@ class TestAdvancedServerExample:
         # The full instantiation requires GraphQL internals, so just check class exists
         assert hasattr(advanced_server.PerformanceExecutionContext, '__init__')
 
-    @patch('advanced_server.GraphQLHTTP.run')
+    @patch('examples.advanced_server.GraphQLHTTP.run')
     def test_advanced_server_main_function(self, mock_run):
         """Test main function creates server correctly."""
 
