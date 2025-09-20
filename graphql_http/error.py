@@ -1,3 +1,6 @@
+from typing import Optional
+
+
 class HttpQueryError(Exception):
     """HTTP-specific GraphQL error with status code and headers.
 
@@ -9,9 +12,9 @@ class HttpQueryError(Exception):
     def __init__(
         self,
         status_code: int,
-        message: str = None,
+        message: Optional[str] = None,
         is_graphql_error: bool = False,
-        headers: dict = None
+        headers: Optional[dict] = None
     ):
         """Initialize HTTP query error.
 

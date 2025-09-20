@@ -4,7 +4,6 @@ Unit tests for introspection detection module.
 These tests validate the introspection detection logic independently of the server.
 """
 
-import pytest
 from graphql import get_introspection_query
 
 from graphql_http.introspection import is_introspection_only
@@ -52,7 +51,7 @@ class TestIntrospectionDetection:
                     }
                 }
             }
-            
+
             fragment TypeInfo on __Type {
                 name
                 kind
@@ -161,9 +160,9 @@ class TestIntrospectionDetection:
 
     def test_invalid_data_type_blocked(self):
         """Test invalid data type should be blocked."""
-        assert is_introspection_only("not a dict") is False
-        assert is_introspection_only(123) is False
-        assert is_introspection_only(None) is False
+        assert is_introspection_only("not a dict") is False  # type: ignore
+        assert is_introspection_only(123) is False  # type: ignore
+        assert is_introspection_only(None) is False  # type: ignore
 
     def test_deeply_nested_introspection(self):
         """Test deeply nested introspection query should work."""
@@ -212,7 +211,7 @@ class TestIntrospectionEdgeCases:
         """Test string fallback for simple introspection."""
         # This would trigger string fallback if AST parsing fails
         query_data = {"query": "{ __schema { queryType { name } } }"}
-        
+
         # Force string fallback by testing the internal function
         from graphql_http.introspection import _check_introspection_string
         result = _check_introspection_string(query_data["query"])
@@ -222,7 +221,7 @@ class TestIntrospectionEdgeCases:
         """Test string fallback blocks business queries."""
         # This would trigger string fallback if AST parsing fails
         query_data = {"query": "{ hello world users { name } }"}
-        
+
         # Force string fallback by testing the internal function
         from graphql_http.introspection import _check_introspection_string
         result = _check_introspection_string(query_data["query"])
@@ -231,7 +230,7 @@ class TestIntrospectionEdgeCases:
     def test_string_fallback_no_introspection_blocked(self):
         """Test string fallback blocks queries without introspection fields."""
         query_data = {"query": "{ hello }"}
-        
+
         from graphql_http.introspection import _check_introspection_string
         result = _check_introspection_string(query_data["query"])
         assert result is False
@@ -239,7 +238,7 @@ class TestIntrospectionEdgeCases:
     def test_string_fallback_mutation_blocked(self):
         """Test string fallback blocks mutations."""
         query_data = {"query": "mutation { __schema { queryType { name } } }"}
-        
+
         from graphql_http.introspection import _check_introspection_string
         result = _check_introspection_string(query_data["query"])
         assert result is False
@@ -271,7 +270,7 @@ class TestIntrospectionSecurity:
             "{__schema{queryType{name}}}",
             "  {  __schema  {  queryType  {  name  }  }  }  ",
         ]
-        
+
         for query in query_variations:
             query_data = {"query": query}
             assert is_introspection_only(query_data) is True, f"Failed for query: {query}"
@@ -302,7 +301,7 @@ class TestIntrospectionSecurity:
                     }
                 }
             }
-            
+
             fragment TypeFragment on __Type {
                 name
                 kind

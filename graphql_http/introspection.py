@@ -82,7 +82,7 @@ def _check_introspection_ast(query_str: str) -> bool:
         # Parse the GraphQL query into an AST
         document = parse(query_str)
         logger.debug(f"Successfully parsed query with {len(document.definitions)} definitions")
-        
+
         # Basic validation - check for obvious invalid patterns
         # This catches things like __type(name: hello) where hello should be "hello"
         query_lower = query_str.lower()
