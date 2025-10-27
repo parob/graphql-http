@@ -3645,10 +3645,18 @@
 
                 // If the active tab's query is empty or whitespace, replace it with defaultQuery
                 if (activeTab && (!activeTab.query || activeTab.query.trim() === '')) {
-                  activeTab.query = defaultQueryValue;
-                  const updatedValue = JSON.stringify(tabState);
-                  localStorage.setItem(key, updatedValue);
-                  return updatedValue;
+                  // Check if the default query already exists in ANY tab
+                  const defaultExistsInAnyTab = tabState.tabs.some(tab =>
+                    tab.query && tab.query.trim() === defaultQueryValue.trim()
+                  );
+
+                  // Only update if it's not already the default AND doesn't exist in any other tab
+                  if (activeTab.query !== defaultQueryValue && !defaultExistsInAnyTab) {
+                    activeTab.query = defaultQueryValue;
+                    const updatedValue = JSON.stringify(tabState);
+                    localStorage.setItem(key, updatedValue);
+                    return updatedValue;
+                  }
                 }
               }
             } catch (e) {
