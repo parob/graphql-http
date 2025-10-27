@@ -3626,15 +3626,37 @@
       });
       const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin];
 
-      // Custom storage that falls back to defaultQuery when localStorage is empty
+      // Store the default query so we can use it in the storage wrapper
+      const defaultQueryValue = "DEFAULT_QUERY";
+
+      // Custom storage that replaces empty queries with defaultQuery
       const customStorage = {
         ...localStorage,
         getItem(key) {
           const value = localStorage.getItem(key);
-          // If getting the query and it's empty/whitespace, return null to trigger defaultQuery fallback
-          if (key === 'graphiql:query' && (!value || value.trim() === '')) {
-            return null;
+
+          // Handle GraphiQL tab state - replace empty query with default
+          if (key === 'graphiql:tabState' && value) {
+            try {
+              const tabState = JSON.parse(value);
+              if (tabState && tabState.tabs && Array.isArray(tabState.tabs)) {
+                const activeIndex = tabState.activeTabIndex || 0;
+                const activeTab = tabState.tabs[activeIndex];
+
+                // If the active tab's query is empty or whitespace, replace it with defaultQuery
+                if (activeTab && (!activeTab.query || activeTab.query.trim() === '')) {
+                  activeTab.query = defaultQueryValue;
+                  const updatedValue = JSON.stringify(tabState);
+                  localStorage.setItem(key, updatedValue);
+                  return updatedValue;
+                }
+              }
+            } catch (e) {
+              // If parsing fails, just return the value as-is
+              return value;
+            }
           }
+
           return value;
         },
         setItem(key, value) {
@@ -3651,7 +3673,7 @@
           plugins,
           defaultEditorToolsVisibility: false,
           isHeadersEditorEnabled: true,
-          defaultQuery: "DEFAULT_QUERY",
+          defaultQuery: defaultQueryValue,
           storage: customStorage
         });
       }

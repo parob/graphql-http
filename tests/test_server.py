@@ -574,13 +574,18 @@ class TestGraphQLHTTPConfiguration:
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
 
+        # Verify defaultQueryValue variable is defined
+        assert "defaultQueryValue" in response.text
+
         # Verify custom storage implementation is present
         assert "customStorage" in response.text
-        assert "graphiql:query" in response.text
+        assert "graphiql:tabState" in response.text
         assert "storage: customStorage" in response.text
 
-        # Verify the storage checks for empty values
-        assert "value.trim()" in response.text or "!value" in response.text
+        # Verify the storage checks for empty query values and replaces with default
+        assert "JSON.parse" in response.text
+        assert "activeTab.query" in response.text
+        assert "activeTab.query = defaultQueryValue" in response.text
 
         # Verify the example query is still in the HTML
         assert "Example" in response.text
