@@ -560,3 +560,27 @@ class TestGraphQLHTTPConfiguration:
         data = {"hello": "world"}
         encoded = GraphQLHTTP.encode(data)
         assert encoded == '{"hello":"world"}'
+
+    def test_graphiql_custom_storage_for_empty_localstorage(self, basic_schema):
+        """Test that GraphiQL HTML includes custom storage to handle empty localStorage."""
+        example_query = "query Example { hello }"
+        server = GraphQLHTTP(
+            schema=basic_schema,
+            graphiql_example_query=example_query
+        )
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+
+        # Verify custom storage implementation is present
+        assert "customStorage" in response.text
+        assert "graphiql:query" in response.text
+        assert "storage: customStorage" in response.text
+
+        # Verify the storage checks for empty values
+        assert "value.trim()" in response.text or "!value" in response.text
+
+        # Verify the example query is still in the HTML
+        assert "Example" in response.text

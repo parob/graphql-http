@@ -3626,13 +3626,33 @@
       });
       const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin];
 
+      // Custom storage that falls back to defaultQuery when localStorage is empty
+      const customStorage = {
+        ...localStorage,
+        getItem(key) {
+          const value = localStorage.getItem(key);
+          // If getting the query and it's empty/whitespace, return null to trigger defaultQuery fallback
+          if (key === 'graphiql:query' && (!value || value.trim() === '')) {
+            return null;
+          }
+          return value;
+        },
+        setItem(key, value) {
+          return localStorage.setItem(key, value);
+        },
+        removeItem(key) {
+          return localStorage.removeItem(key);
+        }
+      };
+
       function App() {
         return React.createElement(GraphiQL, {
           fetcher,
           plugins,
           defaultEditorToolsVisibility: false,
           isHeadersEditorEnabled: true,
-          defaultQuery: "DEFAULT_QUERY"
+          defaultQuery: "DEFAULT_QUERY",
+          storage: customStorage
         });
       }
 
