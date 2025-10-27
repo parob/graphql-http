@@ -587,5 +587,8 @@ class TestGraphQLHTTPConfiguration:
         assert "activeTab.query" in response.text
         assert "activeTab.query = defaultQueryValue" in response.text
 
+        # Verify it checks if default already exists in any tab
+        assert "defaultExistsInAnyTab" in response.text or "tabs.some" in response.text
+
         # Verify the example query is still in the HTML
         assert "Example" in response.text
