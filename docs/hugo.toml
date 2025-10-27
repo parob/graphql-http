@@ -1,6 +1,6 @@
 baseURL = "/"
 languageCode = "en-us"
-title = "GraphQL HTTP for Python"
+title = "GraphQL HTTP"
 theme = "hugo-book"
 relativeURLs = true
 
@@ -56,12 +56,12 @@ relativeURLs = true
 # Language configuration
 [languages]
   [languages.en]
-    title = "GraphQL HTTP for Python"
+    title = "GraphQL HTTP"
     languageName ="English"
     # Weight used for sorting.
     weight = 1
     [languages.en.params]
-      description = "GraphQL HTTP Server for Python"
+      description = "GraphQL HTTP"
 
 # Markup configuration
 [markup]
