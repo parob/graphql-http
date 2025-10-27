@@ -495,7 +495,7 @@ class TestGraphQLHTTPConfiguration:
         example_file.write_text("query AutoDiscovered {\n  hello\n}")
 
         # Create server with direct query (highest priority)
-        server = GraphQLHTTP(
+        GraphQLHTTP(
             schema=basic_schema,
             graphiql_example_query=direct_query,
             graphiql_example_query_path=str(query_file)

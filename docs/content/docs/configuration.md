@@ -160,96 +160,37 @@ app = GraphQLHTTP(
 
 ## GraphiQL Customization
 
-The server provides flexible options for customizing the GraphiQL interface, including multiple ways to specify example queries.
-
 ### Example Queries
 
-Provide example queries to help users understand how to use your API. The server supports three methods with the following priority order:
-
-1. **Direct String** (`graphiql_example_query`) - Highest priority
-2. **File Path** (`graphiql_example_query_path`) - Medium priority
-3. **Auto-Discovery** (`graphiql_example.graphql` or `example.graphql`) - Lowest priority
-
-When multiple sources are provided, the server will use the highest priority source and log a warning about ignored sources.
-
-#### Method 1: Direct String
-
-Pass the example query directly as a string parameter:
+You can provide an example query for GraphiQL to show users how your API works. There are 3 ways:
 
 ```python
+# Option 1: Pass as a string
 app = GraphQLHTTP(
     schema=schema,
-    graphiql_example_query="""
-# Welcome to GraphiQL!
-# Try this example query:
-query GetUsers {
-  users {
-    id
-    name
-    email
-  }
-}
-    """
+    graphiql_example_query="{ users { id name } }"
 )
-```
 
-#### Method 2: File Path
-
-Load the example query from a specific file:
-
-```python
+# Option 2: Load from a file
 app = GraphQLHTTP(
     schema=schema,
     graphiql_example_query_path="./queries/example.graphql"
 )
+
+# Option 3: Auto-discovery (no config needed)
+# Just create graphiql_example.graphql or example.graphql in your working directory
 ```
 
-Create your query file:
-
-```graphql
-# queries/example.graphql
-query GetUsers {
-  users {
-    id
-    name
-    email
-  }
-}
-
-query GetUser($id: ID!) {
-  user(id: $id) {
-    id
-    name
-    email
-  }
-}
-```
-
-#### Method 3: Auto-Discovery
-
-Simply create a `graphiql_example.graphql` or `example.graphql` file in your project's working directory:
-
-```graphql
-# graphiql_example.graphql
-query GetUsers {
-  users {
-    id
-    name
-    email
-  }
-}
-```
-
-The server will automatically discover and use this file without any configuration. If both `graphiql_example.graphql` and `example.graphql` exist, `graphiql_example.graphql` takes priority.
+Priority: string > file path > auto-discovery. If you provide multiple, the server uses the highest priority and logs a warning.
 
 ### Disable GraphiQL
 
-For production environments, you might want to disable GraphiQL:
+For production, disable GraphiQL:
 
 ```python
 app = GraphQLHTTP(
     schema=schema,
-    serve_graphiql=False  # Disable GraphiQL interface
+    serve_graphiql=False
 )
 ```
 

@@ -121,38 +121,17 @@ app = GraphQLHTTP(
 
 ## GraphiQL Example Queries
 
-The server supports multiple ways to provide an example query for the GraphiQL interface to help users understand how to use your API.
+You can provide an example query for GraphiQL to show users how your API works. There are 3 ways to do this:
 
-### Priority Order
-
-When multiple sources are provided, the server uses this priority order:
-1. `graphiql_example_query` - Direct string parameter (highest priority)
-2. `graphiql_example_query_path` - Explicit file path
-3. Auto-discovery - Automatically searches for `graphiql_example.graphql` or `example.graphql` in the current directory (lowest priority)
-
-### Direct String
-
-Pass the example query directly as a string:
-
+**1. Pass a string directly:**
 ```python
 app = GraphQLHTTP(
     schema=schema,
-    graphiql_example_query="""
-        query GetUsers {
-            users {
-                id
-                name
-                email
-            }
-        }
-    """
+    graphiql_example_query="{ users { id name } }"
 )
 ```
 
-### File Path
-
-Load the example query from a file:
-
+**2. Load from a file:**
 ```python
 app = GraphQLHTTP(
     schema=schema,
@@ -160,24 +139,11 @@ app = GraphQLHTTP(
 )
 ```
 
-### Auto-Discovery
+**3. Auto-discovery (no config needed):**
 
-Simply create a `graphiql_example.graphql` or `example.graphql` file in your project's root directory:
+Just create a `graphiql_example.graphql` or `example.graphql` file in your working directory and the server will automatically find and use it.
 
-```graphql
-# graphiql_example.graphql
-query GetUsers {
-    users {
-        id
-        name
-        email
-    }
-}
-```
-
-The server will automatically discover and use this file without any configuration.
-
-**Note**: If multiple sources are provided, the server will log a warning indicating which source is being used and which are being ignored.
+If you provide multiple sources, the string parameter takes priority, then the file path, then auto-discovery.
 
 ## API Reference
 
