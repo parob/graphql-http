@@ -240,7 +240,7 @@ def create_server():
         serve_graphiql=True,
         allow_cors=True,
         health_path="/health",
-        graphiql_default_query="""
+        graphiql_example_query="""
 # Try these queries:
 
 {

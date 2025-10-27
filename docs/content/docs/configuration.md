@@ -19,7 +19,7 @@ from graphql_http import GraphQLHTTP
 app = GraphQLHTTP(
     schema=schema,                          # Required: GraphQL schema
     serve_graphiql=True,                    # Enable GraphiQL interface
-    graphiql_default_query="{ hello }",     # Default query in GraphiQL
+    graphiql_example_query="{ hello }",     # Example query in GraphiQL
     allow_cors=True,                        # Enable CORS
     health_path="/health"                   # Health check endpoint
 )
@@ -42,7 +42,8 @@ app = GraphQLHTTP(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `serve_graphiql` | `bool` | `True` | Whether to serve GraphiQL interface |
-| `graphiql_default_query` | `str` | `None` | Default query shown in GraphiQL |
+| `graphiql_example_query` | `str` | `None` | Example query shown in GraphiQL |
+| `graphiql_example_query_path` | `str` | `None` | Path to file containing example query |
 
 ### HTTP and CORS
 
@@ -159,26 +160,87 @@ app = GraphQLHTTP(
 
 ## GraphiQL Customization
 
-### Default Query
+The server provides flexible options for customizing the GraphiQL interface, including multiple ways to specify example queries.
 
-Set a default query that appears when GraphiQL loads:
+### Example Queries
+
+Provide example queries to help users understand how to use your API. The server supports three methods with the following priority order:
+
+1. **Direct String** (`graphiql_example_query`) - Highest priority
+2. **File Path** (`graphiql_example_query_path`) - Medium priority
+3. **Auto-Discovery** (`graphiql_example.graphql` or `example.graphql`) - Lowest priority
+
+When multiple sources are provided, the server will use the highest priority source and log a warning about ignored sources.
+
+#### Method 1: Direct String
+
+Pass the example query directly as a string parameter:
 
 ```python
 app = GraphQLHTTP(
     schema=schema,
-    graphiql_default_query="""
+    graphiql_example_query="""
 # Welcome to GraphiQL!
-# Try this query:
-{
+# Try this example query:
+query GetUsers {
   users {
     id
     name
     email
   }
 }
-    """.strip()
+    """
 )
 ```
+
+#### Method 2: File Path
+
+Load the example query from a specific file:
+
+```python
+app = GraphQLHTTP(
+    schema=schema,
+    graphiql_example_query_path="./queries/example.graphql"
+)
+```
+
+Create your query file:
+
+```graphql
+# queries/example.graphql
+query GetUsers {
+  users {
+    id
+    name
+    email
+  }
+}
+
+query GetUser($id: ID!) {
+  user(id: $id) {
+    id
+    name
+    email
+  }
+}
+```
+
+#### Method 3: Auto-Discovery
+
+Simply create a `graphiql_example.graphql` or `example.graphql` file in your project's working directory:
+
+```graphql
+# graphiql_example.graphql
+query GetUsers {
+  users {
+    id
+    name
+    email
+  }
+}
+```
+
+The server will automatically discover and use this file without any configuration. If both `graphiql_example.graphql` and `example.graphql` exist, `graphiql_example.graphql` takes priority.
 
 ### Disable GraphiQL
 
@@ -245,7 +307,7 @@ app = GraphQLHTTP(
     serve_graphiql=True,
     allow_cors=True,
     health_path="/health",
-    graphiql_default_query="{ __schema { queryType { name } } }"
+    graphiql_example_query="{ __schema { queryType { name } } }"
 )
 
 app.run(host="0.0.0.0", port=8000, reload=True)

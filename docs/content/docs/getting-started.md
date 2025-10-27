@@ -68,7 +68,7 @@ Add the server setup to your `server.py`:
 app = GraphQLHTTP(
     schema=schema,
     serve_graphiql=True,  # Enable GraphiQL interface
-    graphiql_default_query="{ hello(name: \"Developer\") }"
+    graphiql_example_query="{ hello(name: \"Developer\") }"
 )
 
 if __name__ == "__main__":
@@ -161,7 +161,7 @@ class Query:
 server = GraphQLHTTP.from_api(
     api,
     serve_graphiql=True,
-    graphiql_default_query="""
+    graphiql_example_query="""
 {
   hello(name: "GraphQL-API")
   add(a: 5, b: 3)

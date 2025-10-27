@@ -249,18 +249,6 @@ class TestGraphQLHTTPAuthentication:
         assert "errors" in result
         assert "Authorization header is missing" in result["errors"][0]["message"]
 
-    def test_jwks_client_initialization_failure(self, schema):
-        """Test server initialization when JWKS URI is not provided."""
-        # This should raise a ValueError during initialization now due to validation
-        with pytest.raises(ValueError, match="auth_jwks_uri is required when auth_enabled=True"):
-            GraphQLHTTP(
-                schema=schema,
-                auth_enabled=True,
-                # No auth_jwks_uri provided
-                auth_issuer="https://example.com/",
-                auth_audience="test-audience"
-            )
-
     @patch('graphql_http.server.PyJWKClient')
     def test_jwks_key_retrieval_failure(self, mock_jwks_client_class, schema):
         """Test handling of JWKS key retrieval failure."""

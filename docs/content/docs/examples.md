@@ -98,7 +98,7 @@ schema = GraphQLSchema(
 server = GraphQLHTTP(
     schema=schema,
     serve_graphiql=True,
-    graphiql_default_query="""
+    graphiql_example_query="""
 {
   books {
     id
@@ -251,7 +251,7 @@ def create_auth_server():
         auth_audience=os.getenv("JWT_AUDIENCE", "your-api-identifier"),
         auth_bypass_during_introspection=True,
         
-        graphiql_default_query="""
+        graphiql_example_query="""
 # Public query (no auth required):
 {
   publicInfo
@@ -387,7 +387,7 @@ server = GraphQLHTTP.from_api(
     serve_graphiql=True,
     allow_cors=True,
     health_path="/health",
-    graphiql_default_query="""
+    graphiql_example_query="""
 {
   # Get all authors with their posts
   authors {
@@ -475,7 +475,7 @@ server = GraphQLHTTP(
     schema=schema,
     middleware=[logging_middleware, timing_middleware],
     serve_graphiql=True,
-    graphiql_default_query="""
+    graphiql_example_query="""
 {
   fast
   slow

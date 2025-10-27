@@ -7,7 +7,7 @@ default_query = 'query {_entities(representations: ["{\"__typename\":\"User\", \
 
 server = GraphQLHTTP.from_api(
     api=api,
-    graphiql_default_query=default_query,
+    graphiql_example_query=default_query,
 )
 
 if __name__ == "__main__":

@@ -286,7 +286,7 @@ app = GraphQLHTTP(
     auth_audience=os.getenv("JWT_AUDIENCE", "your-api-identifier"),
     auth_bypass_during_introspection=True,
     
-    graphiql_default_query="""
+    graphiql_example_query="""
 # Try these queries:
 
 # Public (no auth required):

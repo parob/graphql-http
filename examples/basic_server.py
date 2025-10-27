@@ -114,7 +114,7 @@ def main():
     server = GraphQLHTTP(
         schema=schema,
         serve_graphiql=True,
-        graphiql_default_query="""
+        graphiql_example_query="""
 {
   books {
     id

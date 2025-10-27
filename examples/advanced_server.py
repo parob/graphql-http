@@ -353,7 +353,7 @@ def main():
         # Custom context factory
         context_value=lambda: create_custom_context(None),
 
-        graphiql_default_query="""
+        graphiql_example_query="""
 # Try these queries to see advanced features:
 
 {

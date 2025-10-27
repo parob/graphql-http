@@ -137,7 +137,7 @@ def create_server_with_auth():
         auth_audience=audience,
         auth_bypass_during_introspection=True,
 
-        graphiql_default_query="""
+        graphiql_example_query="""
 # Try these queries:
 
 # Public query (no auth required):
@@ -183,7 +183,7 @@ def create_server_without_auth():
         serve_graphiql=True,
         allow_cors=True,
         health_path="/health",
-        graphiql_default_query="""
+        graphiql_example_query="""
 {
   publicInfo
   me {

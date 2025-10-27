@@ -240,7 +240,7 @@ server = GraphQLHTTP(
 server = GraphQLHTTP(
     schema=schema,
     serve_graphiql=True,
-    graphiql_default_query="{ hello }",  # Default query
+    graphiql_example_query="{ hello }",  # Default query
 )
 ```
 

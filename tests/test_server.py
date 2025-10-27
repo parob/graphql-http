@@ -323,19 +323,189 @@ class TestGraphQLHTTPConfiguration:
         # Should return JSON, not HTML when GraphiQL is disabled
         assert "application/json" in response.headers["content-type"]
 
-    def test_graphiql_with_default_query(self, basic_schema):
-        """Test GraphiQL with default query."""
-        default_query = "{ hello }"
+    def test_graphiql_with_example_query(self, basic_schema):
+        """Test GraphiQL with example query."""
+        example_query = "{ hello }"
         server = GraphQLHTTP(
             schema=basic_schema,
-            graphiql_default_query=default_query
+            graphiql_example_query=example_query
         )
         client = server.client()
 
         response = client.get("/graphql", headers={"Accept": "text/html"})
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
-        assert default_query in response.text
+        assert example_query in response.text
+
+    def test_graphiql_with_example_query_path(self, basic_schema, tmp_path):
+        """Test GraphiQL with example query from file path."""
+        example_query = "query HelloQuery {\n  hello\n}"
+        query_file = tmp_path / "my_query.graphql"
+        query_file.write_text(example_query)
+
+        server = GraphQLHTTP(
+            schema=basic_schema,
+            graphiql_example_query_path=str(query_file)
+        )
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        # Check that the query content is in the response
+        assert "HelloQuery" in response.text
+
+    def test_graphiql_with_invalid_query_path(self, basic_schema):
+        """Test GraphiQL with invalid query path (should handle gracefully)."""
+        server = GraphQLHTTP(
+            schema=basic_schema,
+            graphiql_example_query_path="/nonexistent/path/query.graphql"
+        )
+        client = server.client()
+
+        # Should still serve GraphiQL without the example query
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+
+    def test_graphiql_auto_discovery_graphiql_example_file(self, basic_schema, tmp_path, monkeypatch):
+        """Test GraphiQL auto-discovers graphiql_example.graphql file."""
+        example_query = "query AutoDiscovered {\n  hello\n}"
+
+        # Change to temp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create graphiql_example.graphql in current directory
+        example_file = tmp_path / "graphiql_example.graphql"
+        example_file.write_text(example_query)
+
+        server = GraphQLHTTP(schema=basic_schema)
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "AutoDiscovered" in response.text
+
+    def test_graphiql_auto_discovery_example_file(self, basic_schema, tmp_path, monkeypatch):
+        """Test GraphiQL auto-discovers example.graphql file."""
+        example_query = "query ExampleDiscovered {\n  hello\n}"
+
+        # Change to temp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create example.graphql in current directory
+        example_file = tmp_path / "example.graphql"
+        example_file.write_text(example_query)
+
+        server = GraphQLHTTP(schema=basic_schema)
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "ExampleDiscovered" in response.text
+
+    def test_graphiql_priority_graphiql_example_over_example(self, basic_schema, tmp_path, monkeypatch):
+        """Test that graphiql_example.graphql has priority over example.graphql."""
+        graphiql_query = "query GraphiQLExample {\n  hello\n}"
+        example_query = "query JustExample {\n  hello\n}"
+
+        # Change to temp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create both files
+        graphiql_file = tmp_path / "graphiql_example.graphql"
+        graphiql_file.write_text(graphiql_query)
+
+        example_file = tmp_path / "example.graphql"
+        example_file.write_text(example_query)
+
+        server = GraphQLHTTP(schema=basic_schema)
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "GraphiQLExample" in response.text
+        assert "JustExample" not in response.text
+
+    def test_graphiql_priority_direct_over_path(self, basic_schema, tmp_path):
+        """Test that direct query has priority over file path."""
+        direct_query = "{ hello }"
+        file_query = "query FromFile {\n  hello\n}"
+
+        query_file = tmp_path / "query.graphql"
+        query_file.write_text(file_query)
+
+        server = GraphQLHTTP(
+            schema=basic_schema,
+            graphiql_example_query=direct_query,
+            graphiql_example_query_path=str(query_file)
+        )
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert direct_query in response.text
+        assert "FromFile" not in response.text
+
+    def test_graphiql_priority_path_over_auto_discovery(self, basic_schema, tmp_path, monkeypatch):
+        """Test that explicit path has priority over auto-discovery."""
+        explicit_query = "query ExplicitPath {\n  hello\n}"
+        auto_query = "query AutoDiscovered {\n  hello\n}"
+
+        # Change to temp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create graphiql_example.graphql (auto-discovery file)
+        example_file = tmp_path / "graphiql_example.graphql"
+        example_file.write_text(auto_query)
+
+        # Create explicit query file
+        explicit_file = tmp_path / "explicit.graphql"
+        explicit_file.write_text(explicit_query)
+
+        server = GraphQLHTTP(
+            schema=basic_schema,
+            graphiql_example_query_path=str(explicit_file)
+        )
+        client = server.client()
+
+        response = client.get("/graphql", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        assert "ExplicitPath" in response.text
+        assert "AutoDiscovered" not in response.text
+
+    def test_graphiql_warning_on_multiple_sources(self, basic_schema, tmp_path, monkeypatch, caplog):
+        """Test that warning is logged when multiple sources are provided."""
+        import logging
+        caplog.set_level(logging.WARNING)
+
+        direct_query = "{ hello }"
+        file_query = "query FromFile {\n  hello\n}"
+
+        # Change to temp directory
+        monkeypatch.chdir(tmp_path)
+
+        # Create both a file and graphiql_example.graphql
+        query_file = tmp_path / "query.graphql"
+        query_file.write_text(file_query)
+
+        example_file = tmp_path / "graphiql_example.graphql"
+        example_file.write_text("query AutoDiscovered {\n  hello\n}")
+
+        # Create server with direct query (highest priority)
+        server = GraphQLHTTP(
+            schema=basic_schema,
+            graphiql_example_query=direct_query,
+            graphiql_example_query_path=str(query_file)
+        )
+
+        # Check that warning was logged
+        assert any("Multiple GraphiQL example query sources detected" in record.message
+                   for record in caplog.records)
+        assert any("Using graphiql_example_query parameter" in record.message
+                   for record in caplog.records)
 
     def test_raw_parameter_bypasses_graphiql(self, basic_schema):
         """Test that ?raw parameter bypasses GraphiQL."""

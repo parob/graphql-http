@@ -226,10 +226,10 @@ class TestGraphQLHTTPGraphiQL:
 
     def test_graphiql_with_default_query(self, schema):
         """Test GraphiQL with custom default query."""
-        default_query = "{ hello }"
+        example_query = "{ hello }"
         server = GraphQLHTTP(
             schema=schema,
-            graphiql_default_query=default_query
+            graphiql_example_query=example_query
         )
         client = server.client()
 
@@ -239,7 +239,7 @@ class TestGraphQLHTTPGraphiQL:
         )
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
-        assert default_query in response.text
+        assert example_query in response.text
 
     def test_graphiql_raw_parameter(self, schema):
         """Test that ?raw parameter bypasses GraphiQL."""

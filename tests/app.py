@@ -394,11 +394,11 @@ class HelloWorld:
         return [user for user in all_users if user.role() == role]
 
 
-default_query = "query HelloQuery($name: String!){  helloWorld(name: $name) }"
+example_query = "query HelloQuery($name: String!){  helloWorld(name: $name) }"
 
 server = GraphQLHTTP.from_api(
     api=api,
-    graphiql_default_query=default_query,
+    graphiql_example_query=example_query,
     allow_cors=True,
 )
 

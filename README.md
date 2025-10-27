@@ -82,7 +82,7 @@ server.run()
 app = GraphQLHTTP(
     schema=schema,
     serve_graphiql=True,              # Enable GraphiQL interface
-    graphiql_default_query="{ hello }", # Default query in GraphiQL
+    graphiql_example_query="{ hello }", # Example query in GraphiQL
     allow_cors=True,                  # Enable CORS
     health_path="/health"             # Health check endpoint
 )
@@ -119,6 +119,66 @@ app = GraphQLHTTP(
 )
 ```
 
+## GraphiQL Example Queries
+
+The server supports multiple ways to provide an example query for the GraphiQL interface to help users understand how to use your API.
+
+### Priority Order
+
+When multiple sources are provided, the server uses this priority order:
+1. `graphiql_example_query` - Direct string parameter (highest priority)
+2. `graphiql_example_query_path` - Explicit file path
+3. Auto-discovery - Automatically searches for `graphiql_example.graphql` or `example.graphql` in the current directory (lowest priority)
+
+### Direct String
+
+Pass the example query directly as a string:
+
+```python
+app = GraphQLHTTP(
+    schema=schema,
+    graphiql_example_query="""
+        query GetUsers {
+            users {
+                id
+                name
+                email
+            }
+        }
+    """
+)
+```
+
+### File Path
+
+Load the example query from a file:
+
+```python
+app = GraphQLHTTP(
+    schema=schema,
+    graphiql_example_query_path="./queries/example.graphql"
+)
+```
+
+### Auto-Discovery
+
+Simply create a `graphiql_example.graphql` or `example.graphql` file in your project's root directory:
+
+```graphql
+# graphiql_example.graphql
+query GetUsers {
+    users {
+        id
+        name
+        email
+    }
+}
+```
+
+The server will automatically discover and use this file without any configuration.
+
+**Note**: If multiple sources are provided, the server will log a warning indicating which source is being used and which are being ignored.
+
 ## API Reference
 
 ### GraphQLHTTP Class
@@ -130,7 +190,8 @@ app = GraphQLHTTP(
 - `middleware` (List[Callable], optional): List of middleware functions
 - `context_value` (Any, optional): Context passed to resolvers
 - `serve_graphiql` (bool, default: True): Whether to serve GraphiQL interface
-- `graphiql_default_query` (str, optional): Default query for GraphiQL
+- `graphiql_example_query` (str, optional): Example query for GraphiQL interface
+- `graphiql_example_query_path` (str, optional): Path to file containing example query for GraphiQL
 - `allow_cors` (bool, default: False): Enable CORS middleware
 - `health_path` (str, optional): Path for health check endpoint
 - `execution_context_class` (Type[ExecutionContext], optional): Custom execution context

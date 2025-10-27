@@ -22,7 +22,8 @@ GraphQLHTTP(
     middleware: Optional[List[Callable]] = None,
     context_value: Any = None,
     serve_graphiql: bool = True,
-    graphiql_default_query: Optional[str] = None,
+    graphiql_example_query: Optional[str] = None,
+    graphiql_example_query_path: Optional[str] = None,
     allow_cors: bool = False,
     health_path: Optional[str] = None,
     execution_context_class: Optional[Type[ExecutionContext]] = None,
@@ -51,7 +52,8 @@ GraphQLHTTP(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `serve_graphiql` | `bool` | `True` | Whether to serve GraphiQL interface |
-| `graphiql_default_query` | `str` | `None` | Default query shown in GraphiQL |
+| `graphiql_example_query` | `str` | `None` | Example query shown in GraphiQL interface |
+| `graphiql_example_query_path` | `str` | `None` | Path to file containing example query. If not provided, auto-discovers `graphiql_example.graphql` or `example.graphql` in current directory |
 
 ##### HTTP Parameters
 

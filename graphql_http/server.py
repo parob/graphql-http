@@ -89,7 +89,8 @@ class GraphQLHTTP:
         middleware: Optional[List[Callable[[Callable, Any, Any], Any]]] = None,
         context_value: Any = None,
         serve_graphiql: bool = True,
-        graphiql_default_query: Optional[str] = None,
+        graphiql_example_query: Optional[str] = None,
+        graphiql_example_query_path: Optional[str] = None,
         allow_cors: bool = False,
         health_path: Optional[str] = None,
         execution_context_class: Optional[Type[ExecutionContext]] = None,
@@ -107,7 +108,8 @@ class GraphQLHTTP:
             middleware: List of middleware functions for field resolution
             context_value: Context value passed to resolvers
             serve_graphiql: Whether to serve GraphiQL interface
-            graphiql_default_query: Default query for GraphiQL interface
+            graphiql_example_query: Example query for GraphiQL interface
+            graphiql_example_query_path: Path to file containing example query for GraphiQL
             allow_cors: Whether to enable CORS middleware
             health_path: Path for health check endpoint (e.g., '/health')
             execution_context_class: Custom execution context class
@@ -137,7 +139,9 @@ class GraphQLHTTP:
         self.middleware = middleware
         self.context_value = context_value
         self.serve_graphiql = serve_graphiql
-        self.graphiql_default_query = graphiql_default_query
+        self.graphiql_example_query = self._resolve_graphiql_example_query(
+            graphiql_example_query, graphiql_example_query_path
+        )
         self.allow_cors = allow_cors
         self.health_path = health_path
         self.execution_context_class = execution_context_class
@@ -193,9 +197,6 @@ class GraphQLHTTP:
             raise ValueError(f"Expected GraphQLSchema, got {type(schema)}")
 
         if auth_enabled:
-            if not auth_jwks_uri:
-                raise ValueError(
-                    "auth_jwks_uri is required when auth_enabled=True")
             if not auth_issuer:
                 raise ValueError(
                     "auth_issuer is required when auth_enabled=True")
@@ -208,6 +209,85 @@ class GraphQLHTTP:
                 raise ValueError("health_path must be a string")
             if not health_path.startswith('/'):
                 raise ValueError("health_path must start with '/'")
+
+    def _resolve_graphiql_example_query(
+        self,
+        graphiql_example_query: Optional[str],
+        graphiql_example_query_path: Optional[str],
+    ) -> Optional[str]:
+        """Resolve the example GraphiQL query from various sources.
+
+        Priority order:
+        1. graphiql_example_query (direct string)
+        2. graphiql_example_query_path (file path)
+        3. Auto-discovery of graphiql_example.graphql or example.graphql in current directory
+
+        Args:
+            graphiql_example_query: Direct query string
+            graphiql_example_query_path: Path to query file
+
+        Returns:
+            Resolved query string or None
+        """
+        # Check for auto-discovery files
+        auto_discovery_files = ["graphiql_example.graphql", "example.graphql"]
+        auto_discovery_file = None
+        for filename in auto_discovery_files:
+            if os.path.exists(filename):
+                auto_discovery_file = filename
+                break
+
+        # Check for multiple sources and warn about precedence
+        has_direct_query = bool(graphiql_example_query)
+        has_path = bool(graphiql_example_query_path)
+        has_auto_discovery = auto_discovery_file is not None
+
+        sources_count = sum([has_direct_query, has_path, has_auto_discovery])
+
+        # Priority 1: Direct string provided
+        if graphiql_example_query:
+            if sources_count > 1:
+                ignored_sources = []
+                if has_path:
+                    ignored_sources.append(f"graphiql_example_query_path='{graphiql_example_query_path}'")
+                if has_auto_discovery:
+                    ignored_sources.append(f"auto-discovered '{auto_discovery_file}'")
+                logger.warning(
+                    f"Multiple GraphiQL example query sources detected. "
+                    f"Using graphiql_example_query parameter, ignoring: {', '.join(ignored_sources)}"
+                )
+            return graphiql_example_query
+
+        # Priority 2: File path provided
+        if graphiql_example_query_path:
+            if has_auto_discovery:
+                logger.warning(
+                    f"Multiple GraphiQL example query sources detected. "
+                    f"Using graphiql_example_query_path='{graphiql_example_query_path}', "
+                    f"ignoring auto-discovered '{auto_discovery_file}'"
+                )
+            try:
+                with open(graphiql_example_query_path, "r") as f:
+                    return f.read()
+            except (OSError, IOError) as e:
+                logger.warning(
+                    f"Failed to read graphiql_example_query_path '{graphiql_example_query_path}': {e}"
+                )
+                return None
+
+        # Priority 3: Auto-discovery of graphiql_example.graphql or example.graphql
+        if auto_discovery_file:
+            try:
+                with open(auto_discovery_file, "r") as f:
+                    logger.info(f"Auto-discovered example GraphiQL query from {auto_discovery_file}")
+                    return f.read()
+            except (OSError, IOError) as e:
+                logger.warning(
+                    f"Failed to read auto-discovered {auto_discovery_file}: {e}"
+                )
+                return None
+
+        return None
 
     def _setup_cors_middleware(
         self, middleware_stack: List[StarletteMiddleware]
@@ -271,9 +351,9 @@ class GraphQLHTTP:
         graphiql_path = os.path.join(GRAPHIQL_DIR, "index.html")
 
         default_query = ''
-        if self.graphiql_default_query:
-            if isinstance(self.graphiql_default_query, str):
-                default_query = json.dumps(self.graphiql_default_query)
+        if self.graphiql_example_query:
+            if isinstance(self.graphiql_example_query, str):
+                default_query = json.dumps(self.graphiql_example_query)
                 if default_query.startswith('"'):
                     default_query = default_query[1:-1]
 
