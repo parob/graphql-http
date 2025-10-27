@@ -1,5 +1,5 @@
 [project]
-name = "graphql_http"
+name = "graphql-http"
 dynamic = ["version"]
 description = "HTTP Server for GraphQL."
 readme = "README.md"
