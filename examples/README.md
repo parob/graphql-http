@@ -1,4 +1,4 @@
-# GraphQL HTTP Server Examples
+# GraphQL HTTP Examples
 
 This directory contains practical examples demonstrating different use cases and features of the GraphQL HTTP server.
 

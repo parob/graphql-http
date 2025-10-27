@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Basic GraphQL HTTP Server Example
+Basic GraphQL HTTP Example
 
 This example demonstrates how to create a simple GraphQL server
 using the graphql_http package with a basic schema.

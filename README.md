@@ -1,4 +1,4 @@
-# GraphQL HTTP Server
+# GraphQL HTTP
 
 A lightweight, production-ready HTTP server for GraphQL APIs built on top of Starlette/FastAPI. This server provides a simple yet powerful way to serve GraphQL schemas over HTTP with built-in support for authentication, CORS, GraphiQL integration, and more.
 

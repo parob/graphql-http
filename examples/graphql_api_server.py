@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GraphQL HTTP Server with GraphQL-API Integration Example
+GraphQL HTTP with GraphQL-API Integration Example
 
 This example demonstrates how to use the GraphQL HTTP server with
 the graphql-api package for more advanced schema definition and

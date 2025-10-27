@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GraphQL HTTP Server with JWT Authentication Example
+GraphQL HTTP with JWT Authentication Example
 
 This example demonstrates how to set up a GraphQL server with JWT authentication.
 It shows how to configure JWKS, CORS, and different authentication modes.

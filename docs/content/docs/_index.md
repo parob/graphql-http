@@ -5,9 +5,9 @@ bookCollapseSection: true
 weight: 1
 ---
 
-# GraphQL HTTP Server Documentation
+# GraphQL HTTP Documentation
 
-Welcome to the GraphQL HTTP Server documentation. This server provides a production-ready solution for serving GraphQL APIs over HTTP with extensive features for authentication, CORS, and development tools.
+Welcome to the GraphQL HTTP documentation. This server provides a production-ready solution for serving GraphQL APIs over HTTP with extensive features for authentication, CORS, and development tools.
 
 ## Core Concepts
 
@@ -18,7 +18,7 @@ Welcome to the GraphQL HTTP Server documentation. This server provides a product
 
 ## Getting Started
 
-New to GraphQL HTTP Server? Start with our [Getting Started](./getting-started) guide.
+New to GraphQL HTTP? Start with our [Getting Started](./getting-started) guide.
 
 ## Documentation Structure
 

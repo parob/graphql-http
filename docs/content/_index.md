@@ -1,9 +1,9 @@
 ---
-title: GraphQL HTTP Server
+title: GraphQL HTTP
 type: docs
 ---
 
-# GraphQL HTTP Server
+# GraphQL HTTP
 
 {{< columns >}}
 

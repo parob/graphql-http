@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Advanced GraphQL HTTP Server Example
+Advanced GraphQL HTTP Example
 
 This example demonstrates advanced features including:
 - Custom middleware
