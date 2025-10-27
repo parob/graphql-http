@@ -232,10 +232,19 @@ class GraphQLHTTP:
         # Check for auto-discovery files
         auto_discovery_files = ["graphiql_example.graphql", "example.graphql"]
         auto_discovery_file = None
+        cwd = os.getcwd()
+
+        logger.debug(f"Looking for auto-discovery files in: {cwd}")
         for filename in auto_discovery_files:
+            full_path = os.path.join(cwd, filename)
+            logger.debug(f"Checking for: {full_path}")
             if os.path.exists(filename):
                 auto_discovery_file = filename
+                logger.debug(f"Found auto-discovery file: {filename}")
                 break
+
+        if not auto_discovery_file:
+            logger.debug(f"No auto-discovery files found. Searched for: {', '.join(auto_discovery_files)} in {cwd}")
 
         # Check for multiple sources and warn about precedence
         has_direct_query = bool(graphiql_example_query)

@@ -141,7 +141,22 @@ app = GraphQLHTTP(
 
 **3. Auto-discovery (no config needed):**
 
-Just create a `graphiql_example.graphql` or `example.graphql` file in your working directory and the server will automatically find and use it.
+Just create a `graphiql_example.graphql` or `example.graphql` file in the directory where you run your application and the server will automatically find and use it.
+
+```bash
+# Create the file in your project directory
+echo "query Example { hello }" > example.graphql
+
+# Run your app from the same directory
+python my_server.py
+```
+
+**Note:** The file must be in your current working directory when the server starts, not necessarily where your Python script is located. If auto-discovery isn't working, enable debug logging to see where it's looking:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
 
 If you provide multiple sources, the string parameter takes priority, then the file path, then auto-discovery.
 

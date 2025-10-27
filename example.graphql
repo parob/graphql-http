@@ -1,0 +1,6 @@
+query ExampleQuery {
+  # This is an auto-discovered example query!
+  # Just create example.graphql or graphiql_example.graphql
+  # in the directory where you run your app
+  hello
+}
