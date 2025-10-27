@@ -1,42 +1,30 @@
 ---
-title: GraphQL HTTP
+title: "GraphQL HTTP for Python"
 type: docs
 ---
 
-# GraphQL HTTP
+> **A high-performance Python HTTP server for GraphQL APIs with built-in authentication, CORS, and GraphiQL integration.**
 
-{{< columns >}}
+# GraphQL HTTP for Python
 
-## High Performance
+[![PyPI version](https://badge.fury.io/py/graphql-http.svg)](https://badge.fury.io/py/graphql-http)
+[![Python versions](https://img.shields.io/pypi/pyversions/graphql-http.svg)](https://pypi.org/project/graphql-http/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Built on Starlette/ASGI for excellent async performance, handling thousands of concurrent requests efficiently.
+## Why GraphQL HTTP?
 
-<--->
+`graphql-http` provides a production-ready HTTP server for your GraphQL APIs, built on Starlette/ASGI for excellent async performance. It handles authentication, CORS, health checks, and includes an integrated GraphiQL interface for development.
 
-## Authentication Ready  
+## Key Features
 
-Built-in JWT authentication with JWKS support for secure GraphQL APIs in production environments.
-
-<--->
-
-## Developer Friendly
-
-Integrated GraphiQL interface, comprehensive error handling, and easy testing capabilities.
-
-{{< /columns >}}
-
----
-
-## Features
-
-- 🚀 **High Performance**: Built on Starlette/ASGI for excellent async performance
-- 🔐 **JWT Authentication**: Built-in JWT authentication with JWKS support  
-- 🌐 **CORS Support**: Configurable CORS middleware for cross-origin requests
-- 🎨 **GraphiQL Integration**: Interactive GraphQL IDE for development
-- 📊 **Health Checks**: Built-in health check endpoints
-- 🔄 **Batch Queries**: Support for batched GraphQL operations
-- 🛡️ **Error Handling**: Comprehensive error handling and formatting
-- 📝 **Type Safety**: Full TypeScript-style type hints for Python
+| Feature | Description |
+|---------|-------------|
+| 🚀 **High Performance** | Built on Starlette/ASGI for excellent async performance, handling thousands of concurrent requests. |
+| 🔐 **JWT Authentication** | Built-in JWT authentication with JWKS support for secure GraphQL APIs in production. |
+| 🌐 **CORS Support** | Configurable CORS middleware for seamless cross-origin requests. |
+| 🎨 **GraphiQL Integration** | Interactive GraphQL IDE included for easy development and testing. |
+| 📊 **Health Checks** | Built-in health check endpoints for monitoring and orchestration. |
+| 🔄 **Batch Queries** | Support for batched GraphQL operations to optimize network usage. |
 
 ## Quick Start
 
@@ -96,8 +84,8 @@ server = GraphQLHTTP.from_api(api)
 server.run()
 ```
 
-## Next Steps
+## What's Next?
 
-{{< button relref="/docs/getting-started" >}}Get Started{{< /button >}}
-{{< button relref="/docs/examples" >}}Examples{{< /button >}}
-{{< button relref="/docs/api-reference" >}}API Reference{{< /button >}}
+- 📚 **[Getting Started](docs/getting-started/)** - Learn the basics with our comprehensive guide
+- 💡 **[Examples](docs/examples/)** - Explore practical examples and tutorials for real-world scenarios
+- 📖 **[API Reference](docs/api-reference/)** - Check out the complete API documentation
