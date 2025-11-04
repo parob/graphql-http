@@ -1,5 +1,13 @@
 # GraphQL HTTP
 
+[![PyPI version](https://badge.fury.io/py/graphql-http.svg)](https://badge.fury.io/py/graphql-http)
+[![Python versions](https://img.shields.io/pypi/pyversions/graphql-http.svg)](https://pypi.org/project/graphql-http/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**[📚 Documentation](https://graphql-http.parob.com/)** | **[📦 PyPI](https://pypi.org/project/graphql-http/)** | **[🔧 GitHub](https://github.com/parob/graphql-http)**
+
+---
+
 A lightweight, production-ready HTTP server for GraphQL APIs built on top of Starlette/FastAPI. This server provides a simple yet powerful way to serve GraphQL schemas over HTTP with built-in support for authentication, CORS, GraphiQL integration, and more.
 
 ## Features
@@ -248,6 +256,19 @@ assert response.status_code == 200
 assert response.json() == {"data": {"hello": "Hello, World!"}}
 ```
 
+## Documentation
+
+**Visit the [official documentation](https://graphql-http.parob.com/)** for comprehensive guides, examples, and API reference.
+
+### Key Topics
+
+- **[Getting Started](https://graphql-http.parob.com/docs/getting-started/)** - Quick introduction and basic usage
+- **[Configuration](https://graphql-http.parob.com/docs/configuration/)** - Configure your HTTP server
+- **[Authentication](https://graphql-http.parob.com/docs/authentication/)** - JWT and auth setup
+- **[Testing](https://graphql-http.parob.com/docs/testing/)** - Test your GraphQL endpoints
+- **[Examples](https://graphql-http.parob.com/docs/examples/)** - Real-world usage examples
+- **[API Reference](https://graphql-http.parob.com/docs/api-reference/)** - Complete API documentation
+
 ## Error Handling
 
 The server provides comprehensive error handling:
@@ -282,7 +303,3 @@ python -m pytest tests/ -v
 ## License
 
 MIT License - see LICENSE file for details.
-
-## Changelog
-
-See CHANGELOG.md for version history and updates.
