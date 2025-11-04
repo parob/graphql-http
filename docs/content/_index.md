@@ -90,6 +90,25 @@ server.run()
 
 **Learn more**: [graphql-api documentation](https://graphql-api.parob.com/)
 
+### Database Integration: graphql-db
+
+For database-backed APIs, use [graphql-db](https://graphql-db.parob.com/) with graphql-http:
+
+```python
+from graphql_api import GraphQLAPI
+from graphql_http import GraphQLHTTP
+from graphql_db.orm_base import DatabaseManager
+
+db_manager = DatabaseManager(url="sqlite:///myapp.db")
+api = GraphQLAPI()
+# ... define your schema with database models ...
+
+server = GraphQLHTTP.from_api(api)
+server.run()
+```
+
+**Learn more**: [graphql-db documentation](https://graphql-db.parob.com/)
+
 ### MCP Tools: graphql-mcp
 
 Expose your GraphQL API as MCP tools alongside HTTP with [graphql-mcp](https://graphql-mcp.parob.com/):

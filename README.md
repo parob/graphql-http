@@ -82,6 +82,7 @@ server.run()
 ## Related Projects
 
 - **[graphql-api](https://graphql-api.parob.com/)** - Build GraphQL schemas with decorators
+- **[graphql-db](https://graphql-db.parob.com/)** - SQLAlchemy integration for database-backed APIs
 - **[graphql-mcp](https://graphql-mcp.parob.com/)** - Expose GraphQL as MCP tools
 
 See the [documentation](https://graphql-http.parob.com/) for configuration, authentication, and advanced features.
