@@ -63,9 +63,13 @@ if __name__ == "__main__":
 
 Visit [http://localhost:8000/graphql](http://localhost:8000/graphql) to access the GraphiQL interface.
 
-## Integration with GraphQL-API
+## Related Projects
 
-For advanced schema definition with automatic type inference:
+`graphql-http` provides HTTP serving for GraphQL APIs. For additional functionality:
+
+### Schema Building: graphql-api
+
+Build GraphQL schemas with a decorator-based approach using [graphql-api](https://graphql-api.parob.com/):
 
 ```python
 from graphql_api import GraphQLAPI
@@ -79,10 +83,30 @@ class Query:
     def hello(self, name: str = "World") -> str:
         return f"Hello, {name}!"
 
-# Create server from API
+# Create HTTP server from API
 server = GraphQLHTTP.from_api(api)
 server.run()
 ```
+
+**Learn more**: [graphql-api documentation](https://graphql-api.parob.com/)
+
+### MCP Tools: graphql-mcp
+
+Expose your GraphQL API as MCP tools alongside HTTP with [graphql-mcp](https://graphql-mcp.parob.com/):
+
+```python
+from graphql_api import GraphQLAPI
+from graphql_mcp.server import GraphQLMCP
+
+api = GraphQLAPI()
+# ... define your schema ...
+
+# Serve both MCP and GraphQL HTTP
+server = GraphQLMCP.from_api(api, graphql_http=True)
+app = server.http_app()
+```
+
+**Learn more**: [graphql-mcp documentation](https://graphql-mcp.parob.com/)
 
 ## What's Next?
 
