@@ -27,6 +27,10 @@
         justify-content: center;
         font-size: 4rem;
       }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
     <link rel="stylesheet" href="https://esm.sh/graphiql/dist/style.css" />
     <link
@@ -158,6 +162,7 @@
       import { GraphiQL, HISTORY_PLUGIN } from 'graphiql';
       import { createGraphiQLFetcher } from '@graphiql/toolkit';
       import { explorerPlugin } from '@graphiql/plugin-explorer';
+      import { useEditorContext, usePluginContext, ToolbarButton } from '@graphiql/react';
       import { buildClientSchema, printSchema, getIntrospectionQuery } from 'graphql';
       import 'graphiql/setup-workers/esm.sh';
       import ReactFlow, {
@@ -3688,6 +3693,2528 @@
         }
       };
 
+      // ============================================
+      // Settings Plugin - API Key & Model Configuration
+      // ============================================
+
+      // Fetch available Gemini models dynamically
+      const fetchGeminiModels = async (apiKey) => {
+        if (!apiKey) return [];
+
+        // Check cache first
+        const cacheKey = 'graphiql:gemini-models-cache';
+        const cacheTimeKey = 'graphiql:gemini-models-cache-time';
+        const cachedModels = localStorage.getItem(cacheKey);
+        const cacheTime = localStorage.getItem(cacheTimeKey);
+
+        // Use cache if less than 1 hour old
+        if (cachedModels && cacheTime && (Date.now() - parseInt(cacheTime)) < 3600000) {
+          try {
+            return JSON.parse(cachedModels);
+          } catch (e) {
+            // Cache invalid, fetch fresh
+          }
+        }
+
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+          );
+
+          if (!response.ok) {
+            throw new Error('Failed to fetch models');
+          }
+
+          const data = await response.json();
+          const models = (data.models || [])
+            .filter(model =>
+              model.supportedGenerationMethods &&
+              model.supportedGenerationMethods.includes('generateContent')
+            )
+            .map(model => ({
+              id: model.name.replace('models/', ''),
+              name: model.displayName || model.name.replace('models/', ''),
+              description: model.description || ''
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+          // Cache the results
+          localStorage.setItem(cacheKey, JSON.stringify(models));
+          localStorage.setItem(cacheTimeKey, Date.now().toString());
+
+          return models;
+        } catch (error) {
+          console.error('Error fetching Gemini models:', error);
+          return [];
+        }
+      };
+
+      // ============================================
+      // Query Generator Plugin - Main Interface
+      // ============================================
+
+      // Build schema context for AI prompt
+      const buildSchemaContext = (schemaData) => {
+        if (!schemaData || !schemaData.__schema) return 'Schema not available';
+
+        const schema = schemaData.__schema;
+        const types = schema.types.filter(t =>
+          !t.name.startsWith('__') &&
+          !['String', 'Int', 'Float', 'Boolean', 'ID'].includes(t.name)
+        );
+
+        let context = 'GraphQL Schema:\n\n';
+
+        // Root types
+        if (schema.queryType) {
+          context += `Query Type: ${schema.queryType.name}\n`;
+        }
+        if (schema.mutationType) {
+          context += `Mutation Type: ${schema.mutationType.name}\n`;
+        }
+        if (schema.subscriptionType) {
+          context += `Subscription Type: ${schema.subscriptionType.name}\n`;
+        }
+
+        context += '\nTypes:\n';
+
+        // Limit types to avoid token overflow
+        types.slice(0, 40).forEach(type => {
+          context += `\n${type.kind} ${type.name}`;
+          if (type.description) {
+            context += ` - ${type.description.substring(0, 80)}`;
+          }
+
+          const fields = type.fields || type.inputFields;
+          if (fields && fields.length > 0) {
+            context += '\n  Fields: ';
+            context += fields.slice(0, 15).map(f => {
+              let fieldStr = f.name;
+              const typeName = f.type?.name || f.type?.ofType?.name || f.type?.ofType?.ofType?.name || 'Unknown';
+              fieldStr += `: ${typeName}`;
+              if (f.args && f.args.length > 0) {
+                fieldStr += `(${f.args.map(a => a.name).join(', ')})`;
+              }
+              return fieldStr;
+            }).join(', ');
+            if (fields.length > 15) {
+              context += `, ... (${fields.length - 15} more)`;
+            }
+          }
+
+          if (type.enumValues) {
+            context += '\n  Values: ' + type.enumValues.map(v => v.name).join(', ');
+          }
+        });
+
+        if (types.length > 40) {
+          context += `\n\n... and ${types.length - 40} more types`;
+        }
+
+        return context;
+      };
+
+      // Fetch schema data (cached within session only)
+      const ensureSchemaLoaded = async () => {
+        // Use session cache if available (cleared on page refresh)
+        if (window._queryGeneratorSchemaData) {
+          return window._queryGeneratorSchemaData;
+        }
+
+        // Fetch the schema using introspection
+        const introspectionQuery = `
+          query IntrospectionQuery {
+            __schema {
+              queryType { name }
+              mutationType { name }
+              subscriptionType { name }
+              types {
+                kind
+                name
+                description
+                fields(includeDeprecated: true) {
+                  name
+                  description
+                  args {
+                    name
+                    description
+                    type {
+                      kind
+                      name
+                      ofType {
+                        kind
+                        name
+                        ofType {
+                          kind
+                          name
+                          ofType {
+                            kind
+                            name
+                          }
+                        }
+                      }
+                    }
+                    defaultValue
+                  }
+                  type {
+                    kind
+                    name
+                    ofType {
+                      kind
+                      name
+                      ofType {
+                        kind
+                        name
+                        ofType {
+                          kind
+                          name
+                        }
+                      }
+                    }
+                  }
+                  isDeprecated
+                  deprecationReason
+                }
+                inputFields {
+                  name
+                  description
+                  type {
+                    kind
+                    name
+                    ofType {
+                      kind
+                      name
+                      ofType {
+                        kind
+                        name
+                      }
+                    }
+                  }
+                  defaultValue
+                }
+                interfaces {
+                  kind
+                  name
+                }
+                enumValues(includeDeprecated: true) {
+                  name
+                  description
+                  isDeprecated
+                  deprecationReason
+                }
+                possibleTypes {
+                  kind
+                  name
+                }
+              }
+              directives {
+                name
+                description
+                locations
+                args {
+                  name
+                  description
+                  type {
+                    kind
+                    name
+                    ofType {
+                      kind
+                      name
+                    }
+                  }
+                  defaultValue
+                }
+              }
+            }
+          }
+        `;
+
+        const response = await fetch(window.location.pathname, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: introspectionQuery })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch schema');
+        }
+
+        const result = await response.json();
+        if (result.errors) {
+          throw new Error(result.errors[0].message);
+        }
+
+        window._queryGeneratorSchemaData = result.data;
+        return result.data;
+      };
+
+      // Call Gemini API
+      const callGeminiAPI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
+        const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+        const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-2.0-flash';
+
+        if (!apiKey) {
+          throw new Error('API key not configured. Please go to Settings to add your Gemini API key.');
+        }
+
+        // Ensure schema is loaded (fetch if needed)
+        const schemaData = await ensureSchemaLoaded();
+
+        const schemaContext = buildSchemaContext(schemaData);
+
+        const systemPrompt = `You are a GraphQL query assistant. You help users create and modify GraphQL queries, variables, and headers based on their natural language requests.
+
+${schemaContext}
+
+CURRENT STATE IN EDITOR:
+Query:
+${currentQuery || '(empty - no query yet)'}
+
+Variables (JSON):
+${currentVariables || '{}'}
+
+Headers (JSON):
+${currentHeaders || '{}'}
+
+INSTRUCTIONS:
+1. Generate valid GraphQL queries based on the schema provided
+2. If the query requires variables, provide them as valid JSON
+3. If authentication or custom headers are needed, provide them as valid JSON
+4. If the user's request is clear, generate a complete query with any needed variables/headers
+5. If you need clarification, ask specific questions
+6. When modifying existing content, preserve the structure where possible
+7. Always explain what you're doing
+8. Keep your message responses concise and conversational - avoid long lists or excessive formatting
+9. Use simple markdown sparingly: **bold** for emphasis, \`code\` for field names. Avoid headers, numbered lists, or complex formatting
+
+RESPONSE FORMAT - You must respond with valid JSON:
+{
+  "type": "query" | "question" | "suggestion",
+  "message": "Your explanation or question to the user",
+  "query": "The complete GraphQL query (only if type is 'query' or 'suggestion')",
+  "variables": "JSON string of variables (only if needed, e.g., {\"id\": \"123\"})",
+  "headers": "JSON string of headers (only if needed, e.g., {\"Authorization\": \"Bearer token\"})",
+  "options": ["option1", "option2"], // Optional: only include if asking a question with specific choices
+  "suggestions": ["suggestion1", "suggestion2", "suggestion3", "suggestion4"], // REQUIRED: Always include 4 short (2-5 words) contextual follow-up suggestions
+  "needsResults": true | false, // Set to true when you need to see the actual query results to provide analysis
+  "isNewQuery": true | false, // Set to true when generating a completely new query (not modifying existing)
+  "resultsSummary": "Short description of what you'll analyze when results come back" // Include when suggesting a query
+}
+
+IMPORTANT RULES:
+1. Always include the "suggestions" array with 4 helpful follow-up actions. These MUST be contextual and follow on from the conversation - suggest logical next steps based on what the user just asked and what query is currently in the editor. For example, if the user just added a query for users, suggest adding fields, filtering, pagination, or related queries. Don't repeat generic suggestions.
+
+2. Set "needsResults": true when:
+   - The user asks you to "show me", "what are the results", "run this", or similar requests to see actual data
+   - The user wants you to analyze, debug, or explain the actual returned data
+   - You need to see the query output to provide meaningful analysis or recommendations
+   When needsResults is true, the user can click "Run & Analyze" to execute the query and send results back to you.
+
+3. Set "isNewQuery": true when:
+   - The user asks for an entirely new query unrelated to what's in the editor
+   - You're generating a query from scratch based on a new request
+   - The query is completely different from the current editor content
+   Set it to false (or omit) when modifying, improving, or building upon the existing query. When isNewQuery is true, the UI shows a simple "will replace editor content" notice instead of a line-by-line diff.
+
+4. When analyzing query results:
+   - Focus on explaining what the data shows - patterns, insights, potential issues
+   - Do NOT suggest query modifications unless there's a clear reason (error in results, user asked for changes, obvious problem)
+   - If you do suggest a modification, ALWAYS explain WHY in your message (e.g., "The results show X is null, this could be fixed by...")
+   - If the query ran successfully and returned expected data, just analyze it - don't offer unsolicited "improvements"
+   - Only include a "query" field in your response if you're actually suggesting a meaningful change
+
+5. When suggesting a query, include "resultsSummary" - a short description (5-15 words) of what you'll look for when the results come back. Examples:
+   - "Checking user permissions and role assignments"
+   - "Looking at product inventory levels"
+   - "Verifying the order status fields"
+   - "Examining pagination and total count"
+
+Examples:
+- Query with variables: {"type": "query", "message": "Here's a query to fetch a user by ID:", "query": "query GetUser($id: ID!) { user(id: $id) { name email } }", "variables": "{\"id\": \"123\"}", "resultsSummary": "Checking user profile data", "suggestions": ["Add more fields", "Remove the variable", "Add pagination", "Filter by role"]}
+- Simple query: {"type": "query", "message": "Here's a query to fetch all users:", "query": "{ users { id name } }", "resultsSummary": "Reviewing the list of users", "suggestions": ["Add email field", "Add pagination", "Filter by status", "Sort by name"]}
+- Asking for clarification: {"type": "question", "message": "Which user ID would you like to look up?", "options": ["Let me enter an ID", "Show all users instead"], "suggestions": ["Show all users", "Search by email", "List recent users", "Count total users"]}
+- Requesting to analyze results: {"type": "query", "message": "Here's the query. Click 'Run & Analyze' and I'll examine the results for you:", "query": "{ users { id name status } }", "needsResults": true, "resultsSummary": "Analysing user status distribution", "suggestions": ["Filter active users", "Sort by name", "Add email field", "Count users"]}`;
+
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        // Build conversation contents - only include user and assistant messages with actual text content
+        // Filter out error messages and system messages
+        const contents = [];
+
+        conversationHistory
+          .filter(msg => {
+            // Only include user and assistant messages
+            if (msg.role !== 'user' && msg.role !== 'assistant') return false;
+            // Must have content
+            if (!msg.content || !msg.content.trim()) return false;
+            // Filter out error messages from assistant
+            if (msg.role === 'assistant' && msg.type === 'error') return false;
+            // Filter out messages that are just error text
+            if (msg.content.startsWith('Error:')) return false;
+            return true;
+          })
+          .forEach(msg => {
+            contents.push({
+              role: msg.role === 'user' ? 'user' : 'model',
+              parts: [{ text: String(msg.content) }]
+            });
+          });
+
+        // Always add the new user message
+        contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            // Use systemInstruction to always provide schema context
+            systemInstruction: {
+              parts: [{ text: systemPrompt }]
+            },
+            contents: contents,
+            generationConfig: {
+              responseMimeType: 'application/json'
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error?.message || `API request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!textContent) {
+          throw new Error('No response from AI');
+        }
+
+        try {
+          return JSON.parse(textContent);
+        } catch {
+          // If JSON parsing fails, wrap in suggestion
+          return {
+            type: 'suggestion',
+            message: textContent,
+            query: null
+          };
+        }
+      };
+
+      // Get current query from GraphiQL
+      const getCurrentQuery = () => {
+        try {
+          const tabState = JSON.parse(localStorage.getItem('graphiql:tabState') || '{}');
+          if (tabState.tabs && tabState.tabs.length > 0) {
+            const activeIndex = tabState.activeTabIndex || 0;
+            return tabState.tabs[activeIndex]?.query || '';
+          }
+        } catch (e) {
+          console.error('Error getting current query:', e);
+        }
+        return '';
+      };
+
+      // Set query in GraphiQL editor
+      const setEditorQuery = (query) => {
+        try {
+          // Method 1: Find CodeMirror 6 view via React fiber
+          const queryEditor = document.querySelector('.graphiql-query-editor');
+          if (queryEditor) {
+            const cmEditor = queryEditor.querySelector('.cm-editor');
+            if (cmEditor) {
+              // Look for view in React fiber keys
+              const fiberKey = Object.keys(cmEditor).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactInternalInstance'));
+              if (fiberKey) {
+                let fiber = cmEditor[fiberKey];
+                // Walk up the fiber tree looking for CodeMirror view
+                for (let i = 0; i < 20 && fiber; i++) {
+                  if (fiber.stateNode?.view?.dispatch) {
+                    fiber.stateNode.view.dispatch({
+                      changes: { from: 0, to: fiber.stateNode.view.state.doc.length, insert: query }
+                    });
+                    console.log('Query applied via React fiber');
+                    return;
+                  }
+                  if (fiber.memoizedProps?.view?.dispatch) {
+                    fiber.memoizedProps.view.dispatch({
+                      changes: { from: 0, to: fiber.memoizedProps.view.state.doc.length, insert: query }
+                    });
+                    console.log('Query applied via memoizedProps');
+                    return;
+                  }
+                  fiber = fiber.return;
+                }
+              }
+
+              // Method 2: Look for view on cmContent element
+              const cmContent = cmEditor.querySelector('.cm-content');
+              if (cmContent) {
+                // CM6 sometimes stores view reference
+                const contentFiberKey = Object.keys(cmContent).find(k => k.startsWith('__reactFiber'));
+                if (contentFiberKey) {
+                  let fiber = cmContent[contentFiberKey];
+                  for (let i = 0; i < 10 && fiber; i++) {
+                    const view = fiber.stateNode?.view || fiber.memoizedProps?.view;
+                    if (view?.dispatch) {
+                      view.dispatch({
+                        changes: { from: 0, to: view.state.doc.length, insert: query }
+                      });
+                      console.log('Query applied via content fiber');
+                      return;
+                    }
+                    fiber = fiber.return;
+                  }
+                }
+              }
+            }
+          }
+
+          // Method 3: Try to find global CodeMirror reference
+          if (window.CodeMirror) {
+            const editors = document.querySelectorAll('.cm-editor');
+            for (const ed of editors) {
+              if (ed.closest('.graphiql-query-editor') && ed.CodeMirror) {
+                ed.CodeMirror.setValue(query);
+                console.log('Query applied via global CodeMirror');
+                return;
+              }
+            }
+          }
+
+          // Method 4: Clipboard approach - copy to clipboard and notify user
+          navigator.clipboard.writeText(query).then(() => {
+            console.log('Query copied to clipboard');
+            // Also update localStorage
+            const tabState = JSON.parse(localStorage.getItem('graphiql:tabState') || '{}');
+            if (tabState.tabs && tabState.tabs.length > 0) {
+              const activeIndex = tabState.activeTabIndex || 0;
+              tabState.tabs[activeIndex].query = query;
+              localStorage.setItem('graphiql:tabState', JSON.stringify(tabState));
+            }
+            alert('Query copied to clipboard! Paste (Cmd/Ctrl+V) into the editor, or refresh the page.');
+          }).catch(() => {
+            // Fallback if clipboard fails
+            const tabState = JSON.parse(localStorage.getItem('graphiql:tabState') || '{}');
+            if (tabState.tabs && tabState.tabs.length > 0) {
+              const activeIndex = tabState.activeTabIndex || 0;
+              tabState.tabs[activeIndex].query = query;
+              localStorage.setItem('graphiql:tabState', JSON.stringify(tabState));
+              alert('Query saved! Refresh the page to apply.');
+            }
+          });
+        } catch (e) {
+          console.error('Error setting query:', e);
+        }
+      };
+
+      // Compute diff using LCS (Longest Common Subsequence) for better grouping
+      const computeDiff = (original, suggested) => {
+        const originalLines = (original || '').split('\n');
+        const suggestedLines = (suggested || '').split('\n');
+
+        // Build LCS table
+        const m = originalLines.length;
+        const n = suggestedLines.length;
+        const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+        for (let i = 1; i <= m; i++) {
+          for (let j = 1; j <= n; j++) {
+            if (originalLines[i - 1] === suggestedLines[j - 1]) {
+              dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+              dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+          }
+        }
+
+        // Backtrack to find the diff, grouping changes into hunks
+        const result = [];
+        let i = m, j = n;
+        const tempResult = [];
+
+        while (i > 0 || j > 0) {
+          if (i > 0 && j > 0 && originalLines[i - 1] === suggestedLines[j - 1]) {
+            tempResult.unshift({ type: 'unchanged', content: originalLines[i - 1] });
+            i--;
+            j--;
+          } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            tempResult.unshift({ type: 'added', content: suggestedLines[j - 1] });
+            j--;
+          } else if (i > 0) {
+            tempResult.unshift({ type: 'removed', content: originalLines[i - 1] });
+            i--;
+          }
+        }
+
+        // Now group consecutive changes into hunks (removed block, then added block)
+        let idx = 0;
+        while (idx < tempResult.length) {
+          const item = tempResult[idx];
+
+          if (item.type === 'unchanged') {
+            result.push(item);
+            idx++;
+          } else {
+            // Collect consecutive changes into a hunk
+            const removedLines = [];
+            const addedLines = [];
+
+            while (idx < tempResult.length && tempResult[idx].type !== 'unchanged') {
+              if (tempResult[idx].type === 'removed') {
+                removedLines.push(tempResult[idx]);
+              } else {
+                addedLines.push(tempResult[idx]);
+              }
+              idx++;
+            }
+
+            // Add all removed lines first, then all added lines
+            result.push(...removedLines, ...addedLines);
+          }
+        }
+
+        return result;
+      };
+
+      // Inline Diff Viewer Component
+      const InlineDiffViewer = ({ originalQuery, suggestedQuery, onAccept, onReject, onAcceptAndRun }) => {
+        const diff = computeDiff(originalQuery, suggestedQuery);
+
+        return React.createElement('div', {
+          style: {
+            borderTop: '1px solid var(--color-border, #e1e4e8)',
+            background: 'var(--color-base-bg, #f6f8fa)'
+          }
+        }, [
+          // Diff Header
+          React.createElement('div', {
+            key: 'diff-header',
+            style: {
+              padding: '10px 16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid var(--color-border, #e1e4e8)'
+            }
+          }, [
+            React.createElement('span', {
+              key: 'diff-title',
+              style: {
+                fontSize: '12px',
+                fontWeight: '600',
+                color: 'var(--color-base)'
+              }
+            }, 'Suggested Changes'),
+
+            React.createElement('div', {
+              key: 'actions',
+              style: { display: 'flex', gap: '8px' }
+            }, [
+              React.createElement('button', {
+                key: 'reject-btn',
+                onClick: onReject,
+                style: {
+                  padding: '5px 10px',
+                  background: 'var(--color-base-bg, white)',
+                  border: '1px solid var(--color-border, #d1d5da)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: 'var(--color-base)',
+                  transition: 'all 0.15s ease'
+                },
+                onMouseEnter: (e) => {
+                  e.target.style.background = '#ffeaea';
+                  e.target.style.borderColor = '#d73a49';
+                  e.target.style.color = '#d73a49';
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.background = 'var(--color-base-bg, white)';
+                  e.target.style.borderColor = 'var(--color-border, #d1d5da)';
+                  e.target.style.color = 'var(--color-base)';
+                }
+              }, 'Reject'),
+
+              React.createElement('button', {
+                key: 'accept-btn',
+                onClick: onAccept,
+                style: {
+                  padding: '5px 10px',
+                  background: 'var(--color-base-bg, white)',
+                  border: '1px solid #28a745',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: '#28a745',
+                  transition: 'all 0.15s ease'
+                },
+                onMouseEnter: (e) => {
+                  e.target.style.background = '#28a745';
+                  e.target.style.color = 'white';
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.background = 'var(--color-base-bg, white)';
+                  e.target.style.color = '#28a745';
+                }
+              }, 'Accept'),
+
+              React.createElement('button', {
+                key: 'accept-run-btn',
+                onClick: onAcceptAndRun,
+                style: {
+                  padding: '5px 10px',
+                  background: 'hsl(var(--color-primary))',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: 'white',
+                  fontWeight: '500',
+                  transition: 'all 0.15s ease'
+                },
+                onMouseEnter: (e) => {
+                  e.target.style.opacity = '0.9';
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.opacity = '1';
+                }
+              }, 'Accept & Run ▶')
+            ])
+          ]),
+
+          // Diff Content
+          React.createElement('div', {
+            key: 'diff-content',
+            style: {
+              maxHeight: '180px',
+              overflow: 'auto',
+              padding: '8px 12px'
+            }
+          }, React.createElement('pre', {
+            style: {
+              margin: 0,
+              fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
+              fontSize: '12px',
+              lineHeight: '1.5'
+            }
+          }, diff.map((line, idx) =>
+            React.createElement('div', {
+              key: idx,
+              style: {
+                padding: '1px 6px',
+                marginLeft: '-6px',
+                marginRight: '-6px',
+                background: line.type === 'added' ? 'rgba(40, 167, 69, 0.15)' :
+                            line.type === 'removed' ? 'rgba(215, 58, 73, 0.15)' : 'transparent',
+                color: line.type === 'added' ? '#22863a' :
+                       line.type === 'removed' ? '#cb2431' : 'var(--color-base)',
+                textDecoration: line.type === 'removed' ? 'line-through' : 'none'
+              }
+            }, [
+              React.createElement('span', {
+                key: 'prefix',
+                style: {
+                  display: 'inline-block',
+                  width: '14px',
+                  color: line.type === 'added' ? '#22863a' :
+                         line.type === 'removed' ? '#cb2431' : 'var(--color-alpha-tertiary, #959da5)',
+                  userSelect: 'none'
+                }
+              }, line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '),
+              line.content || ' '
+            ])
+          )))
+        ]);
+      };
+
+      // Simple markdown renderer for message content
+      const renderMarkdown = (text) => {
+        if (!text) return null;
+
+        // Split by code blocks first to preserve them
+        const parts = text.split(/(`[^`]+`)/g);
+
+        return parts.map((part, index) => {
+          // Inline code
+          if (part.startsWith('`') && part.endsWith('`')) {
+            return React.createElement('code', {
+              key: index,
+              style: {
+                background: 'rgba(27, 31, 35, 0.05)',
+                padding: '2px 5px',
+                borderRadius: '3px',
+                fontSize: '0.9em',
+                fontFamily: 'SFMono-Regular, Consolas, monospace'
+              }
+            }, part.slice(1, -1));
+          }
+
+          // Process bold and other formatting
+          const elements = [];
+          let remaining = part;
+          let keyCounter = 0;
+
+          while (remaining.length > 0) {
+            // Bold: **text**
+            const boldMatch = remaining.match(/\*\*([^*]+)\*\*/);
+            if (boldMatch) {
+              const beforeBold = remaining.slice(0, boldMatch.index);
+              if (beforeBold) {
+                elements.push(React.createElement('span', { key: `${index}-${keyCounter++}` }, beforeBold));
+              }
+              elements.push(React.createElement('strong', { key: `${index}-${keyCounter++}` }, boldMatch[1]));
+              remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
+              continue;
+            }
+
+            // No more matches, add remaining text
+            elements.push(React.createElement('span', { key: `${index}-${keyCounter++}` }, remaining));
+            break;
+          }
+
+          return elements.length === 1 ? elements[0] : React.createElement('span', { key: index }, elements);
+        });
+      };
+
+      // Message Component with inline diff support
+      const MessageComponent = ({ message, onOptionClick, showDiff, diffStatus, onAccept, onReject, onAcceptAndRun, onRunAndAnalyze }) => {
+        const isUser = message.role === 'user';
+        const isSystem = message.role === 'system';
+        const isResultsFeedback = message.type === 'results-feedback';
+        const isAnalyzingStatus = message.type === 'analyzing-status';
+        const hasChanges = (message.query || message.variables || message.headers) &&
+                          (message.type === 'query' || message.type === 'suggestion');
+        const isPending = diffStatus === 'pending';
+        const isApplied = diffStatus === 'applied';
+        const isDismissed = diffStatus === 'dismissed';
+        const isAnalyzing = diffStatus === 'analyzing';
+
+        // Checkbox states for Execute and Analyse options
+        const [executeEnabled, setExecuteEnabled] = React.useState(true);
+        const [analyseEnabled, setAnalyseEnabled] = React.useState(true);
+
+        // Delayed text display for analyzing-status messages
+        const [showDisplayText, setShowDisplayText] = React.useState(false);
+        React.useEffect(() => {
+          if (isAnalyzingStatus) {
+            const timer = setTimeout(() => setShowDisplayText(true), 1000);
+            return () => clearTimeout(timer);
+          }
+        }, [isAnalyzingStatus]);
+
+        // Handler for the Apply button based on checkbox states
+        const handleApply = () => {
+          if (analyseEnabled && executeEnabled) {
+            onRunAndAnalyze && onRunAndAnalyze();
+          } else if (executeEnabled) {
+            onAcceptAndRun && onAcceptAndRun();
+          } else {
+            onAccept && onAccept();
+          }
+        };
+
+        // Helper to render a diff section - only if there are actual changes
+        const renderDiffSection = (title, original, updated) => {
+          if (!updated) return null;
+          // Normalize for comparison (trim whitespace)
+          const normalizedOriginal = (original || '').trim();
+          const normalizedUpdated = (updated || '').trim();
+          // Skip if no actual changes
+          if (normalizedOriginal === normalizedUpdated) return null;
+          const diff = computeDiff(original || '', updated);
+          return React.createElement('div', {
+            key: title,
+            style: { marginBottom: '8px' }
+          }, [
+            React.createElement('div', {
+              key: 'title',
+              style: {
+                fontSize: '10px',
+                fontWeight: '600',
+                color: 'var(--color-alpha-secondary, #586069)',
+                marginBottom: '4px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }
+            }, title),
+            React.createElement('div', {
+              key: 'content',
+              style: {
+                background: 'var(--color-base-bg, white)',
+                borderRadius: '4px',
+                padding: '6px 8px',
+                border: '1px solid var(--color-border, #e1e4e8)'
+              }
+            }, diff.map((line, idx) =>
+              React.createElement('div', {
+                key: idx,
+                style: {
+                  fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
+                  fontSize: '11px',
+                  lineHeight: '1.4',
+                  background: line.type === 'added' ? 'rgba(40, 167, 69, 0.15)' :
+                              line.type === 'removed' ? 'rgba(215, 58, 73, 0.15)' : 'transparent',
+                  color: line.type === 'added' ? '#22863a' :
+                         line.type === 'removed' ? '#cb2431' : 'var(--color-base)',
+                  textDecoration: line.type === 'removed' ? 'line-through' : 'none',
+                  padding: '1px 4px',
+                  margin: '0 -4px'
+                }
+              }, [
+                React.createElement('span', {
+                  key: 'prefix',
+                  style: {
+                    display: 'inline-block',
+                    width: '12px',
+                    color: line.type === 'added' ? '#22863a' :
+                           line.type === 'removed' ? '#cb2431' : '#959da5',
+                    userSelect: 'none'
+                  }
+                }, line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '),
+                line.content || ' '
+              ])
+            ))
+          ]);
+        };
+
+        return React.createElement('div', {
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: isUser ? 'flex-end' : 'flex-start',
+            marginBottom: '8px'
+          }
+        }, [
+          // Message bubble (for results-feedback, show a compact summary instead of full content)
+          React.createElement('div', {
+            key: 'bubble',
+            style: {
+              maxWidth: '85%',
+              padding: '10px 14px',
+              borderRadius: '12px',
+              background: isUser ? '#e3f2fd' :
+                          isSystem ? 'var(--color-base-bg, #f6f8fa)' :
+                          isResultsFeedback ? '#f6f8fa' :
+                          message.type === 'error' ? '#ffeaea' : 'var(--color-base-bg, #f1f3f5)',
+              color: isUser ? '#1565c0' :
+                     isResultsFeedback ? '#24292e' :
+                     message.type === 'error' ? '#d73a49' : 'var(--color-base)',
+              fontSize: '13px',
+              lineHeight: '1.5',
+              border: isResultsFeedback ? '1px solid #e1e4e8' : 'none'
+            }
+          }, [
+            // For results-feedback, show only the Response Data expandable
+            isResultsFeedback ? React.createElement('details', {
+              key: 'payload',
+              style: { fontSize: '12px' }
+            }, [
+              React.createElement('summary', {
+                key: 'summary',
+                style: {
+                  cursor: 'pointer',
+                  color: '#24292e',
+                  userSelect: 'none'
+                }
+              }, 'Response Data'),
+
+              React.createElement('div', {
+                key: 'content',
+                style: { marginTop: '8px' }
+              }, [
+                // Query section
+                React.createElement('div', {
+                  key: 'query-label',
+                  style: { fontWeight: 500, marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', color: '#586069' }
+                }, 'Query'),
+                React.createElement('pre', {
+                  key: 'query',
+                  style: {
+                    margin: '0 0 8px 0',
+                    padding: '8px',
+                    background: '#f6f8fa',
+                    color: '#24292e',
+                    borderRadius: '4px',
+                    overflow: 'auto',
+                    maxHeight: '120px',
+                    fontSize: '10px',
+                    fontFamily: 'SFMono-Regular, Consolas, monospace'
+                  }
+                }, message.payload?.query || ''),
+
+                // Results section
+                React.createElement('div', {
+                  key: 'results-label',
+                  style: { fontWeight: 500, marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', color: '#586069' }
+                }, 'Results'),
+                React.createElement('pre', {
+                  key: 'results',
+                  style: {
+                    margin: 0,
+                    padding: '8px',
+                    background: '#f6f8fa',
+                    color: '#24292e',
+                    borderRadius: '4px',
+                    overflow: 'auto',
+                    maxHeight: '150px',
+                    fontSize: '10px',
+                    fontFamily: 'SFMono-Regular, Consolas, monospace'
+                  }
+                }, JSON.stringify(message.payload?.results, null, 2))
+              ])
+            ]) : isAnalyzingStatus ? React.createElement('div', {
+              key: 'analyzing-content',
+              style: {
+                color: '#586069',
+                fontStyle: showDisplayText ? 'normal' : 'italic'
+              }
+            }, showDisplayText
+              ? (message.displayText || 'Analysing query results...')
+              : 'Analysing...'
+            ) : React.createElement('div', {
+              key: 'content',
+              style: {
+                whiteSpace: 'pre-wrap'
+              }
+            }, renderMarkdown(message.content)),
+
+            // Show options if present
+            message.options && message.options.length > 0 && React.createElement('div', {
+              key: 'options',
+              style: {
+                marginTop: '10px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px'
+              }
+            }, message.options.map((option, idx) =>
+              React.createElement('button', {
+                key: idx,
+                type: 'button',
+                onClick: (e) => { e.preventDefault(); onOptionClick && onOptionClick(option); },
+                style: {
+                  padding: '4px 10px',
+                  background: 'white',
+                  border: '1px solid var(--color-border, #d1d5da)',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  color: 'var(--color-base)',
+                  transition: 'all 0.15s ease'
+                },
+                onMouseEnter: (e) => {
+                  e.target.style.background = 'hsl(var(--color-primary))';
+                  e.target.style.color = 'white';
+                  e.target.style.borderColor = 'hsl(var(--color-primary))';
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.background = 'white';
+                  e.target.style.color = 'var(--color-base)';
+                  e.target.style.borderColor = 'var(--color-border, #d1d5da)';
+                }
+              }, option)
+            ))
+          ]),
+
+          // Inline diff viewer for messages with changes
+          showDiff && hasChanges && React.createElement('div', {
+            key: 'inline-diff',
+            style: {
+              marginTop: '8px',
+              width: '100%',
+              maxWidth: '95%',
+              background: 'var(--color-base-bg, #f6f8fa)',
+              border: `1px solid ${isApplied ? '#28a745' : isDismissed ? '#d73a49' : 'var(--color-border, #e1e4e8)'}`,
+              borderRadius: '8px',
+              overflow: 'hidden',
+              opacity: isDismissed ? 0.6 : 1
+            }
+          }, [
+            // Status header for applied/dismissed
+            (isApplied || isDismissed) && React.createElement('div', {
+              key: 'status-header',
+              style: {
+                padding: '6px 12px',
+                background: isApplied ? 'rgba(40, 167, 69, 0.1)' : 'rgba(215, 58, 73, 0.1)',
+                borderBottom: '1px solid var(--color-border, #e1e4e8)',
+                fontSize: '11px',
+                fontWeight: '500',
+                color: isApplied ? '#28a745' : '#d73a49'
+              }
+            }, isApplied ? '✓ Applied to editor' : '✗ Dismissed'),
+
+            // New Query notice (simplified view without diff)
+            message.isNewQuery && !isApplied && !isDismissed && React.createElement('div', {
+              key: 'new-query-notice',
+              style: {
+                padding: '10px 12px',
+                background: '#f0f7ff',
+                borderBottom: '1px solid var(--color-border, #e1e4e8)',
+                fontSize: '12px'
+              }
+            }, [
+              React.createElement('div', {
+                key: 'title',
+                style: { fontWeight: '500', marginBottom: '4px', color: '#0969da' }
+              }, '📝 New Query'),
+              React.createElement('div', {
+                key: 'subtitle',
+                style: { fontSize: '11px', color: '#57606a' }
+              }, 'Applying will replace the current editor content')
+            ]),
+
+            // Diff content - Query, Variables, Headers (skip diff for new queries, just show preview)
+            React.createElement('div', {
+              key: 'diff-content',
+              style: {
+                maxHeight: '300px',
+                overflow: 'auto',
+                padding: '10px 12px'
+              }
+            }, message.isNewQuery ? [
+              // For new queries, just show the query preview (no diff)
+              message.query && React.createElement('div', { key: 'query-preview' }, [
+                React.createElement('div', {
+                  key: 'label',
+                  style: { fontSize: '10px', fontWeight: '600', color: '#57606a', marginBottom: '4px', textTransform: 'uppercase' }
+                }, 'Query'),
+                React.createElement('pre', {
+                  key: 'content',
+                  style: {
+                    margin: 0,
+                    padding: '8px',
+                    background: '#f6f8fa',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontFamily: 'SFMono-Regular, Consolas, monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    maxHeight: '150px',
+                    overflow: 'auto'
+                  }
+                }, message.query)
+              ]),
+              message.variables && message.variables !== '{}' && React.createElement('div', { key: 'vars-preview', style: { marginTop: '8px' } }, [
+                React.createElement('div', {
+                  key: 'label',
+                  style: { fontSize: '10px', fontWeight: '600', color: '#57606a', marginBottom: '4px', textTransform: 'uppercase' }
+                }, 'Variables'),
+                React.createElement('pre', {
+                  key: 'content',
+                  style: {
+                    margin: 0,
+                    padding: '8px',
+                    background: '#f6f8fa',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontFamily: 'SFMono-Regular, Consolas, monospace',
+                    whiteSpace: 'pre-wrap'
+                  }
+                }, message.variables)
+              ])
+            ].filter(Boolean) : [
+              // For modified queries, show the diff
+              renderDiffSection('Query', message.originalQuery, message.query),
+              renderDiffSection('Variables', message.originalVariables, message.variables),
+              renderDiffSection('Headers', message.originalHeaders, message.headers)
+            ].filter(Boolean)),
+
+            // Action buttons - show for pending and applied (allows reapply)
+            (isPending || isApplied) && React.createElement('div', {
+              key: 'actions',
+              style: {
+                padding: '8px 12px',
+                borderTop: '1px solid var(--color-border, #e1e4e8)',
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap'
+              }
+            }, [
+              // Dismiss button - only show when pending (can't dismiss what's already applied)
+              isPending && React.createElement('button', {
+                key: 'reject',
+                type: 'button',
+                onClick: (e) => { e.preventDefault(); onReject && onReject(); },
+                style: {
+                  padding: '5px 10px',
+                  background: 'var(--color-base-bg, white)',
+                  border: '1px solid var(--color-border, #d1d5da)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: 'var(--color-base)'
+                }
+              }, 'Dismiss'),
+
+              // Spacer to push checkboxes and button to the right
+              React.createElement('div', { key: 'spacer', style: { flex: 1 } }),
+
+              // Execute checkbox
+              React.createElement('label', {
+                key: 'execute-label',
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '11px',
+                  color: 'var(--color-alpha-secondary, #586069)',
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }
+              }, [
+                React.createElement('input', {
+                  key: 'execute-checkbox',
+                  type: 'checkbox',
+                  checked: executeEnabled,
+                  onChange: (e) => {
+                    setExecuteEnabled(e.target.checked);
+                    // If execute is unchecked, also uncheck analyse
+                    if (!e.target.checked) setAnalyseEnabled(false);
+                  },
+                  style: { margin: 0, cursor: 'pointer' }
+                }),
+                'Execute Query'
+              ]),
+
+              // Analyse checkbox
+              React.createElement('label', {
+                key: 'analyse-label',
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '11px',
+                  color: executeEnabled ? 'var(--color-alpha-secondary, #586069)' : 'var(--color-border, #d1d5da)',
+                  cursor: executeEnabled ? 'pointer' : 'not-allowed',
+                  userSelect: 'none'
+                }
+              }, [
+                React.createElement('input', {
+                  key: 'analyse-checkbox',
+                  type: 'checkbox',
+                  checked: analyseEnabled,
+                  disabled: !executeEnabled,
+                  onChange: (e) => setAnalyseEnabled(e.target.checked),
+                  style: { margin: 0, cursor: executeEnabled ? 'pointer' : 'not-allowed' }
+                }),
+                'Analyse Response'
+              ]),
+
+              // Single Accept button
+              React.createElement('button', {
+                key: 'accept',
+                type: 'button',
+                onClick: (e) => { e.preventDefault(); handleApply(); },
+                style: {
+                  padding: '5px 12px',
+                  background: 'var(--color-base-bg, white)',
+                  border: '1px solid #28a745',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: '#28a745',
+                  fontWeight: '500'
+                }
+              }, 'Accept')
+            ].filter(Boolean)),
+
+            // Analyzing indicator - show when running query for analysis
+            isAnalyzing && React.createElement('div', {
+              key: 'analyzing',
+              style: {
+                padding: '8px 12px',
+                borderTop: '1px solid var(--color-border, #e1e4e8)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '11px',
+                color: 'var(--color-alpha-secondary, #586069)'
+              }
+            }, [
+              React.createElement('span', {
+                key: 'spinner',
+                style: {
+                  display: 'inline-block'
+                }
+              }, '⏳'),
+              'Running query and analysing results...'
+            ]),
+
+            // Results analyzed badge - show after analysis complete
+            message.resultsAnalyzed && !isAnalyzing && React.createElement('div', {
+              key: 'analyzed-badge',
+              style: {
+                padding: '6px 12px',
+                borderTop: '1px solid var(--color-border, #e1e4e8)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '11px',
+                color: 'var(--color-alpha-secondary, #586069)'
+              }
+            }, [
+              React.createElement('span', { key: 'icon' }, '✓'),
+              'Results analysed'
+            ])
+          ])
+        ]);
+      };
+
+      // Settings Popup Content Component (for Query Generator)
+      const SettingsPopupContent = ({ onClose }) => {
+        const [apiKey, setApiKey] = React.useState(() =>
+          localStorage.getItem('graphiql:gemini-api-key') || ''
+        );
+        const [showApiKey, setShowApiKey] = React.useState(false);
+        const [selectedModel, setSelectedModel] = React.useState(() =>
+          localStorage.getItem('graphiql:gemini-model') || ''
+        );
+        const [persistChat, setPersistChat] = React.useState(() =>
+          localStorage.getItem('graphiql:persist-chat') !== 'false' // default true
+        );
+        const [models, setModels] = React.useState([]);
+        const [loadingModels, setLoadingModels] = React.useState(false);
+        const [saveStatus, setSaveStatus] = React.useState(null);
+        const lastFetchedKeyRef = React.useRef(null);
+
+        const loadModels = React.useCallback(async (key) => {
+          if (!key) {
+            setModels([]);
+            return;
+          }
+          // Don't refetch if we already fetched for this key
+          if (lastFetchedKeyRef.current === key && models.length > 0) {
+            return;
+          }
+          setLoadingModels(true);
+          try {
+            const fetchedModels = await fetchGeminiModels(key);
+            setModels(fetchedModels);
+            lastFetchedKeyRef.current = key;
+            if (fetchedModels.length > 0 && !selectedModel) {
+              const defaultModel = fetchedModels.find(m => m.id.includes('flash')) || fetchedModels[0];
+              setSelectedModel(defaultModel.id);
+            }
+          } catch (err) {
+            console.error('Failed to fetch models:', err);
+            setModels([]);
+          } finally {
+            setLoadingModels(false);
+          }
+        }, [selectedModel, models.length]);
+
+        // Auto-fetch models when API key changes (debounced)
+        React.useEffect(() => {
+          if (!apiKey || apiKey.length < 10) return; // Don't fetch for very short keys
+
+          const timer = setTimeout(() => {
+            loadModels(apiKey);
+          }, 500); // 500ms debounce
+
+          return () => clearTimeout(timer);
+        }, [apiKey]);
+
+        // Initial load on mount
+        React.useEffect(() => {
+          if (apiKey) loadModels(apiKey);
+        }, []);
+
+        const handleSave = () => {
+          localStorage.setItem('graphiql:gemini-api-key', apiKey);
+          localStorage.setItem('graphiql:gemini-model', selectedModel);
+          localStorage.setItem('graphiql:persist-chat', persistChat ? 'true' : 'false');
+          // If persist is disabled, clear saved messages
+          if (!persistChat) {
+            localStorage.removeItem('graphiql:chat-messages');
+          }
+          setSaveStatus('saved');
+          setTimeout(() => {
+            setSaveStatus(null);
+            onClose();
+          }, 800);
+        };
+
+        return React.createElement('div', {
+          style: { display: 'flex', flexDirection: 'column', gap: '16px' }
+        }, [
+          // Header
+          React.createElement('div', {
+            key: 'header',
+            style: {
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid hsla(var(--color-neutral), var(--alpha-border-light))',
+              paddingBottom: '12px',
+              marginBottom: '4px'
+            }
+          }, [
+            React.createElement('span', {
+              key: 'title',
+              style: {
+                fontWeight: '600',
+                fontSize: '14px',
+                color: 'hsla(var(--color-neutral), 1)'
+              }
+            }, 'Settings'),
+            React.createElement('button', {
+              key: 'close',
+              onClick: onClose,
+              type: 'button',
+              className: 'graphiql-dialog-close',
+              style: {
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '4px'
+              }
+            }, React.createElement('svg', {
+              width: '16',
+              height: '16',
+              viewBox: '0 0 24 24',
+              fill: 'currentColor'
+            }, React.createElement('path', {
+              d: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'
+            })))
+          ]),
+
+          // API Key
+          React.createElement('div', { key: 'api-key-section' }, [
+            React.createElement('label', {
+              key: 'label',
+              className: 'graphiql-doc-explorer-section-title',
+              style: {
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: 'hsla(var(--color-neutral), 1)',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }
+            }, 'Gemini API Key'),
+            React.createElement('div', { key: 'input-row', style: { display: 'flex', gap: '8px' } }, [
+              React.createElement('input', {
+                key: 'input',
+                type: showApiKey ? 'text' : 'password',
+                value: apiKey,
+                onChange: (e) => setApiKey(e.target.value),
+                placeholder: 'Enter API key',
+                className: 'graphiql-dialog-input',
+                style: {
+                  flex: 1,
+                  padding: '8px 12px',
+                  border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontFamily: 'var(--font-family-mono)',
+                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
+                  color: 'hsla(var(--color-neutral), 1)'
+                }
+              }),
+              React.createElement('button', {
+                key: 'show-hide',
+                onClick: () => setShowApiKey(!showApiKey),
+                type: 'button',
+                className: 'graphiql-button',
+                style: {
+                  padding: '8px 12px',
+                  border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
+                  borderRadius: '6px',
+                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: '500',
+                  color: 'hsla(var(--color-neutral), 1)'
+                }
+              }, showApiKey ? 'Hide' : 'Show')
+            ])
+          ]),
+
+          // Model selector
+          React.createElement('div', { key: 'model-section' }, [
+            React.createElement('label', {
+              key: 'label',
+              className: 'graphiql-doc-explorer-section-title',
+              style: {
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: 'hsla(var(--color-neutral), 1)',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }
+            }, 'Model'),
+            models.length > 0 ?
+              React.createElement('select', {
+                key: 'select',
+                value: selectedModel,
+                onChange: (e) => setSelectedModel(e.target.value),
+                className: 'graphiql-button',
+                style: {
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
+                  color: 'hsla(var(--color-neutral), 1)',
+                  cursor: 'pointer'
+                }
+              }, models.map(m => React.createElement('option', { key: m.id, value: m.id }, m.name)))
+            :
+              React.createElement('div', {
+                key: 'no-models',
+                style: {
+                  padding: '12px',
+                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+                  textAlign: 'center'
+                }
+              }, loadingModels ? 'Loading models...' : (apiKey ? 'No models found' : 'Enter API key to load models'))
+          ]),
+
+          // Persist chat toggle
+          React.createElement('div', {
+            key: 'persist-section',
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '12px',
+              background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
+              borderRadius: '6px'
+            }
+          }, [
+            React.createElement('input', {
+              key: 'checkbox',
+              type: 'checkbox',
+              id: 'persist-chat',
+              checked: persistChat,
+              onChange: (e) => setPersistChat(e.target.checked),
+              style: { margin: 0, cursor: 'pointer', width: '16px', height: '16px' }
+            }),
+            React.createElement('label', {
+              key: 'label',
+              htmlFor: 'persist-chat',
+              style: {
+                fontSize: '13px',
+                color: 'hsla(var(--color-neutral), 1)',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }
+            }, 'Persist chat history')
+          ]),
+
+          // Save button
+          React.createElement('button', {
+            key: 'save-btn',
+            onClick: handleSave,
+            disabled: !apiKey,
+            type: 'button',
+            className: 'graphiql-button',
+            style: {
+              padding: '10px 16px',
+              backgroundColor: saveStatus === 'saved' ? 'hsl(var(--color-success))' : 'hsl(var(--color-primary))',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: !apiKey ? 'not-allowed' : 'pointer',
+              fontSize: '13px',
+              fontWeight: '600',
+              opacity: !apiKey ? 0.5 : 1,
+              transition: 'background-color 0.15s ease'
+            }
+          }, saveStatus === 'saved' ? 'Saved!' : 'Save Settings')
+        ]);
+      };
+
+      // Helper to execute a GraphQL query and get results
+      const executeQueryAndGetResults = async (query, variables, headers) => {
+        const params = new URLSearchParams(window.location.search);
+        const fetchURL = '?' + params.toString();
+
+        const parsedHeaders = headers ? (typeof headers === 'string' ? JSON.parse(headers) : headers) : {};
+        const parsedVariables = variables ? (typeof variables === 'string' ? JSON.parse(variables) : variables) : undefined;
+
+        const response = await fetch(fetchURL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...parsedHeaders
+          },
+          body: JSON.stringify({
+            query,
+            variables: parsedVariables
+          })
+        });
+
+        return await response.json();
+      };
+
+      // Global state for Query Generator (persists across panel switches)
+      if (!window._queryGeneratorState) {
+        // Load persisted messages if enabled
+        const persistEnabled = localStorage.getItem('graphiql:persist-chat') !== 'false'; // default true
+        let savedMessages = [];
+        if (persistEnabled) {
+          try {
+            savedMessages = JSON.parse(localStorage.getItem('graphiql:chat-messages') || '[]');
+          } catch (e) {
+            savedMessages = [];
+          }
+        }
+        window._queryGeneratorState = {
+          messages: savedMessages
+        };
+      }
+
+      // Query Generator Panel Component
+      const QueryGeneratorPanel = () => {
+        // Use GraphiQL's editor context to access the query editor
+        const editorContext = useEditorContext();
+        const [messages, setMessages] = React.useState(() => window._queryGeneratorState.messages || []);
+        const [inputValue, setInputValue] = React.useState('');
+        const [isLoading, setIsLoading] = React.useState(false);
+        const [error, setError] = React.useState(null);
+        const [showSettings, setShowSettings] = React.useState(false);
+        const [suggestions, setSuggestions] = React.useState(() =>
+          window._queryGeneratorState.suggestions || ['Show all queries', 'List types', 'Help me build a query']
+        );
+        const [loadingSuggestions, setLoadingSuggestions] = React.useState(false);
+        const messagesContainerRef = React.useRef(null);
+        const settingsRef = React.useRef(null);
+        const settingsBtnRef = React.useRef(null);
+
+        // Helper to get value from a CodeMirror editor
+        const getEditorValue = (editor) => {
+          if (!editor) return '';
+          if (editor.getValue) return editor.getValue();
+          if (editor.state?.doc) return editor.state.doc.toString();
+          return '';
+        };
+
+        // Helper to set value in a CodeMirror editor
+        const setEditorValue = (editor, value) => {
+          if (!editor) return false;
+          if (editor.setValue) {
+            editor.setValue(value);
+            return true;
+          }
+          if (editor.dispatch && editor.state) {
+            editor.dispatch({
+              changes: { from: 0, to: editor.state.doc.length, insert: value }
+            });
+            return true;
+          }
+          return false;
+        };
+
+        // Function to get current state from GraphiQL's editor context
+        const getEditorState = React.useCallback(() => {
+          const query = getEditorValue(editorContext?.queryEditor) || getCurrentQuery();
+          const variables = getEditorValue(editorContext?.variableEditor) || '{}';
+          const headers = getEditorValue(editorContext?.headerEditor) || '{}';
+          return { query, variables, headers };
+        }, [editorContext]);
+
+        // Function to set query, variables, and headers using GraphiQL's editor context
+        const setEditorState = React.useCallback(({ query, variables, headers }) => {
+          console.log('setEditorState called', { query, variables, headers });
+
+          // Set query
+          if (query !== undefined && query !== null) {
+            if (!setEditorValue(editorContext?.queryEditor, query)) {
+              setEditorQuery(query); // Fallback
+            }
+          }
+
+          // Set variables
+          if (variables !== undefined && variables !== null) {
+            const varsStr = typeof variables === 'string' ? variables : JSON.stringify(variables, null, 2);
+            if (!setEditorValue(editorContext?.variableEditor, varsStr)) {
+              console.log('Could not set variables via editor context');
+            }
+          }
+
+          // Set headers
+          if (headers !== undefined && headers !== null) {
+            const headersStr = typeof headers === 'string' ? headers : JSON.stringify(headers, null, 2);
+            if (!setEditorValue(editorContext?.headerEditor, headersStr)) {
+              console.log('Could not set headers via editor context');
+            }
+          }
+        }, [editorContext]);
+
+        // Sync messages to global state and localStorage
+        React.useEffect(() => {
+          window._queryGeneratorState.messages = messages;
+          // Persist to localStorage if enabled
+          const persistEnabled = localStorage.getItem('graphiql:persist-chat') !== 'false';
+          if (persistEnabled && messages.length > 0) {
+            localStorage.setItem('graphiql:chat-messages', JSON.stringify(messages));
+          }
+        }, [messages]);
+
+        // Sync suggestions to global state
+        React.useEffect(() => {
+          window._queryGeneratorState.suggestions = suggestions;
+        }, [suggestions]);
+
+        // Fetch initial suggestions based on schema (only used on first load)
+        const fetchInitialSuggestions = React.useCallback(async () => {
+          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          if (!apiKey) return;
+
+          setLoadingSuggestions(true);
+          try {
+            const schemaData = await ensureSchemaLoaded();
+            const schemaContext = buildSchemaContext(schemaData);
+            const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-2.0-flash';
+
+            const prompt = `Based on this GraphQL schema, suggest 4 short (2-5 words each) natural language queries a user might want to start with. Return ONLY a JSON array of strings, no explanation.
+
+${schemaContext}
+
+Example output format: ["Get all users", "Find product by ID", "List recent orders", "Search customers"]`;
+
+            const response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  generationConfig: { responseMimeType: 'application/json' }
+                })
+              }
+            );
+
+            if (response.ok) {
+              const data = await response.json();
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  setSuggestions(parsed.slice(0, 4));
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to fetch suggestions:', err);
+          } finally {
+            setLoadingSuggestions(false);
+          }
+        }, []);
+
+        // Fetch initial suggestions on mount if we have an API key and no messages yet
+        React.useEffect(() => {
+          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          if (apiKey && messages.length === 0) {
+            fetchInitialSuggestions();
+          }
+        }, []);
+
+        // Scroll to bottom when messages update (contained within messages area)
+        React.useEffect(() => {
+          if (messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+          }
+        }, [messages]);
+
+        // Listen for updates from the toolbar Analyse button
+        React.useEffect(() => {
+          const handleQueryGeneratorUpdate = () => {
+            // Sync state from global window._queryGeneratorState
+            if (window._queryGeneratorState) {
+              setMessages(window._queryGeneratorState.messages || []);
+              setSuggestions(window._queryGeneratorState.suggestions || ['Show all queries', 'List types', 'Help me build a query']);
+              setIsLoading(window._queryGeneratorState.isLoading || false);
+            }
+          };
+
+          window.addEventListener('queryGeneratorUpdate', handleQueryGeneratorUpdate);
+          return () => {
+            window.removeEventListener('queryGeneratorUpdate', handleQueryGeneratorUpdate);
+          };
+        }, []);
+
+        // Close settings when clicking outside (but not when clicking the settings button)
+        React.useEffect(() => {
+          const handleClickOutside = (event) => {
+            const isOutsidePopup = settingsRef.current && !settingsRef.current.contains(event.target);
+            const isOutsideButton = settingsBtnRef.current && !settingsBtnRef.current.contains(event.target);
+            if (isOutsidePopup && isOutsideButton) {
+              setShowSettings(false);
+            }
+          };
+          if (showSettings) {
+            document.addEventListener('mousedown', handleClickOutside);
+          }
+          return () => document.removeEventListener('mousedown', handleClickOutside);
+        }, [showSettings]);
+
+        // Send message handler
+        const sendMessage = async (messageText) => {
+          const text = messageText || inputValue;
+          if (!text.trim() || isLoading) return;
+
+          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          if (!apiKey) {
+            setError('Please configure your Gemini API key. Click the gear icon ⚙ above.');
+            return;
+          }
+
+          const userMessage = { role: 'user', content: text };
+          setMessages(prev => [...prev, userMessage]);
+          setInputValue('');
+          setIsLoading(true);
+          setError(null);
+
+          try {
+            const currentState = getEditorState();
+            const response = await callGeminiAPI(
+              text,
+              currentState.query,
+              currentState.variables,
+              currentState.headers,
+              messages
+            );
+
+            const aiMessage = {
+              role: 'assistant',
+              content: response.message,
+              type: response.type,
+              query: response.query,
+              variables: response.variables,
+              headers: response.headers,
+              options: response.options,
+              needsResults: response.needsResults || false,
+              isNewQuery: response.isNewQuery || false,
+              resultsSummary: response.resultsSummary || null
+            };
+
+            // Add original state and diffStatus to messages with changes
+            const hasChanges = response.query || response.variables || response.headers;
+            if ((response.type === 'query' || response.type === 'suggestion') && hasChanges) {
+              aiMessage.originalQuery = currentState.query;
+              aiMessage.originalVariables = currentState.variables;
+              aiMessage.originalHeaders = currentState.headers;
+              aiMessage.diffStatus = 'pending'; // 'pending', 'applied', 'dismissed', 'analyzing'
+            }
+
+            setMessages(prev => [...prev, aiMessage]);
+
+            // Update suggestions from the response
+            if (response.suggestions && Array.isArray(response.suggestions) && response.suggestions.length > 0) {
+              setSuggestions(response.suggestions.slice(0, 4));
+            }
+          } catch (err) {
+            setError(err.message);
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              type: 'error',
+              content: `Error: ${err.message}`
+            }]);
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        // Handle option click from AI response
+        const handleOptionClick = (option) => {
+          sendMessage(option);
+        };
+
+        // Accept suggestion - takes message index (works for both pending and applied)
+        const handleAccept = (msgIndex) => {
+          setMessages(prev => prev.map((msg, idx) => {
+            if (idx === msgIndex && (msg.diffStatus === 'pending' || msg.diffStatus === 'applied')) {
+              setEditorState({
+                query: msg.query,
+                variables: msg.variables,
+                headers: msg.headers
+              });
+              return { ...msg, diffStatus: 'applied' };
+            }
+            return msg;
+          }));
+        };
+
+        // Accept and run - takes message index (works for both pending and applied)
+        const handleAcceptAndRun = (msgIndex) => {
+          setMessages(prev => prev.map((msg, idx) => {
+            if (idx === msgIndex && (msg.diffStatus === 'pending' || msg.diffStatus === 'applied')) {
+              setEditorState({
+                query: msg.query,
+                variables: msg.variables,
+                headers: msg.headers
+              });
+              // Trigger query execution
+              setTimeout(() => {
+                const executeButton = document.querySelector('.graphiql-execute-button');
+                if (executeButton) {
+                  executeButton.click();
+                }
+              }, 150);
+              return { ...msg, diffStatus: 'applied' };
+            }
+            return msg;
+          }));
+        };
+
+        // Reject suggestion - takes message index
+        const handleReject = (msgIndex) => {
+          setMessages(prev => prev.map((msg, idx) => {
+            if (idx === msgIndex && msg.diffStatus === 'pending') {
+              return { ...msg, diffStatus: 'dismissed' };
+            }
+            return msg;
+          }));
+        };
+
+        // Helper to get response from the response editor
+        const getResponseFromEditor = () => {
+          // Try to get from editorContext.responseEditor
+          if (editorContext?.responseEditor) {
+            const value = getEditorValue(editorContext.responseEditor);
+            if (value) return value;
+          }
+          // Fallback: try to find the response panel in the DOM
+          const responsePanel = document.querySelector('.graphiql-response .cm-content');
+          if (responsePanel) {
+            return responsePanel.textContent || '';
+          }
+          return null;
+        };
+
+        // Run query and analyze results - takes message index (works for both pending and applied)
+        const handleRunAndAnalyze = async (msgIndex) => {
+          const msg = messages[msgIndex];
+          if (!msg || (msg.diffStatus !== 'pending' && msg.diffStatus !== 'applied')) return;
+
+          // 1. Set status to analyzing
+          setMessages(prev => prev.map((m, idx) =>
+            idx === msgIndex ? { ...m, diffStatus: 'analyzing' } : m
+          ));
+
+          // 2. Apply the query to editor
+          setEditorState({
+            query: msg.query,
+            variables: msg.variables,
+            headers: msg.headers
+          });
+
+          try {
+            // 3. Wait for editor to update with new query
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            // Verify the query was applied
+            const currentEditorQuery = getEditorState().query;
+            if (currentEditorQuery.trim() !== (msg.query || '').trim()) {
+              // Try applying again
+              setEditorState({
+                query: msg.query,
+                variables: msg.variables,
+                headers: msg.headers
+              });
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            // 4. Click the execute button and wait for response
+            const executeButton = document.querySelector('.graphiql-execute-button');
+            if (!executeButton) {
+              throw new Error('Execute button not found');
+            }
+
+            // Get current response to detect when it changes
+            const oldResponse = getResponseFromEditor();
+
+            // Click execute
+            executeButton.click();
+
+            // 4. Wait for the response (poll every 200ms, max 10 seconds)
+            // Strategy: First wait for response to clear/change (loading started),
+            // then wait for valid JSON result
+            let results = null;
+            const maxAttempts = 50;
+            let attempts = 0;
+            let loadingDetected = false;
+
+            await new Promise((resolve, reject) => {
+              const checkResponse = () => {
+                attempts++;
+                const newResponse = getResponseFromEditor();
+
+                // First, detect if loading has started (response cleared or changed)
+                if (!loadingDetected) {
+                  if (!newResponse || newResponse !== oldResponse) {
+                    loadingDetected = true;
+                  }
+                  // After 1 second, assume loading started even if response looks same
+                  // (handles fast cached responses)
+                  if (attempts >= 5) {
+                    loadingDetected = true;
+                  }
+                }
+
+                // Once loading detected, wait for valid JSON response
+                if (loadingDetected && newResponse) {
+                  try {
+                    results = JSON.parse(newResponse);
+                    resolve();
+                    return;
+                  } catch (e) {
+                    // Not valid JSON yet, keep waiting
+                  }
+                }
+
+                if (attempts >= maxAttempts) {
+                  reject(new Error('Timeout waiting for query response'));
+                  return;
+                }
+
+                setTimeout(checkResponse, 200);
+              };
+              setTimeout(checkResponse, 300); // Initial delay to let query start
+            });
+
+            if (!results) {
+              throw new Error('Failed to get query results');
+            }
+
+            // 5. Add results feedback message (user) and analyzing status message (assistant)
+            const resultsMessage = {
+              role: 'user',
+              type: 'results-feedback',
+              content: `[User executed query and sent results for analysis]`,
+              payload: {
+                query: msg.query,
+                variables: msg.variables,
+                results: results
+              }
+            };
+
+            const analyzingMessage = {
+              role: 'assistant',
+              type: 'analyzing-status',
+              displayText: msg.resultsSummary || 'Analysing query results...',
+              content: '' // This is just a status indicator, not sent to LLM
+            };
+
+            setMessages(prev => {
+              const updated = prev.map((m, idx) =>
+                idx === msgIndex ? { ...m, diffStatus: 'applied', resultsAnalyzed: true } : m
+              );
+              return [...updated, resultsMessage, analyzingMessage];
+            });
+
+            // 6. Send to Gemini for analysis
+            setIsLoading(true);
+
+            // Get current conversation for context (include the results message)
+            const updatedMessages = [...messages];
+            // Update the original message status
+            const msgIndexInUpdated = updatedMessages.findIndex((m, i) => i === msgIndex);
+            if (msgIndexInUpdated !== -1) {
+              updatedMessages[msgIndexInUpdated] = { ...updatedMessages[msgIndexInUpdated], diffStatus: 'applied', resultsAnalyzed: true };
+            }
+            updatedMessages.push(resultsMessage);
+
+            // Build analysis prompt with context
+            const analysisPrompt = `The user clicked "Apply, Run & Analyse" to execute the suggested query and see the results.
+
+Query that was executed:
+\`\`\`graphql
+${msg.query}
+\`\`\`
+
+${msg.variables && msg.variables !== '{}' ? `Variables used:\n\`\`\`json\n${msg.variables}\n\`\`\`\n\n` : ''}Results returned:
+\`\`\`json
+${JSON.stringify(results, null, 2)}
+\`\`\`
+
+Please analyse these results. Focus on:
+- What the data shows (patterns, notable values, structure)
+- Any errors or issues in the response
+
+IMPORTANT: Do NOT suggest new queries or modifications unless:
+1. There is an actual error in the response that needs fixing, OR
+2. The user has explicitly asked for changes, improvements, or new queries in the conversation
+If neither condition is met, provide analysis only - do not include a query in your response.`;
+
+            const response = await callGeminiAPI(
+              analysisPrompt,
+              msg.query,
+              msg.variables,
+              msg.headers,
+              updatedMessages
+            );
+
+            // Add AI analysis response
+            const analysisMessage = {
+              role: 'assistant',
+              content: response.message,
+              type: response.type || 'analysis',
+              query: response.query,
+              variables: response.variables,
+              headers: response.headers,
+              options: response.options,
+              needsResults: response.needsResults || false,
+              isNewQuery: response.isNewQuery || false,
+              resultsSummary: response.resultsSummary || null
+            };
+
+            // Add diff status only if there are ACTUAL changes (not just the same query returned)
+            const queryChanged = response.query && (response.query || '').trim() !== (msg.query || '').trim();
+            const variablesChanged = response.variables && (response.variables || '').trim() !== (msg.variables || '').trim();
+            const headersChanged = response.headers && (response.headers || '').trim() !== (msg.headers || '').trim();
+            const hasActualChanges = queryChanged || variablesChanged || headersChanged;
+
+            if ((response.type === 'query' || response.type === 'suggestion') && hasActualChanges) {
+              analysisMessage.originalQuery = msg.query;
+              analysisMessage.originalVariables = msg.variables;
+              analysisMessage.originalHeaders = msg.headers;
+              analysisMessage.diffStatus = 'pending';
+            }
+
+            // Remove the analyzing-status message and add the real response
+            setMessages(prev => [...prev.filter(m => m.type !== 'analyzing-status'), analysisMessage]);
+
+            // Update suggestions
+            if (response.suggestions && Array.isArray(response.suggestions) && response.suggestions.length > 0) {
+              setSuggestions(response.suggestions.slice(0, 4));
+            }
+          } catch (err) {
+            setError(`Analysis failed: ${err.message}`);
+            // Revert to pending on error and remove analyzing-status message
+            setMessages(prev => prev
+              .filter(m => m.type !== 'analyzing-status')
+              .map((m, idx) => idx === msgIndex ? { ...m, diffStatus: 'pending' } : m)
+            );
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        return React.createElement('div', {
+          style: {
+            padding: '0px',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            position: 'relative'
+          }
+        }, [
+          // Header section with title and settings button
+          React.createElement('div', {
+            key: 'header',
+            style: {
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              position: 'relative'
+            }
+          }, [
+            React.createElement('h3', {
+              key: 'title',
+              style: {
+                margin: '0 0 4px 0',
+                fontSize: '29px',
+                fontWeight: 'bold'
+              }
+            }, 'Query Generator'),
+            // Button container for clear and settings
+            React.createElement('div', {
+              key: 'button-container',
+              style: { display: 'flex', alignItems: 'center', gap: '4px' }
+            }, [
+              // Clear chat button
+              messages.length > 0 && React.createElement('button', {
+                key: 'clear-btn',
+                onClick: () => {
+                  setMessages([]);
+                  window._queryGeneratorState.messages = [];
+                  localStorage.removeItem('graphiql:chat-messages');
+                  setSuggestions(['Show all queries', 'List types', 'Help me build a query']);
+                },
+                title: 'Clear chat history',
+                type: 'button',
+                style: {
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  borderRadius: '4px',
+                  color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }
+              }, React.createElement('svg', {
+                width: '18',
+                height: '18',
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: '2',
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round'
+              }, [
+                React.createElement('polyline', { key: 'p1', points: '3 6 5 6 21 6' }),
+                React.createElement('path', { key: 'p2', d: 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2' })
+              ])),
+              // Settings gear button
+              React.createElement('button', {
+                key: 'settings-btn',
+                ref: settingsBtnRef,
+                onClick: () => setShowSettings(!showSettings),
+                title: 'Settings',
+                type: 'button',
+                style: {
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  borderRadius: '4px',
+                  color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }
+              }, React.createElement('svg', {
+                width: '20',
+                height: '20',
+                viewBox: '0 0 24 24',
+                fill: 'currentColor'
+              }, React.createElement('path', {
+                d: 'M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z'
+              }))),
+              // Settings Popup (inside header for proper z-index stacking)
+              showSettings && React.createElement('div', {
+              key: 'settings-popup',
+              ref: settingsRef,
+              style: {
+                position: 'absolute',
+                top: '100%',
+                right: '0px',
+                marginTop: '8px',
+                width: '320px',
+                background: '#ffffff',
+                border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
+                borderRadius: '8px',
+                boxShadow: '0 6px 20px rgba(59, 76, 106, 0.13), 0 1.34018px 4.46726px rgba(59, 76, 106, 0.0774939), 0 0.399006px 1.33002px rgba(59, 76, 106, 0.0525061)',
+                zIndex: 1000,
+                padding: '16px'
+              }
+            }, React.createElement(SettingsPopupContent, { onClose: () => setShowSettings(false) }))
+            ])
+          ]),
+          // Description
+          React.createElement('p', {
+            key: 'description',
+            className: 'graphiql-markdown-description',
+            style: {
+              margin: '0 0 4px 0',
+              color: 'rgba(59, 75, 104, 0.76)'
+            }
+          }, 'Describe what you want to query in natural language'),
+
+          // Messages Area
+          React.createElement('div', {
+            key: 'messages',
+            ref: messagesContainerRef,
+            style: {
+              flex: 1,
+              overflow: 'auto',
+              padding: '0',
+              display: 'flex',
+              flexDirection: 'column'
+            }
+          }, [
+            // Welcome message if no messages
+            messages.length === 0 && React.createElement('div', {
+              key: 'welcome',
+              style: {
+                textAlign: 'center',
+                padding: '48px 24px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flex: 1
+              }
+            }, [
+              // GraphQL-style decorative icon
+              React.createElement('div', {
+                key: 'welcome-icon',
+                style: {
+                  width: '48px',
+                  height: '48px',
+                  marginBottom: '16px',
+                  borderRadius: '12px',
+                  background: 'hsla(var(--color-primary), 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }
+              }, React.createElement('svg', {
+                width: '24',
+                height: '24',
+                viewBox: '0 0 24 24',
+                fill: 'hsl(var(--color-primary))'
+              }, React.createElement('path', {
+                d: 'M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z'
+              }))),
+              React.createElement('p', {
+                key: 'welcome-text',
+                style: {
+                  margin: '0 0 8px 0',
+                  fontWeight: '600',
+                  fontSize: '15px',
+                  color: 'hsla(var(--color-neutral), 1)'
+                }
+              }, 'Start a conversation'),
+              React.createElement('p', {
+                key: 'welcome-desc',
+                className: 'graphiql-markdown-description',
+                style: {
+                  margin: 0,
+                  fontSize: '13px',
+                  color: 'rgba(59, 75, 104, 0.76)',
+                  maxWidth: '240px'
+                }
+              }, 'Type a message below to generate GraphQL queries using natural language')
+            ]),
+
+            // Message list
+            ...messages.map((msg, idx) => {
+              // Show diff for any message that has changes (query, variables, or headers) and diffStatus
+              const hasChangesWithDiff = (msg.query || msg.variables || msg.headers) && msg.diffStatus;
+
+              return React.createElement(MessageComponent, {
+                key: idx,
+                message: msg,
+                onOptionClick: handleOptionClick,
+                showDiff: hasChangesWithDiff,
+                diffStatus: msg.diffStatus,
+                onAccept: () => handleAccept(idx),
+                onReject: () => handleReject(idx),
+                onAcceptAndRun: () => handleAcceptAndRun(idx),
+                onRunAndAnalyze: () => handleRunAndAnalyze(idx)
+              });
+            }),
+
+            // Loading indicator
+            isLoading && React.createElement('div', {
+              key: 'loading',
+              style: {
+                display: 'flex',
+                justifyContent: 'flex-start',
+                marginBottom: '8px'
+              }
+            }, React.createElement('div', {
+              style: {
+                padding: '10px 14px',
+                borderRadius: '12px',
+                background: 'var(--color-base-bg, #f1f3f5)',
+                color: 'var(--color-alpha-secondary, #586069)',
+                fontSize: '13px'
+              }
+            }, '● ● ●')),
+
+          ]),
+
+          // Error display
+          error && React.createElement('div', {
+            key: 'error',
+            style: {
+              padding: '10px 16px',
+              background: '#ffeaea',
+              color: '#d73a49',
+              fontSize: '12px',
+              borderTop: '1px solid #ffc4c4'
+            }
+          }, [
+            React.createElement('span', { key: 'icon' }, '⚠ '),
+            error
+          ]),
+
+          // Input Area with suggestions
+          React.createElement('div', {
+            key: 'input-area',
+            style: {
+              padding: '12px 16px',
+              borderTop: '1px solid var(--color-border, #e1e4e8)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px'
+            }
+          }, [
+            // Quick suggestions (dynamically generated)
+            React.createElement('div', {
+              key: 'quick-suggestions',
+              style: {
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px',
+                alignItems: 'center'
+              }
+            }, [
+              // Loading indicator for suggestions
+              loadingSuggestions && React.createElement('span', {
+                key: 'loading-suggestions',
+                style: {
+                  fontSize: '11px',
+                  color: 'var(--color-alpha-secondary, #586069)',
+                  fontStyle: 'italic'
+                }
+              }, 'Loading suggestions...'),
+              // Suggestion buttons
+              ...(!loadingSuggestions ? suggestions.map((suggestion, idx) =>
+                React.createElement('button', {
+                  key: idx,
+                  type: 'button',
+                  onClick: (e) => { e.preventDefault(); sendMessage(suggestion); },
+                  disabled: isLoading,
+                  style: {
+                    padding: '5px 10px',
+                  background: '#e3f2fd',
+                  border: '1px solid #bbdefb',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  color: '#1565c0',
+                  transition: 'all 0.15s ease',
+                  opacity: isLoading ? 0.5 : 1
+                },
+                onMouseEnter: (e) => {
+                  if (!isLoading) {
+                    e.target.style.background = '#1976d2';
+                    e.target.style.color = 'white';
+                    e.target.style.borderColor = '#1976d2';
+                  }
+                },
+                onMouseLeave: (e) => {
+                  e.target.style.background = '#e3f2fd';
+                  e.target.style.color = '#1565c0';
+                  e.target.style.borderColor = '#bbdefb';
+                }
+              }, suggestion)
+              ) : [])
+            ]),
+            // Input row
+            React.createElement('div', {
+              key: 'input-row',
+              style: {
+                display: 'flex',
+                gap: '8px'
+              }
+            }, [
+              React.createElement('input', {
+                key: 'input',
+                type: 'text',
+                value: inputValue,
+                onChange: (e) => setInputValue(e.target.value),
+                onKeyDown: (e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                },
+                placeholder: 'Describe your query...',
+                disabled: isLoading,
+                style: {
+                  flex: 1,
+                  padding: '8px 12px',
+                  border: '1px solid var(--color-border, #d1d5da)',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  background: 'var(--color-base-bg, white)',
+                  color: 'var(--color-base)'
+                }
+              }),
+              React.createElement('button', {
+                key: 'send-btn',
+                type: 'button',
+                onClick: (e) => { e.preventDefault(); sendMessage(); },
+                disabled: isLoading || !inputValue.trim(),
+                style: {
+                  padding: '8px 14px',
+                  backgroundColor: isLoading || !inputValue.trim() ? 'var(--color-alpha-tertiary, #ccc)' : 'hsl(var(--color-primary))',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: isLoading || !inputValue.trim() ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  transition: 'background-color 0.15s ease'
+                }
+              }, isLoading ? '...' : 'Send')
+            ])
+          ])
+        ]);
+      };
+
+      // Query Generator Plugin Object
+      const queryGeneratorPlugin = {
+        title: 'Query Generator',
+        icon: () => React.createElement('svg', {
+          width: '16',
+          height: '16',
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: '2',
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round'
+        }, [
+          // Rounded square with open top-right corner (cut off at 50%)
+          React.createElement('path', {
+            key: 'box',
+            d: 'M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V12',
+            fill: 'none'
+          }),
+          // Large sparkle (center-right, crevices curve inward)
+          React.createElement('path', {
+            key: 'sparkle1',
+            d: 'M16.6 0.3 Q17.2 7.5 24.4 8.1 Q17.2 8.7 16.6 15.9 Q16 8.7 8.8 8.1 Q16 7.5 16.6 0.3 Z',
+            fill: 'currentColor',
+            stroke: 'none'
+          }),
+          // Small sparkle (bottom-left inside, moved up 2px and right 2px)
+          React.createElement('path', {
+            key: 'sparkle2',
+            d: 'M9 13l.75-1.5.75 1.5 1.5.75-1.5.75-.75 1.5-.75-1.5-1.5-.75z',
+            fill: 'currentColor',
+            stroke: 'none'
+          }),
+          // Tiny sparkle (top-right outside, moved up 1px)
+          React.createElement('path', {
+            key: 'sparkle3',
+            d: 'M20 3l.5-1 .5 1 1 .5-1 .5-.5 1-.5-1-1-.5z',
+            fill: 'currentColor',
+            stroke: 'none'
+          })
+        ]),
+        content: () => QueryGeneratorPanel()
+      };
+
       const params = Object.fromEntries(new URLSearchParams(location.search));
       const { query, variables, operationName, ...rest } = params;
       const fetchURL = '?' + new URLSearchParams(rest).toString();
@@ -3695,7 +6222,7 @@
       const fetcher = createGraphiQLFetcher({
         url: fetchURL
       });
-      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin];
+      const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin, queryGeneratorPlugin];
 
       // Store the default query so we can use it in the storage wrapper
       const defaultQueryValue = "DEFAULT_QUERY";
@@ -3746,6 +6273,303 @@
         }
       };
 
+      // Analyse Button Component for the toolbar
+      const AnalyseButton = () => {
+        const editorContext = useEditorContext();
+        const pluginContext = usePluginContext();
+        const [isAnalysing, setIsAnalysing] = React.useState(false);
+        const [popup, setPopup] = React.useState(null); // { message: string }
+
+        // Function to switch to Query Generator tab
+        const switchToQueryGenerator = () => {
+          // Use plugin context to set visible plugin directly
+          if (pluginContext?.setVisiblePlugin) {
+            // Find the Query Generator plugin from the plugins list
+            const qgPlugin = pluginContext.plugins?.find(p => p.title === 'Query Generator');
+            if (qgPlugin && pluginContext.visiblePlugin !== qgPlugin) {
+              pluginContext.setVisiblePlugin(qgPlugin);
+              return;
+            }
+          }
+
+          // Fallback: click the sidebar button directly
+          const allButtons = document.querySelectorAll('button');
+          for (const btn of allButtons) {
+            const ariaLabel = btn.getAttribute('aria-label');
+            if (ariaLabel === 'Query Generator') {
+              btn.click();
+              return;
+            }
+          }
+        };
+
+        const handleAnalyse = async () => {
+          if (isAnalysing) return;
+
+          // Get current query from editor
+          const query = editorContext?.queryEditor?.getValue?.() ||
+                       editorContext?.queryEditor?.state?.doc?.toString?.() || '';
+
+          // Get variables
+          const variables = editorContext?.variableEditor?.getValue?.() ||
+                           editorContext?.variableEditor?.state?.doc?.toString?.() || '{}';
+
+          // Get response from response editor
+          const response = editorContext?.responseEditor?.getValue?.() ||
+                          editorContext?.responseEditor?.state?.doc?.toString?.() || '';
+
+          if (!query.trim()) {
+            setPopup({ message: 'No query to analyse' });
+            return;
+          }
+
+          if (!response.trim()) {
+            setPopup({ message: 'No response to analyse. Run the query first.' });
+            return;
+          }
+
+          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          if (!apiKey) {
+            setPopup({ message: 'Please configure your Gemini API key in the Query Generator settings first.' });
+            return;
+          }
+
+          // Switch to Query Generator tab
+          switchToQueryGenerator();
+
+          setIsAnalysing(true);
+          window._queryGeneratorState.isLoading = true;
+          window.dispatchEvent(new CustomEvent('queryGeneratorUpdate'));
+
+          try {
+            // Parse response if possible
+            let parsedResponse;
+            try {
+              parsedResponse = JSON.parse(response);
+            } catch (e) {
+              parsedResponse = response;
+            }
+
+            // Get existing conversation from Query Generator
+            const existingMessages = window._queryGeneratorState?.messages || [];
+
+            // Create the results feedback message (user) and analyzing status message (assistant)
+            const userMessage = {
+              role: 'user',
+              type: 'results-feedback',
+              content: `[User executed query and sent results for analysis]`,
+              payload: {
+                query: query,
+                variables: variables,
+                results: parsedResponse
+              }
+            };
+
+            const analyzingMessage = {
+              role: 'assistant',
+              type: 'analyzing-status',
+              displayText: 'Analysing current query results...',
+              content: ''
+            };
+
+            // Add to conversation
+            const updatedMessages = [...existingMessages, userMessage, analyzingMessage];
+            window._queryGeneratorState.messages = updatedMessages;
+
+            // Trigger re-render in Query Generator if it's open
+            window.dispatchEvent(new CustomEvent('queryGeneratorAnalyse', {
+              detail: { query, variables, response: parsedResponse, userMessage, analyzingMessage }
+            }));
+
+            // Call Gemini API with context about being an analysis assistant
+            const analysisPrompt = `The user clicked the "Analyse" button in GraphiQL to analyse the current query and its results.
+
+Query that was executed:
+\`\`\`graphql
+${query}
+\`\`\`
+
+Variables used:
+\`\`\`json
+${variables}
+\`\`\`
+
+Results returned:
+\`\`\`json
+${JSON.stringify(parsedResponse, null, 2)}
+\`\`\`
+
+Please analyse these results. Focus on:
+- What the data shows (patterns, notable values, structure)
+- Any errors or issues in the response
+
+IMPORTANT: Do NOT suggest new queries or modifications unless:
+1. There is an actual error in the response that needs fixing, OR
+2. The user has explicitly asked for changes, improvements, or new queries in the conversation
+If neither condition is met, provide analysis only - do not include a query in your response.`;
+
+            const aiResponse = await callGeminiAPI(
+              analysisPrompt,
+              query,
+              variables,
+              '{}',
+              updatedMessages
+            );
+
+            // Add AI response to conversation
+            const aiMessage = {
+              role: 'assistant',
+              content: aiResponse.message,
+              type: aiResponse.type || 'analysis',
+              query: aiResponse.query,
+              variables: aiResponse.variables,
+              headers: aiResponse.headers,
+              options: aiResponse.options,
+              needsResults: aiResponse.needsResults || false,
+              isNewQuery: aiResponse.isNewQuery || false,
+              resultsSummary: aiResponse.resultsSummary || null
+            };
+
+            // Check for actual changes
+            const queryChanged = aiResponse.query && (aiResponse.query || '').trim() !== (query || '').trim();
+            const variablesChanged = aiResponse.variables && (aiResponse.variables || '').trim() !== (variables || '').trim();
+            if ((aiResponse.type === 'query' || aiResponse.type === 'suggestion') && (queryChanged || variablesChanged)) {
+              aiMessage.originalQuery = query;
+              aiMessage.originalVariables = variables;
+              aiMessage.originalHeaders = '{}';
+              aiMessage.diffStatus = 'pending';
+            }
+
+            // Remove analyzing-status message and add the real response
+            window._queryGeneratorState.messages = [...updatedMessages.filter(m => m.type !== 'analyzing-status'), aiMessage];
+
+            // Update suggestions if provided
+            if (aiResponse.suggestions && Array.isArray(aiResponse.suggestions)) {
+              window._queryGeneratorState.suggestions = aiResponse.suggestions.slice(0, 4);
+            }
+
+            // Trigger update
+            window._queryGeneratorState.isLoading = false;
+            window.dispatchEvent(new CustomEvent('queryGeneratorUpdate'));
+
+          } catch (err) {
+            console.error('Analysis failed:', err);
+            window._queryGeneratorState.isLoading = false;
+            window.dispatchEvent(new CustomEvent('queryGeneratorUpdate'));
+            setPopup({ message: `Analysis failed: ${err.message}` });
+          } finally {
+            setIsAnalysing(false);
+          }
+        };
+
+        return React.createElement(React.Fragment, null, [
+          // Popup for errors/messages
+          popup && React.createElement('div', {
+            key: 'popup',
+            style: {
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              background: 'white',
+              padding: '20px 24px',
+              borderRadius: '8px',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+              zIndex: 10000,
+              maxWidth: '320px',
+              textAlign: 'center'
+            }
+          }, [
+            React.createElement('p', {
+              key: 'message',
+              style: { margin: '0 0 16px 0', color: '#24292e', fontSize: '14px', lineHeight: '1.5' }
+            }, popup.message),
+            React.createElement('button', {
+              key: 'close',
+              onClick: () => setPopup(null),
+              style: {
+                padding: '8px 20px',
+                background: '#e3f2fd',
+                color: '#1565c0',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                fontWeight: 500
+              }
+            }, 'OK')
+          ]),
+          // Backdrop for popup
+          popup && React.createElement('div', {
+            key: 'backdrop',
+            onClick: () => setPopup(null),
+            style: {
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0,0,0,0.3)',
+              zIndex: 9999
+            }
+          }),
+          // The Analyse button using ToolbarButton for proper tooltip styling
+          React.createElement(ToolbarButton, {
+            key: 'analyse-btn',
+            label: 'Analyse with AI',
+            onClick: handleAnalyse,
+            disabled: isAnalysing
+          }, isAnalysing ?
+            React.createElement('div', {
+              style: {
+                width: '18px',
+                height: '18px',
+                border: '2px solid hsla(var(--color-neutral), 0.2)',
+                borderTopColor: 'hsla(var(--color-neutral), var(--alpha-tertiary, 0.4))',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite'
+              }
+            }) :
+            React.createElement('svg', {
+              width: '22',
+              height: '22',
+              viewBox: '0 0 24 24',
+              fill: 'none',
+              style: { color: 'hsla(var(--color-neutral), var(--alpha-tertiary, 0.4))' }
+            }, [
+              // Rounded square with open top-right corner (cut off at 50%)
+              React.createElement('path', {
+                key: 'box',
+                d: 'M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V12',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: '2',
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round'
+              }),
+              // Large sparkle (center-right, crevices curve inward)
+              React.createElement('path', {
+                key: 'sparkle1',
+                d: 'M16.6 0.3 Q17.2 7.5 24.4 8.1 Q17.2 8.7 16.6 15.9 Q16 8.7 8.8 8.1 Q16 7.5 16.6 0.3 Z',
+                fill: 'currentColor'
+              }),
+              // Small sparkle (bottom-left inside, moved up 2px and right 2px)
+              React.createElement('path', {
+                key: 'sparkle2',
+                d: 'M9 13l.75-1.5.75 1.5 1.5.75-1.5.75-.75 1.5-.75-1.5-1.5-.75z',
+                fill: 'currentColor'
+              }),
+              // Tiny sparkle (top-right outside, moved up 1px)
+              React.createElement('path', {
+                key: 'sparkle3',
+                d: 'M20 3l.5-1 .5 1 1 .5-1 .5-.5 1-.5-1-1-.5z',
+                fill: 'currentColor'
+              })
+            ])
+          )
+        ]);
+      };
+
       function App() {
         return React.createElement(GraphiQL, {
           fetcher,
@@ -3754,7 +6578,17 @@
           isHeadersEditorEnabled: true,
           defaultQuery: defaultQueryValue,
           storage: customStorage
-        });
+        },
+          // Use GraphiQL.Toolbar with render prop to add custom button alongside defaults
+          React.createElement(GraphiQL.Toolbar, null,
+            ({ copy, merge, prettify }) => React.createElement(React.Fragment, null,
+              copy,
+              merge,
+              prettify,
+              React.createElement(AnalyseButton, { key: 'analyse-btn' })
+            )
+          )
+        );
       }
 
       const container = document.getElementById('graphiql');
