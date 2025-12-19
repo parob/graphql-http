@@ -402,7 +402,7 @@ CategoryType = GraphQLObjectType(
             resolve=lambda cat, info: len([p for p in db.posts.values() if p["categoryId"] == cat["id"]]),
         ),
         "posts": GraphQLField(
-            GraphQLList(lambda: PostType),
+            GraphQLNonNull(GraphQLList(GraphQLNonNull(lambda: PostType))),
             args={
                 "limit": GraphQLArgument(GraphQLInt, default_value=10),
                 "status": GraphQLArgument(PostStatusEnum),
