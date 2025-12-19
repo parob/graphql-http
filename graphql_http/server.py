@@ -372,7 +372,7 @@ class GraphQLHTTP:
 
         # Inject Gemini API key from environment if set
         gemini_api_key = os.environ.get("GRAPHIQL_GEMINI_API_KEY", "")
-        html_content = html_content.replace("GEMINI_API_KEY_PLACEHOLDER", gemini_api_key)
+        html_content = html_content.replace("__GEMINI_API_KEY__", gemini_api_key)
 
         return HTMLResponse(html_content)
 

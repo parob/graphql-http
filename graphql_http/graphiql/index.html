@@ -177,14 +177,18 @@
       import ELK from 'elkjs';
 
       // Environment-injected Gemini API key (set via GRAPHIQL_GEMINI_API_KEY env var)
-      const ENV_GEMINI_API_KEY = 'GEMINI_API_KEY_PLACEHOLDER';
+      // Server replaces __GEMINI_API_KEY__ with env value or empty string
+      const ENV_GEMINI_API_KEY = '__GEMINI_API_KEY__';
 
-      // Initialize env API key to localStorage if not already set
-      if (ENV_GEMINI_API_KEY && ENV_GEMINI_API_KEY !== 'GEMINI_API_KEY_PLACEHOLDER') {
-        if (!localStorage.getItem('graphiql:gemini-api-key')) {
-          localStorage.setItem('graphiql:gemini-api-key', ENV_GEMINI_API_KEY);
+      // Helper to get API key - uses localStorage first, falls back to env key silently
+      const getGeminiApiKey = () => {
+        const stored = localStorage.getItem('graphiql:gemini-api-key');
+        if (stored) return stored;
+        if (ENV_GEMINI_API_KEY) {
+          return ENV_GEMINI_API_KEY;
         }
-      }
+        return '';
+      };
 
       // Custom Graph Node - contains our entire graph visualization
       const GraphVisualizationNode = ({ data }) => {
@@ -3960,7 +3964,7 @@
 
       // Call Gemini API
       const callGeminiAPI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
-        const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+        const apiKey = getGeminiApiKey();
         const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-2.0-flash';
 
         if (!apiKey) {
@@ -5309,7 +5313,7 @@ Examples:
 
         // Fetch initial suggestions based on schema (only used on first load)
         const fetchInitialSuggestions = React.useCallback(async () => {
-          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          const apiKey = getGeminiApiKey();
           if (!apiKey) return;
 
           setLoadingSuggestions(true);
@@ -5355,7 +5359,7 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
 
         // Fetch initial suggestions on mount if we have an API key and no messages yet
         React.useEffect(() => {
-          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          const apiKey = getGeminiApiKey();
           if (apiKey && messages.length === 0) {
             fetchInitialSuggestions();
           }
@@ -5405,7 +5409,7 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
           const text = messageText || inputValue;
           if (!text.trim() || isLoading) return;
 
-          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          const apiKey = getGeminiApiKey();
           if (!apiKey) {
             setError('Please configure your Gemini API key. Click the gear icon ⚙ above.');
             return;
@@ -6270,7 +6274,7 @@ If neither condition is met, provide analysis only - do not include a query in y
             return;
           }
 
-          const apiKey = localStorage.getItem('graphiql:gemini-api-key');
+          const apiKey = getGeminiApiKey();
           if (!apiKey) {
             setPopup({ message: 'Please configure your Gemini API key in the Query Generator settings first.' });
             return;
