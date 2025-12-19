@@ -4500,8 +4500,20 @@ Examples:
         const isSystem = message.role === 'system';
         const isResultsFeedback = message.type === 'results-feedback';
         const isAnalyzingStatus = message.type === 'analyzing-status';
-        const hasChanges = (message.query || message.variables || message.headers) &&
+        const hasQueryData = (message.query || message.variables || message.headers) &&
                           (message.type === 'query' || message.type === 'suggestion');
+
+        // Check if there are actual differences (not just re-suggesting same query)
+        const hasActualDiffs = hasQueryData && (
+          (message.query && (message.originalQuery || '').trim() !== (message.query || '').trim()) ||
+          (message.variables && (message.originalVariables || '').trim() !== (message.variables || '').trim()) ||
+          (message.headers && (message.originalHeaders || '').trim() !== (message.headers || '').trim())
+        );
+
+        // Has a query but no actual changes = suggesting to re-run the same query
+        const isRerunSuggestion = hasQueryData && !hasActualDiffs;
+        const hasChanges = hasQueryData;
+
         const isPending = diffStatus === 'pending';
         const isApplied = diffStatus === 'applied';
         const isDismissed = diffStatus === 'dismissed';
@@ -4774,7 +4786,7 @@ Examples:
               React.createElement('div', {
                 key: 'title',
                 style: { fontWeight: '500', marginBottom: '4px', color: '#0969da' }
-              }, '📝 New Query'),
+              }, 'New Query'),
               React.createElement('div', {
                 key: 'subtitle',
                 style: { fontSize: '11px', color: '#57606a' }
@@ -4830,7 +4842,24 @@ Examples:
                   }
                 }, message.variables)
               ])
-            ].filter(Boolean) : [
+            ].filter(Boolean) : isRerunSuggestion ? [
+              // No changes - just suggesting to re-run the current query
+              React.createElement('div', {
+                key: 'rerun-message',
+                style: {
+                  padding: '8px 12px',
+                  fontSize: '12px',
+                  color: 'var(--color-alpha-secondary, #586069)',
+                  fontStyle: 'italic',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }
+              }, [
+                React.createElement('span', { key: 'icon' }, '▶'),
+                'No changes to apply — run current query'
+              ])
+            ] : [
               // For modified queries, show the diff
               renderDiffSection('Query', message.originalQuery, message.query),
               renderDiffSection('Variables', message.originalVariables, message.variables),
@@ -4849,7 +4878,68 @@ Examples:
                 justifyContent: 'flex-end',
                 flexWrap: 'wrap'
               }
-            }, [
+            }, isRerunSuggestion ? [
+              // Simplified actions for re-run
+              isPending && React.createElement('button', {
+                key: 'dismiss',
+                type: 'button',
+                onClick: (e) => { e.preventDefault(); onReject && onReject(); },
+                style: {
+                  padding: '5px 10px',
+                  background: 'var(--color-base-bg, white)',
+                  border: '1px solid var(--color-border, #d1d5da)',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: 'var(--color-base)'
+                }
+              }, 'Dismiss'),
+              React.createElement('div', { key: 'spacer', style: { flex: 1 } }),
+              // Analyse checkbox for re-run
+              React.createElement('label', {
+                key: 'analyse-label',
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '11px',
+                  color: 'var(--color-alpha-secondary, #586069)',
+                  cursor: 'pointer',
+                  userSelect: 'none'
+                }
+              }, [
+                React.createElement('input', {
+                  key: 'analyse-checkbox',
+                  type: 'checkbox',
+                  checked: analyseEnabled,
+                  onChange: (e) => setAnalyseEnabled(e.target.checked),
+                  style: { margin: 0, cursor: 'pointer' }
+                }),
+                'Analyse Response'
+              ]),
+              React.createElement('button', {
+                key: 'execute',
+                type: 'button',
+                onClick: (e) => {
+                  e.preventDefault();
+                  if (analyseEnabled) {
+                    onRunAndAnalyze && onRunAndAnalyze();
+                  } else {
+                    onAcceptAndRun && onAcceptAndRun();
+                  }
+                },
+                style: {
+                  padding: '5px 12px',
+                  background: '#28a745',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontWeight: '500',
+                  color: 'white'
+                }
+              }, 'Execute Query')
+            ] : [
               // Dismiss button - only show when pending (can't dismiss what's already applied)
               isPending && React.createElement('button', {
                 key: 'reject',
