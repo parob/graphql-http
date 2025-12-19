@@ -176,6 +176,16 @@
       } from 'reactflow';
       import ELK from 'elkjs';
 
+      // Environment-injected Gemini API key (set via GRAPHIQL_GEMINI_API_KEY env var)
+      const ENV_GEMINI_API_KEY = 'GEMINI_API_KEY_PLACEHOLDER';
+
+      // Initialize env API key to localStorage if not already set
+      if (ENV_GEMINI_API_KEY && ENV_GEMINI_API_KEY !== 'GEMINI_API_KEY_PLACEHOLDER') {
+        if (!localStorage.getItem('graphiql:gemini-api-key')) {
+          localStorage.setItem('graphiql:gemini-api-key', ENV_GEMINI_API_KEY);
+        }
+      }
+
       // Custom Graph Node - contains our entire graph visualization
       const GraphVisualizationNode = ({ data }) => {
         const { getViewport, fitBounds, setViewport, zoomIn, zoomOut } = useReactFlow();
