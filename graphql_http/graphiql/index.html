@@ -4968,9 +4968,8 @@ Examples:
 
       // Settings Popup Content Component (for Query Generator)
       const SettingsPopupContent = ({ onClose }) => {
-        const [apiKey, setApiKey] = React.useState(() =>
-          localStorage.getItem('graphiql:gemini-api-key') || ''
-        );
+        const originalApiKey = React.useRef(localStorage.getItem('graphiql:gemini-api-key') || '');
+        const [apiKey, setApiKey] = React.useState(originalApiKey.current);
         const [showApiKey, setShowApiKey] = React.useState(false);
         const [selectedModel, setSelectedModel] = React.useState(() =>
           localStorage.getItem('graphiql:gemini-model') || ''
@@ -4980,8 +4979,11 @@ Examples:
         );
         const [models, setModels] = React.useState([]);
         const [loadingModels, setLoadingModels] = React.useState(false);
-        const [saveStatus, setSaveStatus] = React.useState(null);
+        const [apiKeySaveStatus, setApiKeySaveStatus] = React.useState(null);
         const lastFetchedKeyRef = React.useRef(null);
+
+        // Check if API key has been modified
+        const apiKeyChanged = apiKey !== originalApiKey.current;
 
         const loadModels = React.useCallback(async (key) => {
           if (!key) {
@@ -5025,85 +5027,81 @@ Examples:
           if (apiKey) loadModels(apiKey);
         }, []);
 
-        const handleSave = () => {
+        // Save API key only
+        const handleSaveApiKey = () => {
           localStorage.setItem('graphiql:gemini-api-key', apiKey);
-          localStorage.setItem('graphiql:gemini-model', selectedModel);
-          localStorage.setItem('graphiql:persist-chat', persistChat ? 'true' : 'false');
-          // If persist is disabled, clear saved messages
-          if (!persistChat) {
-            localStorage.removeItem('graphiql:chat-messages');
-          }
-          setSaveStatus('saved');
-          setTimeout(() => {
-            setSaveStatus(null);
-            onClose();
-          }, 800);
+          originalApiKey.current = apiKey;
+          setApiKeySaveStatus('saved');
+          setTimeout(() => setApiKeySaveStatus(null), 1500);
         };
 
-        return React.createElement('div', {
-          style: { display: 'flex', flexDirection: 'column', gap: '16px' }
-        }, [
-          // Header
+        // Auto-save model when changed
+        const handleModelChange = (newModel) => {
+          setSelectedModel(newModel);
+          localStorage.setItem('graphiql:gemini-model', newModel);
+        };
+
+        // Auto-save persist chat when changed
+        const handlePersistChatChange = (enabled) => {
+          setPersistChat(enabled);
+          localStorage.setItem('graphiql:persist-chat', enabled ? 'true' : 'false');
+          if (!enabled) {
+            localStorage.removeItem('graphiql:chat-messages');
+          }
+        };
+
+        return React.createElement(React.Fragment, null, [
+          // Header (using native GraphiQL classes)
           React.createElement('div', {
             key: 'header',
-            style: {
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid hsla(var(--color-neutral), var(--alpha-border-light))',
-              paddingBottom: '12px',
-              marginBottom: '4px'
-            }
+            className: 'graphiql-dialog-header'
           }, [
-            React.createElement('span', {
+            React.createElement('h2', {
               key: 'title',
-              style: {
-                fontWeight: '600',
-                fontSize: '14px',
-                color: 'hsla(var(--color-neutral), 1)'
-              }
-            }, 'Settings'),
+              className: 'graphiql-dialog-title'
+            }, 'Query Generator Settings'),
             React.createElement('button', {
               key: 'close',
               onClick: onClose,
               type: 'button',
-              className: 'graphiql-dialog-close',
-              style: {
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px',
-                color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '4px'
-              }
-            }, React.createElement('svg', {
-              width: '16',
-              height: '16',
-              viewBox: '0 0 24 24',
-              fill: 'currentColor'
-            }, React.createElement('path', {
-              d: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'
-            })))
+              className: 'graphiql-un-styled graphiql-dialog-close'
+            }, [
+              React.createElement('span', {
+                key: 'sr-text',
+                style: {
+                  position: 'absolute',
+                  border: '0px',
+                  width: '1px',
+                  height: '1px',
+                  padding: '0px',
+                  margin: '-1px',
+                  overflow: 'hidden',
+                  clip: 'rect(0px, 0px, 0px, 0px)',
+                  whiteSpace: 'nowrap',
+                  overflowWrap: 'normal'
+                }
+              }, 'Close dialog'),
+              React.createElement('svg', {
+                key: 'icon',
+                height: '1em',
+                viewBox: '0 0 14 14',
+                stroke: 'currentColor',
+                strokeWidth: '3',
+                xmlns: 'http://www.w3.org/2000/svg'
+              }, [
+                React.createElement('title', { key: 'title' }, 'Close'),
+                React.createElement('path', { key: 'p1', d: 'M1 1L12.9998 12.9997' }),
+                React.createElement('path', { key: 'p2', d: 'M13 1L1.00079 13.0003' })
+              ])
+            ])
           ]),
 
-          // API Key
-          React.createElement('div', { key: 'api-key-section' }, [
-            React.createElement('label', {
-              key: 'label',
-              className: 'graphiql-doc-explorer-section-title',
-              style: {
-                display: 'block',
-                fontSize: '12px',
-                fontWeight: '600',
-                color: 'hsla(var(--color-neutral), 1)',
-                marginBottom: '8px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }
-            }, 'Gemini API Key'),
+          // API Key Section (using native GraphiQL classes)
+          React.createElement('div', { key: 'api-key-section', className: 'graphiql-dialog-section' }, [
+            React.createElement('div', { key: 'info' }, [
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Gemini API Key'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Enter your Google AI Studio API key to enable the query generator.')
+            ]),
             React.createElement('div', { key: 'input-row', style: { display: 'flex', gap: '8px' } }, [
               React.createElement('input', {
                 key: 'input',
@@ -5111,135 +5109,66 @@ Examples:
                 value: apiKey,
                 onChange: (e) => setApiKey(e.target.value),
                 placeholder: 'Enter API key',
-                className: 'graphiql-dialog-input',
-                style: {
-                  flex: 1,
-                  padding: '8px 12px',
-                  border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontFamily: 'var(--font-family-mono)',
-                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
-                  color: 'hsla(var(--color-neutral), 1)'
-                }
-              }),
-              React.createElement('button', {
-                key: 'show-hide',
-                onClick: () => setShowApiKey(!showApiKey),
-                type: 'button',
                 className: 'graphiql-button',
                 style: {
-                  padding: '8px 12px',
-                  border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
-                  borderRadius: '6px',
-                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  fontWeight: '500',
-                  color: 'hsla(var(--color-neutral), 1)'
+                  flex: 1,
+                  fontFamily: 'monospace',
+                  textAlign: 'left'
                 }
-              }, showApiKey ? 'Hide' : 'Show')
+              }),
+              // Show/Hide button transforms to Save button when API key is edited
+              React.createElement('button', {
+                key: 'action-btn',
+                onClick: apiKeyChanged ? handleSaveApiKey : () => setShowApiKey(!showApiKey),
+                type: 'button',
+                className: 'graphiql-button',
+                style: { minWidth: '70px' }
+              }, apiKeyChanged ? (apiKeySaveStatus === 'saved' ? 'Saved!' : 'Save') : (showApiKey ? 'Hide' : 'Show'))
             ])
           ]),
 
-          // Model selector
-          React.createElement('div', { key: 'model-section' }, [
-            React.createElement('label', {
-              key: 'label',
-              className: 'graphiql-doc-explorer-section-title',
-              style: {
-                display: 'block',
-                fontSize: '12px',
-                fontWeight: '600',
-                color: 'hsla(var(--color-neutral), 1)',
-                marginBottom: '8px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }
-            }, 'Model'),
+          // Model selector Section (using native GraphiQL classes) - auto-saves
+          React.createElement('div', { key: 'model-section', className: 'graphiql-dialog-section' }, [
+            React.createElement('div', { key: 'info' }, [
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Model'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Select the Gemini model to use for generating queries.')
+            ]),
             models.length > 0 ?
               React.createElement('select', {
                 key: 'select',
                 value: selectedModel,
-                onChange: (e) => setSelectedModel(e.target.value),
+                onChange: (e) => handleModelChange(e.target.value),
                 className: 'graphiql-button',
-                style: {
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
-                  color: 'hsla(var(--color-neutral), 1)',
-                  cursor: 'pointer'
-                }
+                style: { cursor: 'pointer' }
               }, models.map(m => React.createElement('option', { key: m.id, value: m.id }, m.name)))
             :
               React.createElement('div', {
                 key: 'no-models',
-                style: {
-                  padding: '12px',
-                  background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
-                  textAlign: 'center'
-                }
+                className: 'graphiql-dialog-section-caption'
               }, loadingModels ? 'Loading models...' : (apiKey ? 'No models found' : 'Enter API key to load models'))
           ]),
 
-          // Persist chat toggle
-          React.createElement('div', {
-            key: 'persist-section',
-            style: {
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              padding: '12px',
-              background: 'hsla(var(--color-neutral), var(--alpha-background-light))',
-              borderRadius: '6px'
-            }
-          }, [
-            React.createElement('input', {
-              key: 'checkbox',
-              type: 'checkbox',
-              id: 'persist-chat',
-              checked: persistChat,
-              onChange: (e) => setPersistChat(e.target.checked),
-              style: { margin: 0, cursor: 'pointer', width: '16px', height: '16px' }
-            }),
-            React.createElement('label', {
-              key: 'label',
-              htmlFor: 'persist-chat',
-              style: {
-                fontSize: '13px',
-                color: 'hsla(var(--color-neutral), 1)',
-                cursor: 'pointer',
-                userSelect: 'none'
-              }
-            }, 'Persist chat history')
-          ]),
-
-          // Save button
-          React.createElement('button', {
-            key: 'save-btn',
-            onClick: handleSave,
-            disabled: !apiKey,
-            type: 'button',
-            className: 'graphiql-button',
-            style: {
-              padding: '10px 16px',
-              backgroundColor: saveStatus === 'saved' ? 'hsl(var(--color-success))' : 'hsl(var(--color-primary))',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: !apiKey ? 'not-allowed' : 'pointer',
-              fontSize: '13px',
-              fontWeight: '600',
-              opacity: !apiKey ? 0.5 : 1,
-              transition: 'background-color 0.15s ease'
-            }
-          }, saveStatus === 'saved' ? 'Saved!' : 'Save Settings')
+          // Persist chat toggle Section (using native GraphiQL classes) - auto-saves
+          React.createElement('div', { key: 'persist-section', className: 'graphiql-dialog-section' }, [
+            React.createElement('div', { key: 'info' }, [
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Chat History'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Persist chat history between sessions.')
+            ]),
+            React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' }, [
+              React.createElement('button', {
+                key: 'on',
+                type: 'button',
+                className: persistChat ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => handlePersistChatChange(true)
+              }, 'On'),
+              React.createElement('button', {
+                key: 'off',
+                type: 'button',
+                className: !persistChat ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => handlePersistChatChange(false)
+              }, 'Off')
+            ])
+          ])
         ]);
       };
 
@@ -5905,24 +5834,8 @@ If neither condition is met, provide analysis only - do not include a query in y
               }, React.createElement('path', {
                 d: 'M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z'
               }))),
-              // Settings Popup (inside header for proper z-index stacking)
-              showSettings && React.createElement('div', {
-              key: 'settings-popup',
-              ref: settingsRef,
-              style: {
-                position: 'absolute',
-                top: '100%',
-                right: '0px',
-                marginTop: '8px',
-                width: '320px',
-                background: '#ffffff',
-                border: '1px solid hsla(var(--color-neutral), var(--alpha-border-medium))',
-                borderRadius: '8px',
-                boxShadow: '0 6px 20px rgba(59, 76, 106, 0.13), 0 1.34018px 4.46726px rgba(59, 76, 106, 0.0774939), 0 0.399006px 1.33002px rgba(59, 76, 106, 0.0525061)',
-                zIndex: 1000,
-                padding: '16px'
-              }
-            }, React.createElement(SettingsPopupContent, { onClose: () => setShowSettings(false) }))
+              // Settings popup is now rendered as a centered modal (see below)
+              null
             ])
           ]),
           // Description
@@ -6167,7 +6080,33 @@ If neither condition is met, provide analysis only - do not include a query in y
                 }
               }, isLoading ? '...' : 'Send')
             ])
-          ])
+          ]),
+
+          // Settings Modal (centered dialog with backdrop - matches GraphiQL native style)
+          showSettings && React.createElement('div', {
+            key: 'settings-backdrop',
+            onClick: (e) => {
+              if (e.target === e.currentTarget) setShowSettings(false);
+            },
+            style: {
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(59, 75, 104, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100
+            }
+          }, React.createElement('div', {
+            key: 'settings-dialog',
+            ref: settingsRef,
+            className: 'graphiql-dialog',
+            onClick: (e) => e.stopPropagation(),
+            style: { pointerEvents: 'auto' }
+          }, React.createElement(SettingsPopupContent, { onClose: () => setShowSettings(false) })))
         ]);
       };
 
