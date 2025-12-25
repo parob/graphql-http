@@ -3976,7 +3976,20 @@
 
         const schemaContext = buildSchemaContext(schemaData);
 
-        const systemPrompt = `You are a GraphQL query assistant. You help users create and modify GraphQL queries, variables, and headers based on their natural language requests.
+        // Check if tools are enabled before building prompt
+        const toolsEnabled = localStorage.getItem('graphiql:enable-tools') !== 'false';
+
+        const toolsSection = toolsEnabled ? `
+AVAILABLE TOOLS:
+You have access to these tools - USE THEM when relevant:
+- **Google Search**: Use this to look up current/live information (weather, news, documentation, examples, etc.)
+- **Code Execution**: Use this to run Python code for calculations, data processing, or generating examples
+- **URL Context**: Use this to fetch and read content from URLs the user provides
+
+When the user asks about something that requires current information (weather, live data, recent events), USE Google Search to get accurate, up-to-date answers.
+` : '';
+
+        const systemPrompt = `You are a GraphQL query assistant. You help users create and modify GraphQL queries, variables, and headers based on their natural language requests. You can also answer general questions and have normal conversations.
 
 ${schemaContext}
 
@@ -3989,7 +4002,7 @@ ${currentVariables || '{}'}
 
 Headers (JSON):
 ${currentHeaders || '{}'}
-
+${toolsSection}
 INSTRUCTIONS:
 1. Generate valid GraphQL queries based on the schema provided
 2. If the query requires variables, provide them as valid JSON
@@ -4000,10 +4013,12 @@ INSTRUCTIONS:
 7. Always explain what you're doing
 8. Keep your message responses concise and conversational - avoid long lists or excessive formatting
 9. Use simple markdown sparingly: **bold** for emphasis, \`code\` for field names. Avoid headers, numbered lists, or complex formatting
+10. IMPORTANT: Only suggest queries when the user is asking about GraphQL or the schema. For general questions (weather, greetings, off-topic chat), just respond conversationally - do NOT include a query
+11. CRITICAL: NEVER remove, delete, or consolidate content from the editor unless the user EXPLICITLY asks you to. If the editor has multiple operations, your suggestions must include ALL of them. The user's editor content is sacred.
 
 RESPONSE FORMAT - You must respond with valid JSON:
 {
-  "type": "query" | "question" | "suggestion",
+  "type": "query" | "question" | "suggestion" | "chat",
   "message": "Your explanation or question to the user",
   "query": "The complete GraphQL query (only if type is 'query' or 'suggestion')",
   "variables": "JSON string of variables (only if needed, e.g., {\"id\": \"123\"})",
@@ -4012,7 +4027,8 @@ RESPONSE FORMAT - You must respond with valid JSON:
   "suggestions": ["suggestion1", "suggestion2", "suggestion3", "suggestion4"], // REQUIRED: Always include 4 short (2-5 words) contextual follow-up suggestions
   "needsResults": true | false, // Set to true when you need to see the actual query results to provide analysis
   "isNewQuery": true | false, // Set to true when generating a completely new query (not modifying existing)
-  "resultsSummary": "Short description of what you'll analyze when results come back" // Include when suggesting a query
+  "resultsSummary": "Short description of what you'll analyze when results come back", // Include when suggesting a query
+  "executeOperationName": "OperationName" // REQUIRED when query contains multiple operations - specify which one to execute
 }
 
 IMPORTANT RULES:
@@ -4047,7 +4063,8 @@ Examples:
 - Query with variables: {"type": "query", "message": "Here's a query to fetch a user by ID:", "query": "query GetUser($id: ID!) { user(id: $id) { name email } }", "variables": "{\"id\": \"123\"}", "resultsSummary": "Checking user profile data", "suggestions": ["Add more fields", "Remove the variable", "Add pagination", "Filter by role"]}
 - Simple query: {"type": "query", "message": "Here's a query to fetch all users:", "query": "{ users { id name } }", "resultsSummary": "Reviewing the list of users", "suggestions": ["Add email field", "Add pagination", "Filter by status", "Sort by name"]}
 - Asking for clarification: {"type": "question", "message": "Which user ID would you like to look up?", "options": ["Let me enter an ID", "Show all users instead"], "suggestions": ["Show all users", "Search by email", "List recent users", "Count total users"]}
-- Requesting to analyze results: {"type": "query", "message": "Here's the query. Click 'Run & Analyze' and I'll examine the results for you:", "query": "{ users { id name status } }", "needsResults": true, "resultsSummary": "Analysing user status distribution", "suggestions": ["Filter active users", "Sort by name", "Add email field", "Count users"]}`;
+- Requesting to analyze results: {"type": "query", "message": "Here's the query. Click 'Run & Analyze' and I'll examine the results for you:", "query": "{ users { id name status } }", "needsResults": true, "resultsSummary": "Analysing user status distribution", "suggestions": ["Filter active users", "Sort by name", "Add email field", "Count users"]}
+- General chat (no query needed): {"type": "chat", "message": "The weather in London is currently 12°C and cloudy with a chance of rain later today.", "suggestions": ["Back to queries", "Show schema", "Help me build a query", "What can you do?"]}`;
 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -4077,21 +4094,33 @@ Examples:
         // Always add the new user message
         contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
+        // Build request body
+        const requestBody = {
+          // Use systemInstruction to always provide schema context
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          },
+          contents: contents,
+          generationConfig: {
+            responseMimeType: 'application/json'
+          }
+        };
+
+        // Add tools if enabled (Google Search, Code Execution, URL Context)
+        if (toolsEnabled) {
+          requestBody.tools = [
+            { google_search: {} },
+            { code_execution: {} },
+            { url_context: {} }
+          ];
+        }
+
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            // Use systemInstruction to always provide schema context
-            systemInstruction: {
-              parts: [{ text: systemPrompt }]
-            },
-            contents: contents,
-            generationConfig: {
-              responseMimeType: 'application/json'
-            }
-          })
+          body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
@@ -4100,22 +4129,98 @@ Examples:
         }
 
         const data = await response.json();
-        const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const candidate = data.candidates?.[0];
+        const parts = candidate?.content?.parts || [];
+
+        // Extract text content (may be in any part)
+        const textContent = parts.find(p => p.text)?.text;
 
         if (!textContent) {
           throw new Error('No response from AI');
         }
 
+        // Extract tool usage metadata
+        const toolUsage = {};
+
+        // Grounding metadata analysis
+        const groundingMetadata = candidate?.groundingMetadata;
+        if (groundingMetadata) {
+          const searchQueries = groundingMetadata.webSearchQueries || [];
+          const webSources = (groundingMetadata.groundingChunks || [])
+            .filter(c => c.web)
+            .map(c => ({ title: c.web.title, uri: c.web.uri }));
+
+          // If there are search queries, it's Google Search
+          // If there are web sources but NO search queries, it's URL Context
+          const hasSearchQueries = searchQueries.some(q => q && q.trim());
+
+          if (hasSearchQueries) {
+            // Google Search was used
+            toolUsage.googleSearch = {
+              queries: searchQueries,
+              sources: webSources
+            };
+          } else if (webSources.length > 0) {
+            // URL Context was used (web sources without search queries)
+            toolUsage.urlContext = {
+              urls: webSources.map(s => s.uri)
+            };
+          }
+        }
+
+        // Code execution results
+        const executableCode = parts.find(p => p.executableCode);
+        const codeResult = parts.find(p => p.codeExecutionResult);
+        if (executableCode || codeResult) {
+          toolUsage.codeExecution = {
+            language: executableCode?.executableCode?.language || 'PYTHON',
+            code: executableCode?.executableCode?.code || '',
+            outcome: codeResult?.codeExecutionResult?.outcome || '',
+            output: codeResult?.codeExecutionResult?.output || ''
+          };
+        }
+
+        // Also check for retrievedContext (alternative URL context format)
+        const retrievedContextChunks = (groundingMetadata?.groundingChunks || [])
+          .filter(c => c.retrievedContext?.uri);
+        if (retrievedContextChunks.length > 0 && !toolUsage.urlContext) {
+          toolUsage.urlContext = {
+            urls: retrievedContextChunks.map(c => c.retrievedContext.uri)
+          };
+        }
+
+        // Check urlContextMetadata (separate field for URL context tool)
+        const urlContextMetadata = candidate?.urlContextMetadata;
+        if (urlContextMetadata?.urlMetadata?.length > 0) {
+          const successfulUrls = urlContextMetadata.urlMetadata
+            .filter(u => u.urlRetrievalStatus === 'URL_RETRIEVAL_STATUS_SUCCESS')
+            .map(u => u.retrievedUrl);
+          if (successfulUrls.length > 0) {
+            toolUsage.urlContext = {
+              urls: successfulUrls
+            };
+          }
+        }
+
+        // Parse the JSON response
+        let parsedResponse;
         try {
-          return JSON.parse(textContent);
+          parsedResponse = JSON.parse(textContent);
         } catch {
           // If JSON parsing fails, wrap in suggestion
-          return {
+          parsedResponse = {
             type: 'suggestion',
             message: textContent,
             query: null
           };
         }
+
+        // Attach tool usage if any tools were used
+        if (Object.keys(toolUsage).length > 0) {
+          parsedResponse.toolUsage = toolUsage;
+        }
+
+        return parsedResponse;
       };
 
       // Get current query from GraphiQL
@@ -4494,6 +4599,237 @@ Examples:
         });
       };
 
+      // Tool Usage Indicator Component - shows what tools Gemini used
+      const ToolUsageIndicator = ({ toolUsage }) => {
+        if (!toolUsage || Object.keys(toolUsage).length === 0) return null;
+
+        const [expandedTool, setExpandedTool] = React.useState(null);
+
+        const toolIndicators = [];
+
+        // Google Search indicator
+        if (toolUsage.googleSearch && (toolUsage.googleSearch.queries?.length > 0 || toolUsage.googleSearch.sources?.length > 0)) {
+          const { queries = [], sources } = toolUsage.googleSearch;
+          // Get first non-empty query, or fallback to 'web search'
+          const queryText = (queries.find(q => q && q.trim()) || 'web search');
+          const truncatedQuery = queryText.length > 30 ? queryText.slice(0, 30) + '...' : queryText;
+
+          toolIndicators.push(
+            React.createElement('div', {
+              key: 'google-search',
+              style: { marginBottom: expandedTool === 'search' ? '8px' : '4px' }
+            }, [
+              React.createElement('div', {
+                key: 'header',
+                onClick: () => setExpandedTool(expandedTool === 'search' ? null : 'search'),
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: sources.length > 0 ? 'pointer' : 'default',
+                  fontSize: '11px',
+                  color: '#586069'
+                }
+              }, [
+                React.createElement('span', { key: 'icon' }, '\uD83D\uDD0D'),
+                React.createElement('span', { key: 'text' }, `Searched: "${truncatedQuery}"`),
+                sources.length > 0 && React.createElement('span', {
+                  key: 'expand',
+                  style: {
+                    color: '#0366d6',
+                    fontSize: '10px'
+                  }
+                }, expandedTool === 'search' ? '\u25BC' : `\u25B8 ${sources.length} source${sources.length > 1 ? 's' : ''}`)
+              ]),
+              // Expanded sources list
+              expandedTool === 'search' && sources.length > 0 && React.createElement('div', {
+                key: 'sources',
+                style: {
+                  marginTop: '6px',
+                  marginLeft: '20px',
+                  fontSize: '10px',
+                  color: '#586069'
+                }
+              }, sources.slice(0, 5).map((source, idx) =>
+                React.createElement('div', {
+                  key: idx,
+                  style: { marginBottom: '2px' }
+                }, [
+                  React.createElement('a', {
+                    key: 'link',
+                    href: source.uri,
+                    target: '_blank',
+                    rel: 'noopener noreferrer',
+                    style: { color: '#0366d6', textDecoration: 'none' }
+                  }, source.title || source.uri)
+                ])
+              ))
+            ])
+          );
+        }
+
+        // Code Execution indicator
+        if (toolUsage.codeExecution && (toolUsage.codeExecution.code || toolUsage.codeExecution.output)) {
+          const { code, output, outcome } = toolUsage.codeExecution;
+          const outcomeOk = outcome === 'OUTCOME_OK';
+          const shortOutput = output ? (output.length > 40 ? output.slice(0, 40) + '...' : output) : '';
+
+          toolIndicators.push(
+            React.createElement('div', {
+              key: 'code-execution',
+              style: { marginBottom: expandedTool === 'code' ? '8px' : '4px' }
+            }, [
+              React.createElement('div', {
+                key: 'header',
+                onClick: () => setExpandedTool(expandedTool === 'code' ? null : 'code'),
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: '#586069'
+                }
+              }, [
+                React.createElement('span', { key: 'icon' }, '\uD83D\uDCBB'),
+                React.createElement('span', { key: 'text' }, 'Ran code'),
+                outcomeOk && shortOutput && React.createElement('span', {
+                  key: 'output',
+                  style: { color: '#28a745', fontFamily: 'monospace', fontSize: '10px' }
+                }, `\u2192 ${shortOutput}`),
+                !outcomeOk && React.createElement('span', {
+                  key: 'error',
+                  style: { color: '#d73a49', fontSize: '10px' }
+                }, '\u2717 error'),
+                React.createElement('span', {
+                  key: 'expand',
+                  style: { color: '#0366d6', fontSize: '10px' }
+                }, expandedTool === 'code' ? '\u25BC view' : '\u25B8 view')
+              ]),
+              // Expanded code view
+              expandedTool === 'code' && React.createElement('div', {
+                key: 'details',
+                style: {
+                  marginTop: '6px',
+                  marginLeft: '20px',
+                  fontSize: '10px'
+                }
+              }, [
+                code && React.createElement('div', { key: 'code-section' }, [
+                  React.createElement('div', {
+                    key: 'label',
+                    style: { color: '#586069', marginBottom: '2px', fontWeight: 500 }
+                  }, 'Code:'),
+                  React.createElement('pre', {
+                    key: 'code',
+                    style: {
+                      margin: '0 0 8px 0',
+                      padding: '6px',
+                      background: '#f6f8fa',
+                      borderRadius: '4px',
+                      overflow: 'auto',
+                      maxHeight: '100px',
+                      fontSize: '10px',
+                      fontFamily: 'SFMono-Regular, Consolas, monospace'
+                    }
+                  }, code)
+                ]),
+                output && React.createElement('div', { key: 'output-section' }, [
+                  React.createElement('div', {
+                    key: 'label',
+                    style: { color: '#586069', marginBottom: '2px', fontWeight: 500 }
+                  }, 'Output:'),
+                  React.createElement('pre', {
+                    key: 'output',
+                    style: {
+                      margin: 0,
+                      padding: '6px',
+                      background: outcomeOk ? '#f0fff4' : '#ffeef0',
+                      borderRadius: '4px',
+                      overflow: 'auto',
+                      maxHeight: '80px',
+                      fontSize: '10px',
+                      fontFamily: 'SFMono-Regular, Consolas, monospace',
+                      color: outcomeOk ? '#22863a' : '#cb2431'
+                    }
+                  }, output)
+                ])
+              ])
+            ])
+          );
+        }
+
+        // URL Context indicator
+        if (toolUsage.urlContext && toolUsage.urlContext.urls?.length > 0) {
+          const { urls } = toolUsage.urlContext;
+
+          toolIndicators.push(
+            React.createElement('div', {
+              key: 'url-context',
+              style: { marginBottom: expandedTool === 'url' ? '8px' : '4px' }
+            }, [
+              React.createElement('div', {
+                key: 'header',
+                onClick: () => setExpandedTool(expandedTool === 'url' ? null : 'url'),
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: urls.length > 1 ? 'pointer' : 'default',
+                  fontSize: '11px',
+                  color: '#586069'
+                }
+              }, [
+                React.createElement('span', { key: 'icon' }, '\uD83D\uDD17'),
+                React.createElement('span', { key: 'text' }, `Fetched ${urls.length} URL${urls.length > 1 ? 's' : ''}`),
+                urls.length > 1 && React.createElement('span', {
+                  key: 'expand',
+                  style: { color: '#0366d6', fontSize: '10px' }
+                }, expandedTool === 'url' ? '\u25BC' : '\u25B8')
+              ]),
+              // Expanded URLs list
+              (expandedTool === 'url' || urls.length === 1) && React.createElement('div', {
+                key: 'urls',
+                style: {
+                  marginTop: urls.length === 1 ? '2px' : '6px',
+                  marginLeft: '20px',
+                  fontSize: '10px',
+                  color: '#586069'
+                }
+              }, urls.slice(0, 5).map((url, idx) =>
+                React.createElement('div', {
+                  key: idx,
+                  style: { marginBottom: '2px' }
+                },
+                  React.createElement('a', {
+                    href: url,
+                    target: '_blank',
+                    rel: 'noopener noreferrer',
+                    style: {
+                      color: '#0366d6',
+                      textDecoration: 'none',
+                      wordBreak: 'break-all'
+                    }
+                  }, url.length > 50 ? url.slice(0, 50) + '...' : url)
+                )
+              ))
+            ])
+          );
+        }
+
+        if (toolIndicators.length === 0) return null;
+
+        return React.createElement('div', {
+          style: {
+            padding: '8px 10px',
+            background: '#f8f9fa',
+            borderBottom: '1px solid #e1e4e8',
+            borderRadius: '12px 12px 0 0',
+            marginBottom: '-1px'
+          }
+        }, toolIndicators);
+      };
+
       // Message Component with inline diff support
       const MessageComponent = ({ message, onOptionClick, showDiff, diffStatus, onAccept, onReject, onAcceptAndRun, onRunAndAnalyze }) => {
         const isUser = message.role === 'user';
@@ -4522,6 +4858,37 @@ Examples:
         // Checkbox states for Execute and Analyse options
         const [executeEnabled, setExecuteEnabled] = React.useState(true);
         const [analyseEnabled, setAnalyseEnabled] = React.useState(true);
+        const [acceptDropdownOpen, setAcceptDropdownOpen] = React.useState(false);
+        const [dropdownPosition, setDropdownPosition] = React.useState({ top: 0, left: 0 });
+        const acceptBtnRef = React.useRef(null);
+
+        // Get the operation name to execute for display
+        const getExecuteOperationName = () => {
+          if (message.executeOperationName) return message.executeOperationName;
+          if (message.query) {
+            const ops = extractOperationNames(message.query);
+            if (ops.length > 0 && ops[0].name) return ops[0].name;
+          }
+          return 'Query';
+        };
+        const executeOpName = getExecuteOperationName();
+
+        // Close dropdown when clicking outside or scrolling
+        React.useEffect(() => {
+          if (!acceptDropdownOpen) return;
+          const handleClickOutside = () => setAcceptDropdownOpen(false);
+          const handleScroll = () => setAcceptDropdownOpen(false);
+          document.addEventListener('click', handleClickOutside);
+          // Delay adding scroll listener to prevent immediate close
+          const scrollTimeout = setTimeout(() => {
+            window.addEventListener('scroll', handleScroll, true);
+          }, 100);
+          return () => {
+            document.removeEventListener('click', handleClickOutside);
+            clearTimeout(scrollTimeout);
+            window.removeEventListener('scroll', handleScroll, true);
+          };
+        }, [acceptDropdownOpen]);
 
         // Delayed text display for analyzing-status messages
         const [showDisplayText, setShowDisplayText] = React.useState(false);
@@ -4533,13 +4900,15 @@ Examples:
         }, [isAnalyzingStatus]);
 
         // Handler for the Apply button based on checkbox states
-        const handleApply = () => {
+        // mode: 'default' | 'newTab' | 'newQuery'
+        const handleApply = (mode = 'default') => {
+          setAcceptDropdownOpen(false);
           if (analyseEnabled && executeEnabled) {
-            onRunAndAnalyze && onRunAndAnalyze();
+            onRunAndAnalyze && onRunAndAnalyze(mode);
           } else if (executeEnabled) {
-            onAcceptAndRun && onAcceptAndRun();
+            onAcceptAndRun && onAcceptAndRun(mode);
           } else {
-            onAccept && onAccept();
+            onAccept && onAccept(mode);
           }
         };
 
@@ -4607,6 +4976,9 @@ Examples:
           ]);
         };
 
+        // Check if message has tool usage (assistant messages only)
+        const hasToolUsage = !isUser && message.toolUsage && Object.keys(message.toolUsage).length > 0;
+
         return React.createElement('div', {
           style: {
             display: 'flex',
@@ -4620,7 +4992,6 @@ Examples:
             key: 'bubble',
             style: {
               maxWidth: '85%',
-              padding: '10px 14px',
               borderRadius: '12px',
               background: isUser ? '#e3f2fd' :
                           isSystem ? 'var(--color-base-bg, #f6f8fa)' :
@@ -4631,9 +5002,20 @@ Examples:
                      message.type === 'error' ? '#d73a49' : 'var(--color-base)',
               fontSize: '13px',
               lineHeight: '1.5',
-              border: isResultsFeedback ? '1px solid #e1e4e8' : 'none'
+              border: isResultsFeedback ? '1px solid #e1e4e8' : 'none',
+              overflow: 'hidden'
             }
           }, [
+            // Tool usage indicator (for assistant messages with tool usage)
+            hasToolUsage && React.createElement(ToolUsageIndicator, {
+              key: 'tool-usage',
+              toolUsage: message.toolUsage
+            }),
+            // Main content wrapper with padding
+            React.createElement('div', {
+              key: 'content-wrapper',
+              style: { padding: '10px 14px' }
+            }, [
             // For results-feedback, show only the Response Data expandable
             isResultsFeedback ? React.createElement('details', {
               key: 'payload',
@@ -4744,7 +5126,8 @@ Examples:
                 }
               }, option)
             ))
-          ]),
+          ])  // Close content-wrapper
+          ]),  // Close bubble
 
           // Inline diff viewer for messages with changes
           showDiff && hasChanges && React.createElement('div', {
@@ -4923,9 +5306,9 @@ Examples:
                 onClick: (e) => {
                   e.preventDefault();
                   if (analyseEnabled) {
-                    onRunAndAnalyze && onRunAndAnalyze();
+                    onRunAndAnalyze && onRunAndAnalyze('default');
                   } else {
-                    onAcceptAndRun && onAcceptAndRun();
+                    onAcceptAndRun && onAcceptAndRun('default');
                   }
                 },
                 style: {
@@ -4938,7 +5321,7 @@ Examples:
                   fontWeight: '500',
                   color: 'white'
                 }
-              }, 'Execute Query')
+              }, `Execute ${executeOpName}`)
             ] : [
               // Dismiss button - only show when pending (can't dismiss what's already applied)
               isPending && React.createElement('button', {
@@ -4983,7 +5366,7 @@ Examples:
                   },
                   style: { margin: 0, cursor: 'pointer' }
                 }),
-                'Execute Query'
+                `Execute ${executeOpName}`
               ]),
 
               // Analyse checkbox
@@ -5010,22 +5393,129 @@ Examples:
                 'Analyse Response'
               ]),
 
-              // Single Accept button
-              React.createElement('button', {
-                key: 'accept',
-                type: 'button',
-                onClick: (e) => { e.preventDefault(); handleApply(); },
+              // Split Accept button with dropdown
+              React.createElement('div', {
+                key: 'accept-split',
+                ref: acceptBtnRef,
                 style: {
-                  padding: '5px 12px',
-                  background: 'var(--color-base-bg, white)',
-                  border: '1px solid #28a745',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  color: '#28a745',
-                  fontWeight: '500'
+                  position: 'relative',
+                  display: 'flex'
                 }
-              }, 'Accept')
+              }, [
+                // Main Accept button
+                React.createElement('button', {
+                  key: 'accept-main',
+                  type: 'button',
+                  onClick: (e) => { e.preventDefault(); handleApply('default'); },
+                  style: {
+                    padding: acceptDropdownOpen ? '5px 12px 6px 12px' : '5px 12px',
+                    minWidth: '130px',
+                    background: 'var(--color-base-bg, white)',
+                    border: '1px solid #28a745',
+                    borderRadius: acceptDropdownOpen ? '4px 0 0 0' : '4px 0 0 4px',
+                    borderRight: 'none',
+                    borderBottom: acceptDropdownOpen ? 'none' : '1px solid #28a745',
+                    cursor: 'pointer',
+                    fontSize: '11px',
+                    color: '#28a745',
+                    fontWeight: '500'
+                  }
+                }, 'Accept'),
+                // Dropdown arrow button
+                React.createElement('button', {
+                  key: 'accept-dropdown-btn',
+                  type: 'button',
+                  onClick: (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!acceptDropdownOpen && acceptBtnRef.current) {
+                      const rect = acceptBtnRef.current.getBoundingClientRect();
+                      setDropdownPosition({
+                        top: rect.bottom - 2,
+                        left: rect.left,
+                        width: rect.width
+                      });
+                    }
+                    setAcceptDropdownOpen(!acceptDropdownOpen);
+                  },
+                  style: {
+                    padding: acceptDropdownOpen ? '5px 6px 6px 6px' : '5px 6px',
+                    background: 'var(--color-base-bg, white)',
+                    border: '1px solid #28a745',
+                    borderRadius: acceptDropdownOpen ? '0 4px 0 0' : '0 4px 4px 0',
+                    borderBottom: acceptDropdownOpen ? 'none' : '1px solid #28a745',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    color: '#28a745',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }
+                }, '▾'),
+              ]),
+
+              // Dropdown menu (rendered outside the button container using fixed positioning)
+              acceptDropdownOpen && React.createElement('div', {
+                key: 'accept-dropdown-menu',
+                onClick: (e) => e.stopPropagation(),
+                style: {
+                  position: 'fixed',
+                  top: dropdownPosition.top,
+                  left: dropdownPosition.left,
+                  width: dropdownPosition.width || 'auto',
+                  background: 'var(--color-base-bg, white)',
+                  borderLeft: '1px solid #28a745',
+                  borderRight: '1px solid #28a745',
+                  borderBottom: '1px solid #28a745',
+                  borderRadius: '0 0 4px 4px',
+                  zIndex: 10000,
+                  overflow: 'hidden',
+                  boxSizing: 'border-box',
+                  whiteSpace: 'nowrap'
+                }
+              }, [
+                  React.createElement('button', {
+                    key: 'opt-newquery',
+                    type: 'button',
+                    onClick: (e) => { e.preventDefault(); handleApply('newQuery'); },
+                    style: {
+                      display: 'block',
+                      width: '100%',
+                      padding: '6px 12px',
+                      background: 'none',
+                      border: 'none',
+                      borderTop: '1px solid #28a745',
+                      borderBottom: '1px solid rgba(40, 167, 69, 0.3)',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      color: '#28a745',
+                      fontWeight: '500',
+                      boxSizing: 'border-box'
+                    },
+                    onMouseEnter: (e) => e.target.style.background = 'rgba(40, 167, 69, 0.1)',
+                    onMouseLeave: (e) => e.target.style.background = 'none'
+                  }, 'Accept as New Query'),
+                  React.createElement('button', {
+                    key: 'opt-newtab',
+                    type: 'button',
+                    onClick: (e) => { e.preventDefault(); handleApply('newTab'); },
+                    style: {
+                      display: 'block',
+                      width: '100%',
+                      padding: '6px 12px',
+                      background: 'none',
+                      border: 'none',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      color: '#28a745',
+                      fontWeight: '500',
+                      boxSizing: 'border-box'
+                    },
+                    onMouseEnter: (e) => e.target.style.background = 'rgba(40, 167, 69, 0.1)',
+                    onMouseLeave: (e) => e.target.style.background = 'none'
+                  }, 'Accept in New Tab')
+                ])
             ].filter(Boolean)),
 
             // Analyzing indicator - show when running query for analysis
@@ -5080,6 +5570,9 @@ Examples:
         );
         const [persistChat, setPersistChat] = React.useState(() =>
           localStorage.getItem('graphiql:persist-chat') !== 'false' // default true
+        );
+        const [enableTools, setEnableTools] = React.useState(() =>
+          localStorage.getItem('graphiql:enable-tools') !== 'false' // default true
         );
         const [models, setModels] = React.useState([]);
         const [loadingModels, setLoadingModels] = React.useState(false);
@@ -5152,6 +5645,12 @@ Examples:
           if (!enabled) {
             localStorage.removeItem('graphiql:chat-messages');
           }
+        };
+
+        // Auto-save tools setting when changed
+        const handleToolsChange = (enabled) => {
+          setEnableTools(enabled);
+          localStorage.setItem('graphiql:enable-tools', enabled ? 'true' : 'false');
         };
 
         return React.createElement(React.Fragment, null, [
@@ -5263,6 +5762,28 @@ Examples:
                 type: 'button',
                 className: !persistChat ? 'graphiql-button active' : 'graphiql-button',
                 onClick: () => handlePersistChatChange(false)
+              }, 'Off')
+            ])
+          ]),
+
+          // Tools toggle Section
+          React.createElement('div', { key: 'tools-section', className: 'graphiql-dialog-section' }, [
+            React.createElement('div', { key: 'info' }, [
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Tools'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Allow AI to search Google, fetch URLs, and execute code.')
+            ]),
+            React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' }, [
+              React.createElement('button', {
+                key: 'on',
+                type: 'button',
+                className: enableTools ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => handleToolsChange(true)
+              }, 'On'),
+              React.createElement('button', {
+                key: 'off',
+                type: 'button',
+                className: !enableTools ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => handleToolsChange(false)
               }, 'Off')
             ])
           ])
@@ -5385,6 +5906,244 @@ Examples:
             }
           }
         }, [editorContext]);
+
+        // Function to create a new GraphiQL tab with the given content
+        // Options: { autoExecute: boolean }
+        const createNewTab = React.useCallback(({ query, variables, headers }, options = {}) => {
+          // Find and click the "+" button to add a new tab in GraphiQL
+          const addTabButton = document.querySelector('.graphiql-tab-add') ||
+                               document.querySelector('[aria-label="Add tab"]') ||
+                               document.querySelector('button[title="Add tab"]');
+
+          if (addTabButton) {
+            addTabButton.click();
+
+            // Wait for the new tab to be created, then set its content
+            setTimeout(() => {
+              setEditorState({ query, variables, headers });
+
+              // Auto-execute if requested
+              if (options.autoExecute) {
+                setTimeout(() => {
+                  const executeButton = document.querySelector('.graphiql-execute-button');
+                  if (executeButton) {
+                    executeButton.click();
+                  }
+                }, 100);
+              }
+            }, 50);
+          } else {
+            // Fallback: just update current tab if we can't create a new one
+            console.warn('Could not find add tab button, updating current tab instead');
+            setEditorState({ query, variables, headers });
+
+            if (options.autoExecute) {
+              setTimeout(() => {
+                const executeButton = document.querySelector('.graphiql-execute-button');
+                if (executeButton) {
+                  executeButton.click();
+                }
+              }, 100);
+            }
+          }
+        }, [setEditorState]);
+
+        // Helper to extract all operation names from a GraphQL query string
+        const extractOperationNames = (queryStr) => {
+          if (!queryStr) return [];
+          const names = [];
+          // Match: query Name, mutation Name, subscription Name (with optional name)
+          const regex = /\b(query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)?/g;
+          let match;
+          while ((match = regex.exec(queryStr)) !== null) {
+            names.push({
+              type: match[1],
+              name: match[2] || null,
+              index: match.index
+            });
+          }
+          // Also match shorthand queries: { ... } at the start (unnamed query)
+          if (/^\s*\{/.test(queryStr) && !names.some(n => n.index < queryStr.indexOf('{'))) {
+            names.unshift({ type: 'query', name: null, index: 0 });
+          }
+          return names;
+        };
+
+        // Helper to generate a unique operation name
+        const makeUniqueOperationName = (baseName, existingNames) => {
+          if (!existingNames.includes(baseName)) return baseName;
+          let counter = 2;
+          while (existingNames.includes(baseName + counter)) {
+            counter++;
+          }
+          return baseName + counter;
+        };
+
+        // Helper to rename operations in a query string to avoid conflicts
+        const renameOperationsInQuery = (queryStr, existingNames) => {
+          const operations = extractOperationNames(queryStr);
+          if (operations.length === 0) return { query: queryStr, operationName: null };
+
+          let renamedQuery = queryStr;
+          let finalOperationName = null;
+          const usedNames = [...existingNames];
+
+          // Process operations in reverse order to preserve indices
+          for (let i = operations.length - 1; i >= 0; i--) {
+            const op = operations[i];
+            const typeWord = op.type;
+
+            if (op.name) {
+              // Named operation - check for conflict
+              const uniqueName = makeUniqueOperationName(op.name, usedNames);
+              if (uniqueName !== op.name) {
+                // Need to rename
+                const searchStr = typeWord + ' ' + op.name;
+                const replaceStr = typeWord + ' ' + uniqueName;
+                renamedQuery = renamedQuery.substring(0, op.index) +
+                               renamedQuery.substring(op.index).replace(searchStr, replaceStr);
+              }
+              usedNames.push(uniqueName);
+              if (i === 0) finalOperationName = uniqueName;
+            } else {
+              // Unnamed operation - generate a name
+              const baseTypeName = typeWord.charAt(0).toUpperCase() + typeWord.slice(1);
+              const uniqueName = makeUniqueOperationName(baseTypeName + '1', usedNames);
+              // Insert the name after the type keyword
+              const insertPos = op.index + typeWord.length;
+              // Check if it's a shorthand query (starts with {)
+              if (op.index === 0 && /^\s*\{/.test(queryStr)) {
+                renamedQuery = 'query ' + uniqueName + ' ' + renamedQuery.trim();
+              } else {
+                renamedQuery = renamedQuery.substring(0, insertPos) + ' ' + uniqueName + renamedQuery.substring(insertPos);
+              }
+              usedNames.push(uniqueName);
+              if (i === 0) finalOperationName = uniqueName;
+            }
+          }
+
+          return { query: renamedQuery, operationName: finalOperationName };
+        };
+
+        // Helper to replace a specific operation in the editor by name
+        // Returns the updated query string, or null if operation not found
+        const replaceOperationInEditor = (operationName, newOperationQuery) => {
+          const currentQuery = getEditorState().query || '';
+          if (!operationName || !currentQuery) return null;
+
+          // Find all operations in current query
+          const operations = extractOperationNames(currentQuery);
+          const targetOp = operations.find(op => op.name === operationName);
+
+          if (!targetOp) return null;
+
+          // Find the end of this operation (next operation start or end of string)
+          const opIndex = targetOp.index;
+          let endIndex = currentQuery.length;
+
+          // Find the next operation that starts after this one
+          for (const op of operations) {
+            if (op.index > opIndex && op.index < endIndex) {
+              endIndex = op.index;
+            }
+          }
+
+          // Also check for "# ---" separators
+          const separatorMatch = currentQuery.substring(opIndex).match(/\n\n# ---/);
+          if (separatorMatch) {
+            const separatorPos = opIndex + separatorMatch.index;
+            if (separatorPos < endIndex) {
+              endIndex = separatorPos;
+            }
+          }
+
+          // Build the new query
+          const before = currentQuery.substring(0, opIndex);
+          const after = currentQuery.substring(endIndex);
+
+          // Extract operation name from new query for consistency
+          const newOps = extractOperationNames(newOperationQuery);
+          let finalNewQuery = newOperationQuery.trim();
+
+          // If the new query doesn't have the same operation name, rename it
+          if (newOps.length > 0 && newOps[0].name !== operationName) {
+            const newOpName = newOps[0].name;
+            if (newOpName) {
+              finalNewQuery = finalNewQuery.replace(
+                new RegExp(`\\b(query|mutation|subscription)\\s+${newOpName}\\b`),
+                `$1 ${operationName}`
+              );
+            }
+          }
+
+          return before + finalNewQuery + after;
+        };
+
+        // Function to append a new query to the existing editor content
+        const appendQuery = React.useCallback(({ query, variables, headers }, options = {}) => {
+          // Get current query
+          const currentQuery = getEditorState().query || '';
+
+          // Get existing operation names
+          const existingOps = extractOperationNames(currentQuery);
+          const existingNames = existingOps.map(op => op.name).filter(Boolean);
+
+          // Rename operations in new query if there are conflicts
+          const { query: renamedNewQuery, operationName } = renameOperationsInQuery(query || '', existingNames);
+
+          // Append new query with a separator
+          const separator = currentQuery.trim() ? '\n\n# --- New Query ---\n\n' : '';
+          const combinedQuery = currentQuery + separator + renamedNewQuery;
+
+          // Set the combined query
+          setEditorState({ query: combinedQuery, variables, headers });
+
+          // Auto-execute if requested - use operationName to run the specific query
+          if (options.autoExecute && operationName) {
+            setTimeout(() => {
+              window._pendingOperationName = operationName;
+
+              // Force CodeMirror to recognize the new content
+              const cmContent = document.querySelector('.graphiql-query-editor .cm-content');
+              if (cmContent) {
+                cmContent.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+
+              const executeButton = document.querySelector('.graphiql-execute-button');
+              if (executeButton) {
+                // Helper to find and click the operation in dropdown
+                const clickOperation = () => {
+                  const items = document.querySelectorAll('.graphiql-dropdown-item, [role="menuitem"]');
+                  for (const item of items) {
+                    if (item.textContent.trim() === operationName) {
+                      item.click();
+                      return true;
+                    }
+                  }
+                  return false;
+                };
+
+                // Trigger execute button with pointer events (Radix UI)
+                executeButton.focus();
+                executeButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true }));
+                executeButton.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true }));
+                executeButton.click();
+
+                // Wait for dropdown and click the operation
+                const tryClickOperation = (attempt) => {
+                  if (clickOperation()) return;
+                  if (attempt < 5) {
+                    setTimeout(() => tryClickOperation(attempt + 1), 100);
+                  }
+                };
+
+                setTimeout(() => tryClickOperation(1), 100);
+              }
+            }, 500);
+          }
+
+          return operationName;
+        }, [getEditorState, setEditorState]);
 
         // Sync messages to global state and localStorage
         React.useEffect(() => {
@@ -5531,7 +6290,9 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
               options: response.options,
               needsResults: response.needsResults || false,
               isNewQuery: response.isNewQuery || false,
-              resultsSummary: response.resultsSummary || null
+              resultsSummary: response.resultsSummary || null,
+              toolUsage: response.toolUsage || null,
+              executeOperationName: response.executeOperationName || null
             };
 
             // Add original state and diffStatus to messages with changes
@@ -5566,41 +6327,181 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
           sendMessage(option);
         };
 
-        // Accept suggestion - takes message index (works for both pending and applied)
-        const handleAccept = (msgIndex) => {
-          setMessages(prev => prev.map((msg, idx) => {
-            if (idx === msgIndex && (msg.diffStatus === 'pending' || msg.diffStatus === 'applied')) {
-              setEditorState({
-                query: msg.query,
-                variables: msg.variables,
-                headers: msg.headers
-              });
-              return { ...msg, diffStatus: 'applied' };
-            }
-            return msg;
-          }));
-        };
+        // Accept suggestion - takes message index and mode ('default', 'newTab', 'newQuery')
+        const handleAccept = (msgIndex, mode = 'default') => {
+          console.log('[handleAccept] Called with msgIndex:', msgIndex, 'mode:', mode);
+          const msg = messages[msgIndex];
+          console.log('[handleAccept] Message:', msg?.diffStatus, 'executeOperationName:', msg?.executeOperationName);
+          if (!msg || (msg.diffStatus !== 'pending' && msg.diffStatus !== 'applied')) return;
 
-        // Accept and run - takes message index (works for both pending and applied)
-        const handleAcceptAndRun = (msgIndex) => {
-          setMessages(prev => prev.map((msg, idx) => {
-            if (idx === msgIndex && (msg.diffStatus === 'pending' || msg.diffStatus === 'applied')) {
-              setEditorState({
-                query: msg.query,
-                variables: msg.variables,
-                headers: msg.headers
-              });
-              // Trigger query execution
-              setTimeout(() => {
+          // Update message status
+          setMessages(prev => prev.map((m, idx) =>
+            idx === msgIndex ? { ...m, diffStatus: 'applied' } : m
+          ));
+
+          // Handle the action based on mode
+          if (mode === 'newTab') {
+            createNewTab({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            });
+          } else if (mode === 'newQuery') {
+            appendQuery({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            });
+          } else {
+            // Default mode: check if we should replace just one operation
+            let queryToSet = msg.query;
+
+            if (msg.targetOperationName && !msg.executeOperationName) {
+              // This is an analysis fix - try to replace only the target operation
+              const updatedQuery = replaceOperationInEditor(msg.targetOperationName, msg.query);
+              if (updatedQuery) {
+                queryToSet = updatedQuery;
+              }
+            }
+
+            setEditorState({
+              query: queryToSet,
+              variables: msg.variables,
+              headers: msg.headers
+            });
+
+            // If there are multiple operations, pre-set which one to execute
+            const operationToExecute = msg.executeOperationName || msg.targetOperationName;
+            if (operationToExecute) {
+              // Check if the resulting query has multiple operations
+              const resultOps = extractOperationNames(queryToSet);
+              if (resultOps.length > 1) {
+                window._pendingOperationName = operationToExecute;
+                console.log('[Accept] Pre-set pending operation for multi-op editor:', operationToExecute);
+
+                // Listen for execute button click to handle dropdown selection
                 const executeButton = document.querySelector('.graphiql-execute-button');
                 if (executeButton) {
-                  executeButton.click();
+                  const handleExecuteClick = () => {
+                    // After dropdown appears, click the right operation
+                    setTimeout(() => {
+                      const items = document.querySelectorAll('.graphiql-dropdown-item, [role="menuitem"]');
+                      for (const item of items) {
+                        if (item.textContent.trim() === operationToExecute) {
+                          item.click();
+                          break;
+                        }
+                      }
+                    }, 100);
+                    // Remove listener after first use
+                    executeButton.removeEventListener('click', handleExecuteClick);
+                  };
+                  executeButton.addEventListener('click', handleExecuteClick);
                 }
-              }, 150);
-              return { ...msg, diffStatus: 'applied' };
+              }
             }
-            return msg;
-          }));
+          }
+        };
+
+        // Accept and run - takes message index and mode ('default', 'newTab', 'newQuery')
+        const handleAcceptAndRun = (msgIndex, mode = 'default') => {
+          console.log('[handleAcceptAndRun] Called with msgIndex:', msgIndex, 'mode:', mode);
+          const msg = messages[msgIndex];
+          console.log('[handleAcceptAndRun] Message:', msg?.diffStatus, 'executeOperationName:', msg?.executeOperationName);
+          if (!msg || (msg.diffStatus !== 'pending' && msg.diffStatus !== 'applied')) return;
+
+          // Update message status
+          setMessages(prev => prev.map((m, idx) =>
+            idx === msgIndex ? { ...m, diffStatus: 'applied' } : m
+          ));
+
+          // Handle the action based on mode
+          if (mode === 'newTab') {
+            createNewTab({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            }, { autoExecute: true });
+          } else if (mode === 'newQuery') {
+            // Append and auto-execute with operationName to specify which query to run
+            appendQuery({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            }, { autoExecute: true });
+          } else {
+            // Default mode: check if we should replace just one operation
+            let queryToSet = msg.query;
+
+            // If we have a target operation and query has multiple ops, try to replace just that one
+            if (msg.targetOperationName && !msg.executeOperationName) {
+              const updatedQuery = replaceOperationInEditor(msg.targetOperationName, msg.query);
+              if (updatedQuery) {
+                queryToSet = updatedQuery;
+              }
+            }
+
+            // Check if query has multiple operations
+            const queryOps = extractOperationNames(queryToSet);
+            const hasMultipleOps = queryOps.length > 1;
+
+            // Determine which operation to execute
+            let operationToExecute = msg.executeOperationName || msg.targetOperationName || null;
+
+            // If multiple ops but no explicit execute name, use the first named operation
+            if (hasMultipleOps && !operationToExecute && queryOps.length > 0) {
+              operationToExecute = queryOps[0].name;
+            }
+
+            console.log('[AcceptAndRun] Query has', queryOps.length, 'operations, executeOperationName:', operationToExecute);
+
+            setEditorState({
+              query: queryToSet,
+              variables: msg.variables,
+              headers: msg.headers
+            });
+
+            // Trigger query execution after editor updates
+            setTimeout(() => {
+              const executeButton = document.querySelector('.graphiql-execute-button');
+              console.log('[AcceptAndRun] Execute button found:', !!executeButton);
+
+              if (executeButton) {
+                // Set pending operation name for fetcher
+                if (operationToExecute) {
+                  window._pendingOperationName = operationToExecute;
+                  console.log('[AcceptAndRun] Set pending operation:', operationToExecute);
+                }
+
+                // Click execute button
+                executeButton.focus();
+                executeButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true }));
+                executeButton.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true }));
+                executeButton.click();
+                console.log('[AcceptAndRun] Clicked execute button');
+
+                // If multi-operation, click the right one in dropdown
+                if (hasMultipleOps && operationToExecute) {
+                  const tryClickDropdown = (attempt) => {
+                    const items = document.querySelectorAll('.graphiql-dropdown-item, [role="menuitem"]');
+                    console.log('[AcceptAndRun] Attempt', attempt, '- Found', items.length, 'dropdown items');
+                    for (const item of items) {
+                      if (item.textContent.trim() === operationToExecute) {
+                        console.log('[AcceptAndRun] Clicking dropdown item:', operationToExecute);
+                        item.click();
+                        return true;
+                      }
+                    }
+                    if (attempt < 5) {
+                      setTimeout(() => tryClickDropdown(attempt + 1), 100);
+                    }
+                    return false;
+                  };
+                  setTimeout(() => tryClickDropdown(1), 100);
+                }
+              }
+            }, 300);
+          }
         };
 
         // Reject suggestion - takes message index
@@ -5628,9 +6529,11 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
           return null;
         };
 
-        // Run query and analyze results - takes message index (works for both pending and applied)
-        const handleRunAndAnalyze = async (msgIndex) => {
+        // Run query and analyze results - takes message index and mode ('default', 'newTab', 'newQuery')
+        const handleRunAndAnalyze = async (msgIndex, mode = 'default') => {
+          console.log('[handleRunAndAnalyze] Called with msgIndex:', msgIndex, 'mode:', mode);
           const msg = messages[msgIndex];
+          console.log('[handleRunAndAnalyze] Message:', msg?.diffStatus, 'executeOperationName:', msg?.executeOperationName);
           if (!msg || (msg.diffStatus !== 'pending' && msg.diffStatus !== 'applied')) return;
 
           // 1. Set status to analyzing
@@ -5638,20 +6541,42 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
             idx === msgIndex ? { ...m, diffStatus: 'analyzing' } : m
           ));
 
-          // 2. Apply the query to editor
-          setEditorState({
-            query: msg.query,
-            variables: msg.variables,
-            headers: msg.headers
-          });
+          // 2. Handle different modes
+          if (mode === 'newTab') {
+            const addTabButton = document.querySelector('.graphiql-tab-add') ||
+                                 document.querySelector('[aria-label="Add tab"]') ||
+                                 document.querySelector('button[title="Add tab"]');
+            if (addTabButton) {
+              addTabButton.click();
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            setEditorState({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            });
+          } else if (mode === 'newQuery') {
+            // Append with autoExecute - appendQuery handles clicking execute with operationName
+            appendQuery({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            }, { autoExecute: true });
+          } else {
+            setEditorState({
+              query: msg.query,
+              variables: msg.variables,
+              headers: msg.headers
+            });
+          }
 
           try {
             // 3. Wait for editor to update with new query
             await new Promise(resolve => setTimeout(resolve, 300));
 
-            // Verify the query was applied
+            // Verify the query was applied (skip for newQuery mode since it appends)
             const currentEditorQuery = getEditorState().query;
-            if (currentEditorQuery.trim() !== (msg.query || '').trim()) {
+            if (mode !== 'newQuery' && currentEditorQuery.trim() !== (msg.query || '').trim()) {
               // Try applying again
               setEditorState({
                 query: msg.query,
@@ -5661,17 +6586,48 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
               await new Promise(resolve => setTimeout(resolve, 300));
             }
 
-            // 4. Click the execute button and wait for response
-            const executeButton = document.querySelector('.graphiql-execute-button');
-            if (!executeButton) {
-              throw new Error('Execute button not found');
-            }
-
             // Get current response to detect when it changes
             const oldResponse = getResponseFromEditor();
 
-            // Click execute
-            executeButton.click();
+            // 4. Click the execute button (skip for newQuery - appendQuery handles it)
+            if (mode !== 'newQuery') {
+              const executeButton = document.querySelector('.graphiql-execute-button');
+              if (!executeButton) {
+                throw new Error('Execute button not found');
+              }
+
+              // Check if query has multiple operations
+              const queryOps = extractOperationNames(msg.query);
+              const hasMultipleOps = queryOps.length > 1;
+              const operationToExecute = msg.executeOperationName || msg.targetOperationName || (queryOps[0]?.name);
+
+              console.log('[RunAndAnalyze] Query has', queryOps.length, 'ops, executing:', operationToExecute);
+
+              // Set pending operation name for fetcher
+              if (operationToExecute) {
+                window._pendingOperationName = operationToExecute;
+              }
+
+              // Use pointer events for Radix UI
+              executeButton.focus();
+              executeButton.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, isPrimary: true }));
+              executeButton.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, isPrimary: true }));
+              executeButton.click();
+
+              // If multi-operation, click the right one in dropdown
+              if (hasMultipleOps && operationToExecute) {
+                await new Promise(resolve => setTimeout(resolve, 150));
+                const items = document.querySelectorAll('.graphiql-dropdown-item, [role="menuitem"]');
+                console.log('[RunAndAnalyze] Found', items.length, 'dropdown items');
+                for (const item of items) {
+                  if (item.textContent.trim() === operationToExecute) {
+                    console.log('[RunAndAnalyze] Clicking dropdown item:', operationToExecute);
+                    item.click();
+                    break;
+                  }
+                }
+              }
+            }
 
             // 4. Wait for the response (poll every 200ms, max 10 seconds)
             // Strategy: First wait for response to clear/change (loading started),
@@ -5761,10 +6717,19 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
             }
             updatedMessages.push(resultsMessage);
 
+            // Get current editor state for context
+            const currentEditorState = getEditorState();
+
+            // Check if editor has multiple operations
+            const editorOperations = extractOperationNames(currentEditorState.query || '');
+            const hasMultipleOps = editorOperations.length > 1;
+            console.log('[Analysis] Editor operations:', editorOperations.length, editorOperations.map(o => o.name || 'unnamed'));
+            console.log('[Analysis] Has multiple ops:', hasMultipleOps);
+
             // Build analysis prompt with context
             const analysisPrompt = `The user clicked "Apply, Run & Analyse" to execute the suggested query and see the results.
 
-Query that was executed:
+Query that was executed (operationName: ${window._pendingOperationName || 'unknown'}):
 \`\`\`graphql
 ${msg.query}
 \`\`\`
@@ -5781,13 +6746,22 @@ Please analyse these results. Focus on:
 IMPORTANT: Do NOT suggest new queries or modifications unless:
 1. There is an actual error in the response that needs fixing, OR
 2. The user has explicitly asked for changes, improvements, or new queries in the conversation
-If neither condition is met, provide analysis only - do not include a query in your response.`;
+If neither condition is met, provide analysis only - do not include a query in your response.
+${hasMultipleOps ? `
+CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.length} operations (${editorOperations.map(o => o.name || 'unnamed').join(', ')}).
+- NEVER remove, delete, consolidate, or merge operations unless the user EXPLICITLY asks you to
+- NEVER return just one operation when there are multiple - always return ALL operations
+- If you suggest a fix, your "query" field MUST include ALL ${editorOperations.length} operations exactly as they appear in the editor, with only the minimal fix applied to the problematic operation
+- Preserve the exact structure, order, and content of all operations
+- If an operation needs a name, just add the name - don't change anything else
+- REQUIRED: Include "executeOperationName" in your response to specify which operation should be executed when the user clicks Accept & Run
+- The user's editor content is sacred - modifying it without permission is unacceptable` : ''}`;
 
             const response = await callGeminiAPI(
               analysisPrompt,
-              msg.query,
-              msg.variables,
-              msg.headers,
+              currentEditorState.query || msg.query,
+              currentEditorState.variables || msg.variables,
+              currentEditorState.headers || msg.headers,
               updatedMessages
             );
 
@@ -5802,20 +6776,37 @@ If neither condition is met, provide analysis only - do not include a query in y
               options: response.options,
               needsResults: response.needsResults || false,
               isNewQuery: response.isNewQuery || false,
-              resultsSummary: response.resultsSummary || null
+              resultsSummary: response.resultsSummary || null,
+              toolUsage: response.toolUsage || null,
+              executeOperationName: response.executeOperationName || null
             };
 
-            // Add diff status only if there are ACTUAL changes (not just the same query returned)
-            const queryChanged = response.query && (response.query || '').trim() !== (msg.query || '').trim();
-            const variablesChanged = response.variables && (response.variables || '').trim() !== (msg.variables || '').trim();
-            const headersChanged = response.headers && (response.headers || '').trim() !== (msg.headers || '').trim();
-            const hasActualChanges = queryChanged || variablesChanged || headersChanged;
+            console.log('[Analysis] AI response - type:', response.type, 'executeOperationName:', response.executeOperationName);
 
-            if ((response.type === 'query' || response.type === 'suggestion') && hasActualChanges) {
-              analysisMessage.originalQuery = msg.query;
-              analysisMessage.originalVariables = msg.variables;
-              analysisMessage.originalHeaders = msg.headers;
+            // If analysis returns a query (type 'query' or 'suggestion'), show it with buttons
+            // This includes re-suggestions of the same query (e.g., to fix errors)
+            const hasQuerySuggestion = response.query && (response.type === 'query' || response.type === 'suggestion');
+
+            if (hasQuerySuggestion) {
+              // Override type to 'suggestion' so buttons are shown
+              analysisMessage.type = 'suggestion';
+              // Use current editor state as original for diff (not the previous message)
+              const currentState = getEditorState();
+              analysisMessage.originalQuery = currentState.query || '';
+              analysisMessage.originalVariables = currentState.variables || '{}';
+              analysisMessage.originalHeaders = currentState.headers || '{}';
               analysisMessage.diffStatus = 'pending';
+
+              // Store the target operation name so we can replace just this operation
+              // (instead of replacing the entire editor)
+              const executedOps = extractOperationNames(msg.query);
+              console.log('[Analysis] Executed ops:', executedOps);
+              if (executedOps.length > 0 && executedOps[0].name) {
+                analysisMessage.targetOperationName = executedOps[0].name;
+                console.log('[Analysis] Set targetOperationName:', analysisMessage.targetOperationName);
+              } else {
+                console.log('[Analysis] No operation name found in executed query');
+              }
             }
 
             // Remove the analyzing-status message and add the real response
@@ -6023,10 +7014,10 @@ If neither condition is met, provide analysis only - do not include a query in y
                 onOptionClick: handleOptionClick,
                 showDiff: hasChangesWithDiff,
                 diffStatus: msg.diffStatus,
-                onAccept: () => handleAccept(idx),
+                onAccept: (mode) => handleAccept(idx, mode),
                 onReject: () => handleReject(idx),
-                onAcceptAndRun: () => handleAcceptAndRun(idx),
-                onRunAndAnalyze: () => handleRunAndAnalyze(idx)
+                onAcceptAndRun: (mode) => handleAcceptAndRun(idx, mode),
+                onRunAndAnalyze: (mode) => handleRunAndAnalyze(idx, mode)
               });
             }),
 
@@ -6255,9 +7246,23 @@ If neither condition is met, provide analysis only - do not include a query in y
       const { query, variables, operationName, ...rest } = params;
       const fetchURL = '?' + new URLSearchParams(rest).toString();
 
-      const fetcher = createGraphiQLFetcher({
+      const baseFetcher = createGraphiQLFetcher({
         url: fetchURL
       });
+
+      // Wrap fetcher to support pending operation name from appendQuery
+      const fetcher = (graphQLParams, opts) => {
+        // If there's a pending operation name, use it
+        if (window._pendingOperationName && !graphQLParams.operationName) {
+          graphQLParams = {
+            ...graphQLParams,
+            operationName: window._pendingOperationName
+          };
+          // Clear it after use
+          window._pendingOperationName = null;
+        }
+        return baseFetcher(graphQLParams, opts);
+      };
       const plugins = [HISTORY_PLUGIN, explorerPlugin(), sdlDownloadPlugin, schemaVisualizerPlugin, queryGeneratorPlugin];
 
       // Store the default query so we can use it in the storage wrapper
@@ -6359,10 +7364,7 @@ If neither condition is met, provide analysis only - do not include a query in y
             return;
           }
 
-          if (!response.trim()) {
-            setPopup({ message: 'No response to analyse. Run the query first.' });
-            return;
-          }
+          const hasResponse = response.trim().length > 0;
 
           const apiKey = getGeminiApiKey();
           if (!apiKey) {
@@ -6379,21 +7381,25 @@ If neither condition is met, provide analysis only - do not include a query in y
 
           try {
             // Parse response if possible
-            let parsedResponse;
-            try {
-              parsedResponse = JSON.parse(response);
-            } catch (e) {
-              parsedResponse = response;
+            let parsedResponse = null;
+            if (hasResponse) {
+              try {
+                parsedResponse = JSON.parse(response);
+              } catch (e) {
+                parsedResponse = response;
+              }
             }
 
             // Get existing conversation from Query Generator
             const existingMessages = window._queryGeneratorState?.messages || [];
 
-            // Create the results feedback message (user) and analyzing status message (assistant)
+            // Create the feedback message (user) and analyzing status message (assistant)
             const userMessage = {
               role: 'user',
               type: 'results-feedback',
-              content: `[User executed query and sent results for analysis]`,
+              content: hasResponse
+                ? `[User executed query and sent results for analysis]`
+                : `[User sent query for analysis]`,
               payload: {
                 query: query,
                 variables: variables,
@@ -6404,7 +7410,7 @@ If neither condition is met, provide analysis only - do not include a query in y
             const analyzingMessage = {
               role: 'assistant',
               type: 'analyzing-status',
-              displayText: 'Analysing current query results...',
+              displayText: hasResponse ? 'Analysing query and results...' : 'Analysing query...',
               content: ''
             };
 
@@ -6412,13 +7418,17 @@ If neither condition is met, provide analysis only - do not include a query in y
             const updatedMessages = [...existingMessages, userMessage, analyzingMessage];
             window._queryGeneratorState.messages = updatedMessages;
 
-            // Trigger re-render in Query Generator if it's open
+            // Trigger re-render in Query Generator to show the results-feedback message
+            window.dispatchEvent(new CustomEvent('queryGeneratorUpdate'));
+
+            // Also dispatch the analyse event for any other listeners
             window.dispatchEvent(new CustomEvent('queryGeneratorAnalyse', {
               detail: { query, variables, response: parsedResponse, userMessage, analyzingMessage }
             }));
 
             // Call Gemini API with context about being an analysis assistant
-            const analysisPrompt = `The user clicked the "Analyse" button in GraphiQL to analyse the current query and its results.
+            const analysisPrompt = hasResponse
+              ? `The user clicked the "Analyse" button in GraphiQL to analyse the current query and its results.
 
 Query that was executed:
 \`\`\`graphql
@@ -6442,7 +7452,26 @@ Please analyse these results. Focus on:
 IMPORTANT: Do NOT suggest new queries or modifications unless:
 1. There is an actual error in the response that needs fixing, OR
 2. The user has explicitly asked for changes, improvements, or new queries in the conversation
-If neither condition is met, provide analysis only - do not include a query in your response.`;
+If neither condition is met, provide analysis only - do not include a query in your response.`
+              : `The user clicked the "Analyse" button in GraphiQL to analyse their query (no results yet - query has not been executed).
+
+Query to analyse:
+\`\`\`graphql
+${query}
+\`\`\`
+
+Variables:
+\`\`\`json
+${variables}
+\`\`\`
+
+Please analyse this query. Focus on:
+- Query structure and correctness
+- Whether the fields and arguments look valid
+- Any potential improvements or issues
+- What data this query would return
+
+Feel free to suggest improvements to the query if you see any.`;
 
             const aiResponse = await callGeminiAPI(
               analysisPrompt,
@@ -6463,7 +7492,8 @@ If neither condition is met, provide analysis only - do not include a query in y
               options: aiResponse.options,
               needsResults: aiResponse.needsResults || false,
               isNewQuery: aiResponse.isNewQuery || false,
-              resultsSummary: aiResponse.resultsSummary || null
+              resultsSummary: aiResponse.resultsSummary || null,
+              toolUsage: aiResponse.toolUsage || null
             };
 
             // Check for actual changes

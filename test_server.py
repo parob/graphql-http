@@ -402,7 +402,7 @@ CategoryType = GraphQLObjectType(
             resolve=lambda cat, info: len([p for p in db.posts.values() if p["categoryId"] == cat["id"]]),
         ),
         "posts": GraphQLField(
-            GraphQLNonNull(GraphQLList(GraphQLNonNull(lambda: PostType))),
+            GraphQLNonNull(GraphQLList(GraphQLNonNull(PostType))),
             args={
                 "limit": GraphQLArgument(GraphQLInt, default_value=10),
                 "status": GraphQLArgument(PostStatusEnum),
@@ -431,7 +431,7 @@ UserType = GraphQLObjectType(
         "followerCount": GraphQLField(GraphQLNonNull(GraphQLInt)),
         "followingCount": GraphQLField(GraphQLNonNull(GraphQLInt)),
         "posts": GraphQLField(
-            GraphQLNonNull(GraphQLList(GraphQLNonNull(lambda: PostType))),
+            GraphQLNonNull(GraphQLList(GraphQLNonNull(PostType))),
             args={
                 "limit": GraphQLArgument(GraphQLInt, default_value=10),
                 "status": GraphQLArgument(PostStatusEnum),
@@ -442,7 +442,7 @@ UserType = GraphQLObjectType(
             ][:limit],
         ),
         "comments": GraphQLField(
-            GraphQLNonNull(GraphQLList(GraphQLNonNull(lambda: CommentType))),
+            GraphQLNonNull(GraphQLList(GraphQLNonNull(CommentType))),
             args={"limit": GraphQLArgument(GraphQLInt, default_value=10)},
             resolve=lambda user, info, limit=10: [
                 c for c in db.comments.values() if c["authorId"] == user["id"]
@@ -481,7 +481,7 @@ PostType = GraphQLObjectType(
             resolve=lambda post, info: db.categories.get(post["categoryId"]),
         ),
         "comments": GraphQLField(
-            GraphQLNonNull(GraphQLList(GraphQLNonNull(lambda: CommentType))),
+            GraphQLNonNull(GraphQLList(GraphQLNonNull(CommentType))),
             args={
                 "limit": GraphQLArgument(GraphQLInt, default_value=20),
                 "includeReplies": GraphQLArgument(GraphQLBoolean, default_value=True),
@@ -521,11 +521,11 @@ CommentType = GraphQLObjectType(
             resolve=lambda comment, info: db.posts.get(comment["postId"]),
         ),
         "parent": GraphQLField(
-            lambda: CommentType,
+            CommentType,
             resolve=lambda comment, info: db.comments.get(comment["parentId"]) if comment["parentId"] else None,
         ),
         "replies": GraphQLField(
-            GraphQLNonNull(GraphQLList(GraphQLNonNull(lambda: CommentType))),
+            GraphQLNonNull(GraphQLList(GraphQLNonNull(CommentType))),
             resolve=lambda comment, info: [
                 c for c in db.comments.values() if c["parentId"] == comment["id"]
             ],
