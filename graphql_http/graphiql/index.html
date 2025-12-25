@@ -6091,8 +6091,8 @@ Examples:
           // Rename operations in new query if there are conflicts
           const { query: renamedNewQuery, operationName } = renameOperationsInQuery(query || '', existingNames);
 
-          // Append new query with a separator
-          const separator = currentQuery.trim() ? '\n\n# --- New Query ---\n\n' : '';
+          // Append new query with just whitespace separator
+          const separator = currentQuery.trim() ? '\n\n' : '';
           const combinedQuery = currentQuery + separator + renamedNewQuery;
 
           // Set the combined query
