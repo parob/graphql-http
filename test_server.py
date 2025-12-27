@@ -12,7 +12,7 @@ A comprehensive example demonstrating a blog/social platform API with:
 import sys
 import os
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 import uuid
 
 from graphql import (
@@ -323,6 +323,7 @@ The future of responsive design!""",
                 "parentId": None,
             },
         }
+
 
 # Global database instance
 db = Database()
