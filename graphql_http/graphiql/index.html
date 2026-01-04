@@ -4830,6 +4830,28 @@ Examples:
         }, toolIndicators);
       };
 
+      // Helper to extract all operation names from a GraphQL query string
+      // (Defined here so it's available to MessageComponent before the main chat component)
+      const extractOperationNames = (queryStr) => {
+        if (!queryStr) return [];
+        const names = [];
+        // Match: query Name, mutation Name, subscription Name (with optional name)
+        const regex = /\b(query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)?/g;
+        let match;
+        while ((match = regex.exec(queryStr)) !== null) {
+          names.push({
+            type: match[1],
+            name: match[2] || null,
+            index: match.index
+          });
+        }
+        // Also match shorthand queries: { ... } at the start (unnamed query)
+        if (/^\s*\{/.test(queryStr) && !names.some(n => n.index < queryStr.indexOf('{'))) {
+          names.unshift({ type: 'query', name: null, index: 0 });
+        }
+        return names;
+      };
+
       // Message Component with inline diff support
       const MessageComponent = ({ message, onOptionClick, showDiff, diffStatus, onAccept, onReject, onAcceptAndRun, onRunAndAnalyze }) => {
         const isUser = message.role === 'user';
@@ -5947,27 +5969,6 @@ Examples:
             }
           }
         }, [setEditorState]);
-
-        // Helper to extract all operation names from a GraphQL query string
-        const extractOperationNames = (queryStr) => {
-          if (!queryStr) return [];
-          const names = [];
-          // Match: query Name, mutation Name, subscription Name (with optional name)
-          const regex = /\b(query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)?/g;
-          let match;
-          while ((match = regex.exec(queryStr)) !== null) {
-            names.push({
-              type: match[1],
-              name: match[2] || null,
-              index: match.index
-            });
-          }
-          // Also match shorthand queries: { ... } at the start (unnamed query)
-          if (/^\s*\{/.test(queryStr) && !names.some(n => n.index < queryStr.indexOf('{'))) {
-            names.unshift({ type: 'query', name: null, index: 0 });
-          }
-          return names;
-        };
 
         // Helper to generate a unique operation name
         const makeUniqueOperationName = (baseName, existingNames) => {
