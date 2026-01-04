@@ -3965,7 +3965,7 @@
       // Call Gemini API
       const callGeminiAPI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
         const apiKey = getGeminiApiKey();
-        const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-2.0-flash';
+        const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-3-flash-preview';
 
         if (!apiKey) {
           throw new Error('API key not configured. Please go to Settings to add your Gemini API key.');
@@ -4106,12 +4106,12 @@ Examples:
           }
         };
 
-        // Add tools if enabled (Google Search, Code Execution, URL Context)
+        // Add tools if enabled (Google Search, Code Execution)
+        // Note: url_context (Browse) is not supported by all models
         if (toolsEnabled) {
           requestBody.tools = [
             { google_search: {} },
-            { code_execution: {} },
-            { url_context: {} }
+            { code_execution: {} }
           ];
         }
 
@@ -6170,7 +6170,7 @@ Examples:
           try {
             const schemaData = await ensureSchemaLoaded();
             const schemaContext = buildSchemaContext(schemaData);
-            const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-2.0-flash';
+            const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-3-flash-preview';
 
             const prompt = `Based on this GraphQL schema, suggest 4 short (2-5 words each) natural language queries a user might want to start with. Return ONLY a JSON array of strings, no explanation.
 
