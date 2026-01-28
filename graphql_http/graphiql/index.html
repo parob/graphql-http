@@ -184,7 +184,8 @@
       const getGeminiApiKey = () => {
         const stored = localStorage.getItem('graphiql:gemini-api-key');
         if (stored) return stored;
-        if (ENV_GEMINI_API_KEY) {
+        // Check that the env key exists and wasn't left as the unreplaced placeholder
+        if (ENV_GEMINI_API_KEY && !ENV_GEMINI_API_KEY.startsWith('__')) {
           return ENV_GEMINI_API_KEY;
         }
         return '';
@@ -5584,7 +5585,7 @@ Examples:
 
       // Settings Popup Content Component (for Query Generator)
       const SettingsPopupContent = ({ onClose }) => {
-        const originalApiKey = React.useRef(localStorage.getItem('graphiql:gemini-api-key') || '');
+        const originalApiKey = React.useRef(getGeminiApiKey());
         const [apiKey, setApiKey] = React.useState(originalApiKey.current);
         const [showApiKey, setShowApiKey] = React.useState(false);
         const [selectedModel, setSelectedModel] = React.useState(() =>
