@@ -13,7 +13,6 @@ from graphql.execution.execute import ExecutionContext
 from graphql.type.schema import GraphQLSchema
 from jwt import InvalidTokenError, PyJWKClient
 from starlette.applications import Starlette
-from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware as StarletteMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -73,7 +72,7 @@ class GraphQLHTTP:
         middleware = executor.middleware
         context = GraphQLContext(schema=schema, meta=meta, executor=executor)
 
-        return GraphQLHTTP(
+        return cls(
             schema=schema,
             root_value=root_value,
             middleware=middleware,
@@ -533,8 +532,7 @@ class GraphQLHTTP:
             for key, value in request.query_params.items():
                 query_data[key] = value
 
-            execution_results, all_params = await run_in_threadpool(
-                run_http_query,
+            execution_results, all_params = run_http_query(
                 self.schema,
                 request_method,
                 data,

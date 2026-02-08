@@ -1,4 +1,5 @@
 import pytest
+import starlette.concurrency
 
 from graphql import (
     GraphQLSchema,
@@ -218,6 +219,32 @@ class TestGraphQLHTTPCore:
         result = response.json()
         assert "errors" in result
         assert "Batch GraphQL requests are not enabled" in result["errors"][0]["message"]
+
+    def test_from_api_returns_subclass(self, schema):
+        """from_api should instantiate cls so subclasses are honored."""
+        from graphql_api import GraphQLAPI
+
+        class CustomGraphQLHTTP(GraphQLHTTP):
+            pass
+
+        class API(GraphQLAPI):
+            @property
+            def query(self):
+                return schema.query_type
+
+        server = CustomGraphQLHTTP.from_api(API())
+        assert isinstance(server, CustomGraphQLHTTP)
+
+    def test_dispatch_does_not_use_threadpool(self, monkeypatch, client):
+        """dispatch should execute GraphQL setup on request loop, not threadpool."""
+
+        async def _fail(*args, **kwargs):
+            raise AssertionError("run_in_threadpool should not be used")
+
+        monkeypatch.setattr(starlette.concurrency, "run_in_threadpool", _fail)
+        response = client.post("/graphql", json={"query": "{ hello }"})
+        assert response.status_code == 200
+        assert response.json() == {"data": {"hello": "Hello, World!"}}
 
 
 class TestGraphQLHTTPMiddleware:
