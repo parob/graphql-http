@@ -6111,6 +6111,7 @@ ${jsonInstruction}`;
         const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false);
         const modelDropdownRef = React.useRef(null);
         const modelInputRef = React.useRef(null);
+        const modelDropdownElRef = React.useRef(null);
         const [modelDropdownPos, setModelDropdownPos] = React.useState(null);
         const [persistChat, setPersistChat] = React.useState(() =>
           localStorage.getItem('graphiql:persist-chat') !== 'false'
@@ -6138,16 +6139,18 @@ ${jsonInstruction}`;
           }
         }, []);
 
-        // Close model dropdown on outside click
+        // Close model dropdown on outside click (capture phase to bypass stopPropagation)
         React.useEffect(() => {
           if (!modelDropdownOpen) return;
           const handler = (e) => {
-            if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target)) {
+            const inInput = modelInputRef.current && modelInputRef.current.contains(e.target);
+            const inDropdown = modelDropdownElRef.current && modelDropdownElRef.current.contains(e.target);
+            if (!inInput && !inDropdown) {
               setModelDropdownOpen(false);
             }
           };
-          document.addEventListener('mousedown', handler);
-          return () => document.removeEventListener('mousedown', handler);
+          document.addEventListener('mousedown', handler, true);
+          return () => document.removeEventListener('mousedown', handler, true);
         }, [modelDropdownOpen]);
 
         const apiKeyChanged = apiKey !== originalApiKey.current;
@@ -6166,7 +6169,8 @@ ${jsonInstruction}`;
         };
 
         // --- Model loading (Puter, Gemini, OpenAI) ---
-        const loadModels = React.useCallback(async (source) => {
+        const loadModelsRef = React.useRef(null);
+        const loadModels = React.useCallback(async (source, { force = false } = {}) => {
           setLoadingModels(true);
           try {
             let fetchedModels = [];
@@ -6194,7 +6198,7 @@ ${jsonInstruction}`;
             } else {
               // Gemini — source is the API key
               if (!source || source.length < 10) { setModels([]); setLoadingModels(false); return; }
-              if (lastFetchedKeyRef.current === source && models.length > 0) { setLoadingModels(false); return; }
+              if (!force && lastFetchedKeyRef.current === source) { setLoadingModels(false); return; }
               fetchedModels = await fetchGeminiModels(source);
               lastFetchedKeyRef.current = source;
             }
@@ -6215,7 +6219,8 @@ ${jsonInstruction}`;
           } finally {
             setLoadingModels(false);
           }
-        }, [selectedModel, models.length]);
+        }, [selectedModel, provider]);
+        loadModelsRef.current = loadModels;
 
         // Providers that support model list fetching
         const modelListProviders = [API_PROVIDERS.PUTER, API_PROVIDERS.GEMINI, API_PROVIDERS.OPENAI];
@@ -6223,21 +6228,21 @@ ${jsonInstruction}`;
         // Auto-fetch models when API key changes (debounced) for key-based providers
         React.useEffect(() => {
           if (provider === API_PROVIDERS.GEMINI && apiKey && apiKey.length >= 10) {
-            const timer = setTimeout(() => loadModels(apiKey), 500);
+            const timer = setTimeout(() => loadModelsRef.current(apiKey), 500);
             return () => clearTimeout(timer);
           }
           if (provider === API_PROVIDERS.OPENAI && apiKey && apiKey.length >= 10) {
-            const timer = setTimeout(() => loadModels('openai'), 500);
+            const timer = setTimeout(() => loadModelsRef.current('openai'), 500);
             return () => clearTimeout(timer);
           }
         }, [apiKey, provider]);
 
         // Load models on mount or when provider changes
         React.useEffect(() => {
-          if (provider === API_PROVIDERS.PUTER) loadModels('puter');
-          else if (provider === API_PROVIDERS.GEMINI && apiKey) loadModels(apiKey);
-          else if (provider === API_PROVIDERS.OPENAI && apiKey) loadModels('openai');
-          else setModels([]);
+          setModels([]);
+          if (provider === API_PROVIDERS.PUTER) loadModelsRef.current('puter', { force: true });
+          else if (provider === API_PROVIDERS.GEMINI && apiKey) loadModelsRef.current(apiKey, { force: true });
+          else if (provider === API_PROVIDERS.OPENAI && apiKey) loadModelsRef.current('openai', { force: true });
         }, [provider]);
 
         const handleSaveApiKey = () => {
@@ -6320,8 +6325,7 @@ ${jsonInstruction}`;
         // --- Service ---
         sections.push(React.createElement('div', { key: 'provider-section', className: 'graphiql-dialog-section' }, [
           React.createElement('div', { key: 'info' }, [
-            React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Service'),
-            React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Select the AI service for the query generator.')
+            React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'LLM Provider')
           ]),
           React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' },
             [API_PROVIDERS.PUTER, API_PROVIDERS.GEMINI, API_PROVIDERS.OPENROUTER, API_PROVIDERS.OPENAI, API_PROVIDERS.CUSTOM].map(p =>
@@ -6419,103 +6423,114 @@ ${jsonInstruction}`;
         // --- Model ---
         if (provider) {
           const hasModelList = modelListProviders.includes(provider);
-          const modelContent = [];
-          modelContent.push(React.createElement('div', { key: 'info' }, [
-            React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Model'),
-            React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' },
-              hasModelList ? 'Search and select a model.' : 'Enter the model identifier to use.')
-          ]));
+          const defaultModel = defaultModels[provider] || '';
 
-          if (hasModelList) {
-            if (models.length > 0) {
-              // Filter models by search term
-              const searchLower = modelSearch.toLowerCase();
-              const filtered = searchLower
-                ? models.filter(m => m.id.toLowerCase().includes(searchLower) || m.name.toLowerCase().includes(searchLower))
-                : models;
-              // Compute dropdown position from the input's bounding rect
-              const updateDropdownPos = () => {
-                if (!modelInputRef.current) return;
-                const rect = modelInputRef.current.getBoundingClientRect();
-                setModelDropdownPos({ top: rect.bottom, left: rect.left, width: rect.width });
-              };
+          // Compute dropdown position from the input's bounding rect
+          const updateDropdownPos = () => {
+            if (!modelInputRef.current) return;
+            const rect = modelInputRef.current.getBoundingClientRect();
+            setModelDropdownPos({ top: rect.bottom, left: rect.left, width: rect.width });
+          };
 
-              const getDropdownStyle = () => {
-                if (!modelDropdownPos) return { display: 'none' };
-                return {
-                  position: 'fixed',
-                  top: modelDropdownPos.top + 'px',
-                  left: modelDropdownPos.left + 'px',
-                  width: modelDropdownPos.width + 'px',
-                  zIndex: 10000,
-                  maxHeight: '280px', overflowY: 'auto',
-                  background: '#fff', border: '1px solid #d0d7de', borderRadius: '0 0 6px 6px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                };
-              };
+          const getDropdownStyle = () => {
+            if (!modelDropdownPos) return { display: 'none' };
+            return {
+              position: 'fixed',
+              top: modelDropdownPos.top + 'px',
+              left: modelDropdownPos.left + 'px',
+              minWidth: modelDropdownPos.width + 'px',
+              width: 'max-content',
+              maxWidth: '90vw',
+              zIndex: 10000,
+              maxHeight: '280px', overflowY: 'auto',
+              background: '#fff', border: '1px solid #d0d7de', borderRadius: '0 0 6px 6px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+            };
+          };
 
-              modelContent.push(React.createElement('div', {
-                key: 'model-picker', ref: modelDropdownRef
-              }, [
-                // Search input
-                React.createElement('input', {
-                  key: 'search',
-                  ref: modelInputRef,
-                  type: 'text',
-                  value: modelDropdownOpen ? modelSearch : selectedModel,
-                  onChange: (e) => { setModelSearch(e.target.value); setModelDropdownOpen(true); updateDropdownPos(); },
-                  onFocus: () => { setModelSearch(''); setModelDropdownOpen(true); updateDropdownPos(); },
-                  placeholder: 'Search models...',
-                  className: 'graphiql-button',
-                  style: { width: '100%', fontFamily: 'monospace', textAlign: 'left', boxSizing: 'border-box' }
-                }),
-                // Dropdown list — rendered via portal to body so it escapes overflow clipping
-                modelDropdownOpen && createPortal(
-                  React.createElement('div', {
-                    key: 'dropdown',
-                    ref: (el) => {
-                      // Extend the outside-click ref to include the portal dropdown
-                      if (el) modelDropdownRef.current = { contains: (t) => el.contains(t) || (modelInputRef.current && modelInputRef.current.contains(t)) };
-                    },
-                    style: getDropdownStyle()
-                  }, filtered.length > 0
-                    ? filtered.slice(0, 100).map(m => React.createElement('div', {
-                        key: m.id,
-                        onMouseDown: (e) => { e.preventDefault(); handleModelChange(m.id); setModelDropdownOpen(false); setModelSearch(''); },
-                        style: {
-                          padding: '6px 10px', cursor: 'pointer', fontSize: '13px',
-                          fontFamily: 'monospace',
-                          background: m.id === selectedModel ? '#f0f4ff' : 'transparent',
-                          borderBottom: '1px solid #f0f0f0'
-                        },
-                        onMouseEnter: (e) => e.currentTarget.style.background = '#f0f4ff',
-                        onMouseLeave: (e) => e.currentTarget.style.background = m.id === selectedModel ? '#f0f4ff' : 'transparent'
-                      }, m.id))
-                    : React.createElement('div', {
-                        style: { padding: '8px 10px', color: '#888', fontSize: '13px' }
-                      }, 'No models match "' + modelSearch + '"')
-                  ),
-                  document.body
-                )
-              ]));
-            } else {
-              const emptyMsg = loadingModels ? 'Loading models...'
-                : provider === API_PROVIDERS.PUTER ? 'Sign in to load models'
-                : (apiKey ? 'No models found' : 'Enter API key to load models');
-              modelContent.push(React.createElement('div', {
-                key: 'no-models', className: 'graphiql-dialog-section-caption'
-              }, emptyMsg));
-            }
+          // Build the input row (input + optional clear button)
+          const inputRowChildren = [];
+
+          if (hasModelList && models.length > 0) {
+            const searchLower = modelSearch.toLowerCase();
+            const filtered = searchLower
+              ? models.filter(m => m.id.toLowerCase().includes(searchLower) || m.name.toLowerCase().includes(searchLower))
+              : models;
+
+            inputRowChildren.push(React.createElement('div', {
+              key: 'model-picker', ref: modelDropdownRef, style: { flex: 1, position: 'relative' }
+            }, [
+              React.createElement('input', {
+                key: 'search',
+                ref: modelInputRef,
+                type: 'text',
+                value: modelDropdownOpen ? modelSearch : selectedModel,
+                onChange: (e) => { setModelSearch(e.target.value); setModelDropdownOpen(true); updateDropdownPos(); },
+                onFocus: () => { setModelSearch(''); setModelDropdownOpen(true); updateDropdownPos(); },
+                placeholder: 'Search models...',
+                className: 'graphiql-button',
+                style: { width: '100%', fontFamily: 'monospace', textAlign: 'left', boxSizing: 'border-box' }
+              }),
+              modelDropdownOpen && createPortal(
+                React.createElement('div', {
+                  key: 'dropdown',
+                  ref: (el) => { modelDropdownElRef.current = el; },
+                  style: getDropdownStyle()
+                }, filtered.length > 0
+                  ? filtered.slice(0, 100).map(m => React.createElement('div', {
+                      key: m.id,
+                      onMouseDown: (e) => { e.preventDefault(); handleModelChange(m.id); setModelDropdownOpen(false); setModelSearch(''); },
+                      style: {
+                        padding: '6px 10px', cursor: 'pointer', fontSize: '13px',
+                        fontFamily: 'monospace',
+                        background: m.id === selectedModel ? '#f0f4ff' : 'transparent',
+                        borderBottom: '1px solid #f0f0f0'
+                      },
+                      onMouseEnter: (e) => e.currentTarget.style.background = '#f0f4ff',
+                      onMouseLeave: (e) => e.currentTarget.style.background = m.id === selectedModel ? '#f0f4ff' : 'transparent'
+                    }, m.id))
+                  : React.createElement('div', {
+                      style: { padding: '8px 10px', color: '#888', fontSize: '13px' }
+                    }, 'No models match "' + modelSearch + '"')
+                ),
+                document.body
+              )
+            ]));
+          } else if (hasModelList) {
+            const emptyMsg = loadingModels ? 'Loading models...'
+              : provider === API_PROVIDERS.PUTER ? 'Sign in to load models'
+              : (apiKey ? 'No models found' : 'Enter API key to load models');
+            inputRowChildren.push(React.createElement('div', {
+              key: 'no-models', className: 'graphiql-dialog-section-caption', style: { flex: 1 }
+            }, emptyMsg));
           } else {
-            modelContent.push(React.createElement('input', {
+            inputRowChildren.push(React.createElement('input', {
               key: 'model-input', type: 'text', value: selectedModel,
               onChange: (e) => handleModelChange(e.target.value),
               placeholder: defaultModels[provider] || 'gemini-3-flash-preview',
               className: 'graphiql-button',
-              style: { width: '100%', fontFamily: 'monospace', textAlign: 'left', boxSizing: 'border-box' }
+              style: { flex: 1, fontFamily: 'monospace', textAlign: 'left' }
             }));
           }
-          sections.push(React.createElement('div', { key: 'model-section', className: 'graphiql-dialog-section' }, modelContent));
+
+          if (defaultModel && selectedModel && selectedModel !== defaultModel) {
+            inputRowChildren.push(React.createElement('button', {
+              key: 'reset-model',
+              type: 'button',
+              onClick: () => handleModelChange(defaultModel),
+              className: 'graphiql-button',
+              style: { minWidth: '50px', fontSize: '12px', cursor: 'pointer' }
+            }, 'Clear'));
+          }
+
+          sections.push(React.createElement('div', { key: 'model-section', className: 'graphiql-dialog-section' }, [
+            React.createElement('div', { key: 'info' }, [
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Model'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' },
+                hasModelList ? 'Search and select a model.' : 'Enter the model identifier to use.')
+            ]),
+            React.createElement('div', { key: 'input-row', style: { display: 'flex', gap: '8px' } }, inputRowChildren)
+          ]));
         }
 
         // --- Chat History ---
@@ -8058,7 +8073,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
             ref: settingsRef,
             className: 'graphiql-dialog',
             onMouseDown: (e) => e.stopPropagation(),
-            style: { pointerEvents: 'auto', width: '560px', maxWidth: '90vw' }
+            style: { pointerEvents: 'auto', width: '720px', maxWidth: '90vw' }
           }, React.createElement(SettingsPopupContent, { onClose: () => { setShowSettings(false); refreshProviderModel(); } })))
         ]);
       };
