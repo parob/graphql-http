@@ -72,6 +72,11 @@
                     stroke 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
       }
 
+      @keyframes dotPulse {
+        0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+        40% { opacity: 1; transform: scale(1); }
+      }
+
       /* Fade animation classes */
       .edges-fading .react-flow__edges {
         opacity: 0.2;
@@ -129,6 +134,7 @@
       }
     </style>
     <!-- React Flow CSS removed - using custom styles -->
+    <script src="https://js.puter.com/v2/"></script>
     <!--
      * Note:
      * The ?standalone flag bundles the module along with all of its `dependencies`, excluding `peerDependencies`, into a single JavaScript file.
@@ -159,6 +165,7 @@
     <script type="module">
       import React from 'react';
       import ReactDOM from 'react-dom/client';
+      import { createPortal } from 'react-dom';
       import { GraphiQL, HISTORY_PLUGIN } from 'graphiql';
       import { createGraphiQLFetcher } from '@graphiql/toolkit';
       import { explorerPlugin } from '@graphiql/plugin-explorer';
@@ -180,15 +187,53 @@
       // Server replaces __GEMINI_API_KEY__ with env value or empty string
       const ENV_GEMINI_API_KEY = '__GEMINI_API_KEY__';
 
-      // Helper to get API key - uses localStorage first, falls back to env key silently
-      const getGeminiApiKey = () => {
-        const stored = localStorage.getItem('graphiql:gemini-api-key');
-        if (stored) return stored;
-        // Check that the env key exists and wasn't left as the unreplaced placeholder
-        if (ENV_GEMINI_API_KEY && !ENV_GEMINI_API_KEY.startsWith('__')) {
-          return ENV_GEMINI_API_KEY;
+      // --- AI Provider Abstraction ---
+      const API_PROVIDERS = {
+        PUTER: 'puter',
+        GEMINI: 'gemini',
+        OPENROUTER: 'openrouter',
+        OPENAI: 'openai',
+        CUSTOM: 'custom'
+      };
+
+      // Migrate legacy localStorage keys (one-time)
+      (() => {
+        const legacyKey = localStorage.getItem('graphiql:gemini-api-key');
+        const legacyModel = localStorage.getItem('graphiql:gemini-model');
+        if (legacyKey && !localStorage.getItem('graphiql:api-key')) {
+          localStorage.setItem('graphiql:api-provider', 'gemini');
+          localStorage.setItem('graphiql:api-key', legacyKey);
+          if (legacyModel) localStorage.setItem('graphiql:api-model', legacyModel);
         }
+        // Migrate old two-level provider setting
+        const oldAiProvider = localStorage.getItem('graphiql:ai-provider');
+        if (oldAiProvider === 'puter') {
+          localStorage.setItem('graphiql:api-provider', 'puter');
+          localStorage.removeItem('graphiql:ai-provider');
+        } else if (oldAiProvider === 'apikey') {
+          // api-provider already set, just clean up
+          localStorage.removeItem('graphiql:ai-provider');
+        }
+      })();
+
+      const getAPIProvider = () => localStorage.getItem('graphiql:api-provider') || '';
+      const getAPIKey = () => {
+        const stored = localStorage.getItem('graphiql:api-key');
+        if (stored) return stored;
+        if (ENV_GEMINI_API_KEY && !ENV_GEMINI_API_KEY.startsWith('__')) return ENV_GEMINI_API_KEY;
         return '';
+      };
+      const getAPIModel = () => {
+        const provider = getAPIProvider();
+        return localStorage.getItem(`graphiql:model:${provider}`) || localStorage.getItem('graphiql:api-model') || '';
+      };
+      const getAPIBaseUrl = () => localStorage.getItem('graphiql:api-base-url') || '';
+
+      const isAIReady = () => {
+        const provider = getAPIProvider();
+        if (!provider) return false;
+        if (provider === API_PROVIDERS.PUTER) return typeof puter !== 'undefined';
+        return !!getAPIKey();
       };
 
       // Custom Graph Node - contains our entire graph visualization
@@ -1076,40 +1121,104 @@
         graphVisualization: GraphVisualizationNode
       };
 
-      // SDL Download Plugin
+      // TypeScript generator from introspection data
+      const generateTypeScript = (schemaData) => {
+        const builtInTypes = new Set(['String', 'Int', 'Float', 'Boolean', 'ID']);
+        const scalarMap = { String: 'string', Int: 'number', Float: 'number', Boolean: 'boolean', ID: 'string' };
+        const types = schemaData.__schema.types.filter(t => !t.name.startsWith('__') && !builtInTypes.has(t.name));
+
+        const resolveType = (typeRef) => {
+          if (!typeRef) return 'any';
+          if (typeRef.kind === 'NON_NULL') {
+            const inner = resolveType(typeRef.ofType);
+            return inner.endsWith(' | null') ? inner.slice(0, -7) : inner;
+          }
+          if (typeRef.kind === 'LIST') {
+            const inner = resolveType(typeRef.ofType);
+            return `Array<${inner}> | null`;
+          }
+          const name = typeRef.name;
+          if (scalarMap[name]) return `${scalarMap[name]} | null`;
+          return `${name} | null`;
+        };
+
+        const lines = [];
+        for (const type of types) {
+          if (type.description) lines.push(`/** ${type.description} */`);
+
+          if (type.kind === 'ENUM') {
+            lines.push(`enum ${type.name} {`);
+            (type.enumValues || []).forEach(v => {
+              if (v.description) lines.push(`  /** ${v.description} */`);
+              lines.push(`  ${v.name} = '${v.name}',`);
+            });
+            lines.push('}\n');
+          } else if (type.kind === 'UNION') {
+            const members = (type.possibleTypes || []).map(t => t.name).join(' | ');
+            lines.push(`type ${type.name} = ${members};\n`);
+          } else if (type.kind === 'SCALAR') {
+            lines.push(`type ${type.name} = ${scalarMap[type.name] || 'string'};\n`);
+          } else if (type.kind === 'OBJECT' || type.kind === 'INTERFACE' || type.kind === 'INPUT_OBJECT') {
+            lines.push(`interface ${type.name} {`);
+            const fields = type.fields || type.inputFields || [];
+            fields.forEach(f => {
+              if (f.description) lines.push(`  /** ${f.description} */`);
+              const resolved = resolveType(f.type);
+              const isNullable = resolved.endsWith(' | null');
+              const cleanType = isNullable ? resolved.slice(0, -7) : resolved;
+              const optional = (type.kind === 'INPUT_OBJECT' || isNullable) ? '?' : '';
+              lines.push(`  ${f.name}${optional}: ${cleanType};`);
+            });
+            lines.push('}\n');
+          }
+        }
+        return lines.join('\n');
+      };
+
+      // Schema Explorer Plugin
       const sdlDownloadPlugin = {
-        title: 'SDL Download',
+        title: 'Schema',
         icon: () => React.createElement('svg', {
           width: '16',
           height: '16',
           viewBox: '0 0 24 24',
-          fill: 'currentColor'
-        }, React.createElement('path', {
-          d: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z'
-        })),
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: '1.5',
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round'
+        }, [
+          React.createElement('path', { key: 'p1', d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }),
+          React.createElement('polyline', { key: 'pl1', points: '14 2 14 8 20 8' }),
+          React.createElement('line', { key: 'l1', x1: '8', y1: '13', x2: '16', y2: '13' }),
+          React.createElement('line', { key: 'l2', x1: '8', y1: '17', x2: '16', y2: '17' })
+        ]),
         content: () => {
           const [sdlContent, setSdlContent] = React.useState('');
+          const [rawData, setRawData] = React.useState(null);
+          const [schemaRef, setSchemaRef] = React.useState(null);
           const [loading, setLoading] = React.useState(false);
           const [error, setError] = React.useState(null);
+          const [format, setFormat] = React.useState('sdl');
+          const [searchQuery, setSearchQuery] = React.useState('');
 
-          const generateSDL = async () => {
+          const fetchSchema = async () => {
             setLoading(true);
             setError(null);
             try {
               const introspectionQuery = getIntrospectionQuery();
-
               const result = await fetcher({
                 query: introspectionQuery,
                 operationName: 'IntrospectionQuery'
               });
-
               if (result.errors) {
                 throw new Error(result.errors[0].message);
               }
-
               const schema = buildClientSchema(result.data);
               const sdl = printSchema(schema);
               setSdlContent(sdl);
+              setRawData(result.data);
+              setSchemaRef(schema);
             } catch (err) {
               setError(err.message);
             } finally {
@@ -1117,9 +1226,80 @@
             }
           };
 
-          React.useEffect(() => {
-            generateSDL();
-          }, []);
+          React.useEffect(() => { fetchSchema(); }, []);
+
+          // Compute stats from rawData
+          const stats = React.useMemo(() => {
+            if (!rawData) return null;
+            const allTypes = rawData.__schema.types.filter(t => !t.name.startsWith('__'));
+            const builtIn = new Set(['String', 'Int', 'Float', 'Boolean', 'ID']);
+            const userTypes = allTypes.filter(t => !builtIn.has(t.name));
+            const queryType = rawData.__schema.queryType?.name;
+            const mutationType = rawData.__schema.mutationType?.name;
+            const subscriptionType = rawData.__schema.subscriptionType?.name;
+            const queryFields = queryType ? (allTypes.find(t => t.name === queryType)?.fields || []).length : 0;
+            const mutationFields = mutationType ? (allTypes.find(t => t.name === mutationType)?.fields || []).length : 0;
+            const subscriptionFields = subscriptionType ? (allTypes.find(t => t.name === subscriptionType)?.fields || []).length : 0;
+            const enums = userTypes.filter(t => t.kind === 'ENUM').length;
+            const inputs = userTypes.filter(t => t.kind === 'INPUT_OBJECT').length;
+            return { types: userTypes.length, queries: queryFields, mutations: mutationFields, subscriptions: subscriptionFields, enums, inputs };
+          }, [rawData]);
+
+          // Compute displayed content based on format
+          const displayContent = React.useMemo(() => {
+            if (!sdlContent && !rawData) return '';
+            if (format === 'sdl') return sdlContent;
+            if (format === 'json') return JSON.stringify(rawData, null, 2);
+            if (format === 'typescript') return generateTypeScript(rawData);
+            return sdlContent;
+          }, [format, sdlContent, rawData]);
+
+          // Filter content by search query
+          const { filteredContent, matchCount } = React.useMemo(() => {
+            if (!searchQuery.trim() || !displayContent) return { filteredContent: displayContent, matchCount: 0 };
+            const query = searchQuery.toLowerCase();
+            if (format === 'json') {
+              // For JSON, filter top-level keys
+              try {
+                const parsed = JSON.parse(displayContent);
+                const schema = parsed.__schema || parsed;
+                if (schema.types) {
+                  const matched = schema.types.filter(t => JSON.stringify(t).toLowerCase().includes(query));
+                  return { filteredContent: JSON.stringify({ ...schema, types: matched }, null, 2), matchCount: matched.length };
+                }
+              } catch {}
+              return { filteredContent: displayContent, matchCount: 0 };
+            }
+            // For SDL and TypeScript, split by blank-line-delimited blocks
+            const blocks = displayContent.split(/\n\n+/);
+            const matched = blocks.filter(b => b.toLowerCase().includes(query));
+            return { filteredContent: matched.join('\n\n'), matchCount: matched.length };
+          }, [displayContent, searchQuery, format]);
+
+          // Highlight search matches in text
+          const highlightMatches = (text, query) => {
+            if (!query || !query.trim() || !text) return text;
+            const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(${escaped})`, 'gi');
+            const parts = text.split(regex);
+            if (parts.length === 1) return text;
+            return parts.map((part, i) =>
+              regex.test(part)
+                ? React.createElement('mark', {
+                    key: i,
+                    style: {
+                      backgroundColor: '#fff3b0',
+                      color: '#24292e',
+                      borderRadius: '2px',
+                      padding: '0 1px'
+                    }
+                  }, part)
+                : part
+            );
+          };
+
+          const fileExtension = format === 'sdl' ? 'schema.graphql' : format === 'json' ? 'schema.json' : 'schema.ts';
+          const mimeType = format === 'json' ? 'application/json' : 'text/plain';
 
           return React.createElement('div', {
             style: {
@@ -1127,9 +1307,10 @@
               height: '100%',
               display: 'flex',
               flexDirection: 'column',
-              gap: '16px'
+              gap: '12px'
             }
           }, [
+            // Title
             React.createElement('h3', {
               key: 'title',
               style: {
@@ -1137,17 +1318,74 @@
                 fontSize: '29px',
                 fontWeight: 'bold'
               }
-            }, 'Schema Download'),
+            }, 'SDL'),
+
+            // Description
             React.createElement('p', {
               key: 'description',
               className: 'graphiql-markdown-description',
               style: {
-                margin: '0 0 20px 0',
+                margin: '0',
                 color: 'rgba(59, 75, 104, 0.76)'
               }
-            }, 'Download your GraphQL schema as SDL (Schema Definition Language).'),
+            }, 'Explore, search, and download your GraphQL schema in multiple formats.'),
 
-            // Schema Preview Section
+            // Stats bubbles
+            stats && React.createElement('div', {
+              key: 'stats',
+              style: {
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px'
+              }
+            }, [
+              { key: 'types', label: 'Types', value: stats.types },
+              { key: 'queries', label: 'Queries', value: stats.queries },
+              stats.mutations > 0 && { key: 'mutations', label: 'Mutations', value: stats.mutations },
+              stats.subscriptions > 0 && { key: 'subscriptions', label: 'Subscriptions', value: stats.subscriptions },
+              { key: 'enums', label: 'Enums', value: stats.enums },
+              { key: 'inputs', label: 'Inputs', value: stats.inputs }
+            ].filter(Boolean).map(s => React.createElement('span', {
+              key: s.key,
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 10px',
+                backgroundColor: '#f0f3f6',
+                border: '1px solid #e1e4e8',
+                borderRadius: '12px',
+                fontSize: '11px',
+                color: '#586069'
+              }
+            }, [
+              React.createElement('span', { key: 'l', style: { fontWeight: '500' } }, s.label),
+              React.createElement('span', { key: 'v', style: { color: '#24292e', fontWeight: '600' } }, String(s.value))
+            ]))),
+
+            // Format selector
+            React.createElement('div', {
+              key: 'format-selector',
+              className: 'graphiql-button-group'
+            }, [
+              React.createElement('button', {
+                key: 'fmt-sdl',
+                className: format === 'sdl' ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => setFormat('sdl')
+              }, 'SDL'),
+              React.createElement('button', {
+                key: 'fmt-json',
+                className: format === 'json' ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => setFormat('json')
+              }, 'JSON'),
+              React.createElement('button', {
+                key: 'fmt-ts',
+                className: format === 'typescript' ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => setFormat('typescript')
+              }, 'TypeScript')
+            ]),
+
+            // Preview section
             React.createElement('div', {
               key: 'preview-section',
               style: {
@@ -1157,8 +1395,9 @@
                 minHeight: 0
               }
             }, [
+              // Toolbar: search + match count + action buttons
               React.createElement('div', {
-                key: 'preview-header',
+                key: 'toolbar',
                 style: {
                   display: 'flex',
                   alignItems: 'center',
@@ -1166,30 +1405,225 @@
                   marginBottom: '8px'
                 }
               }, [
-                React.createElement('span', {
-                  key: 'file-icon',
+                React.createElement('input', {
+                  key: 'search-input',
+                  type: 'text',
+                  placeholder: 'Search schema...',
+                  value: searchQuery,
+                  onChange: (e) => setSearchQuery(e.target.value),
                   style: {
-                    fontSize: '14px'
+                    flex: 1,
+                    padding: '6px 10px',
+                    border: '1px solid #e1e4e8',
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    outline: 'none',
+                    fontFamily: 'inherit'
                   }
-                }, '📄'),
-                React.createElement('span', {
-                  key: 'filename',
-                  style: {
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    color: '#24292e'
-                  }
-                }, 'schema.graphql'),
-                React.createElement('span', {
-                  key: 'preview-label',
+                }),
+                searchQuery.trim() && React.createElement('span', {
+                  key: 'match-count',
                   style: {
                     fontSize: '11px',
                     color: '#586069',
-                    fontStyle: 'italic'
+                    whiteSpace: 'nowrap'
                   }
-                }, '(preview)')
-              ]),
+                }, `${matchCount} match${matchCount !== 1 ? 'es' : ''}`),
 
+                // Copy button
+                !loading && !error && displayContent && React.createElement('div', {
+                  key: 'copy-wrapper',
+                  style: { position: 'relative', display: 'inline-flex' },
+                  onMouseOver: (e) => {
+                    const tip = e.currentTarget.querySelector('[data-tooltip]');
+                    if (tip) tip.style.opacity = '1';
+                  },
+                  onMouseOut: (e) => {
+                    const tip = e.currentTarget.querySelector('[data-tooltip]');
+                    if (tip) {
+                      tip.style.opacity = '0';
+                      // Reset tooltip text after hiding if it was showing "Copied!"
+                      if (tip.dataset.copied) {
+                        setTimeout(() => {
+                          delete tip.dataset.copied;
+                          tip.textContent = `Copy ${fileExtension}`;
+                          tip.style.backgroundColor = '#24292e';
+                        }, 150);
+                      }
+                    }
+                  }
+                }, [
+                  React.createElement('span', {
+                    key: 'tip',
+                    'data-tooltip': true,
+                    style: {
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      marginBottom: '6px',
+                      padding: '4px 8px',
+                      backgroundColor: '#24292e',
+                      color: 'white',
+                      fontSize: '11px',
+                      borderRadius: '4px',
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'none',
+                      opacity: 0,
+                      transition: 'opacity 0.15s'
+                    }
+                  }, `Copy ${fileExtension}`),
+                  React.createElement('button', {
+                    key: 'btn',
+                    onClick: async (e) => {
+                      if (displayContent) {
+                        const wrapper = e.currentTarget.parentElement;
+                        const tip = wrapper.querySelector('[data-tooltip]');
+                        try {
+                          await navigator.clipboard.writeText(displayContent);
+                        } catch (err) {
+                          const textArea = document.createElement('textarea');
+                          textArea.value = displayContent;
+                          textArea.style.position = 'fixed';
+                          textArea.style.opacity = '0';
+                          document.body.appendChild(textArea);
+                          textArea.select();
+                          try { document.execCommand('copy'); } catch {}
+                          document.body.removeChild(textArea);
+                        }
+                        // Show "Copied!" feedback via tooltip and button color
+                        if (tip) {
+                          tip.textContent = 'Copied!';
+                          tip.style.backgroundColor = '#28a745';
+                          tip.style.opacity = '1';
+                          tip.dataset.copied = 'true';
+                        }
+                        const btn = e.currentTarget;
+                        btn.style.backgroundColor = '#28a745';
+                        btn.style.color = 'white';
+                        btn.style.borderColor = '#28a745';
+                        setTimeout(() => {
+                          btn.style.backgroundColor = 'transparent';
+                          btn.style.color = '#586069';
+                          btn.style.borderColor = '#e1e4e8';
+                          if (tip) {
+                            tip.textContent = `Copy ${fileExtension}`;
+                            tip.style.backgroundColor = '#24292e';
+                            tip.style.opacity = '0';
+                            delete tip.dataset.copied;
+                          }
+                        }, 1500);
+                      }
+                    },
+                    style: {
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '28px',
+                      padding: 0,
+                      backgroundColor: 'transparent',
+                      border: '1px solid #e1e4e8',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      color: '#586069'
+                    },
+                    onMouseOver: (e) => {
+                      if (!e.currentTarget.dataset.copied) {
+                        e.currentTarget.style.backgroundColor = '#f0f0f0';
+                        e.currentTarget.style.color = '#24292e';
+                      }
+                    },
+                    onMouseOut: (e) => {
+                      if (!e.currentTarget.dataset.copied) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#586069';
+                      }
+                    }
+                  }, React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+                    React.createElement('rect', { key: 'r1', x: 9, y: 9, width: 13, height: 13, rx: 2 }),
+                    React.createElement('path', { key: 'p1', d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' })
+                  ]))
+                ]),
+
+                // Download button
+                !loading && !error && displayContent && React.createElement('div', {
+                  key: 'download-wrapper',
+                  style: { position: 'relative', display: 'inline-flex' },
+                  onMouseOver: (e) => {
+                    const tip = e.currentTarget.querySelector('[data-tooltip]');
+                    if (tip) tip.style.opacity = '1';
+                  },
+                  onMouseOut: (e) => {
+                    const tip = e.currentTarget.querySelector('[data-tooltip]');
+                    if (tip) tip.style.opacity = '0';
+                  }
+                }, [
+                  React.createElement('span', {
+                    key: 'tip',
+                    'data-tooltip': true,
+                    style: {
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      marginBottom: '6px',
+                      padding: '4px 8px',
+                      backgroundColor: '#24292e',
+                      color: 'white',
+                      fontSize: '11px',
+                      borderRadius: '4px',
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'none',
+                      opacity: 0,
+                      transition: 'opacity 0.15s'
+                    }
+                  }, `Download ${fileExtension}`),
+                  React.createElement('button', {
+                    key: 'btn',
+                    onClick: () => {
+                      if (displayContent) {
+                        const blob = new Blob([displayContent], { type: mimeType });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = fileExtension;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }
+                    },
+                    style: {
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '28px',
+                      height: '28px',
+                      padding: 0,
+                      backgroundColor: 'transparent',
+                      border: '1px solid #e1e4e8',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      color: '#586069'
+                    },
+                    onMouseOver: (e) => {
+                      e.currentTarget.style.backgroundColor = '#f0f0f0';
+                      e.currentTarget.style.color = '#24292e';
+                    },
+                    onMouseOut: (e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.color = '#586069';
+                    }
+                  }, React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
+                    React.createElement('path', { key: 'p1', d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+                    React.createElement('polyline', { key: 'pl1', points: '7 10 12 15 17 10' }),
+                    React.createElement('line', { key: 'l1', x1: 12, y1: 15, x2: 12, y2: 3 })
+                  ]))
+                ])
+              ].filter(Boolean)),
+
+              // Content area
               loading ? React.createElement('div', {
                 key: 'loading-preview',
                 style: {
@@ -1202,7 +1636,7 @@
                   fontSize: '12px',
                   color: '#586069'
                 }
-              }, 'Generating SDL from schema...') :
+              }, 'Loading schema...') :
 
               error ? React.createElement('div', {
                 key: 'error-preview',
@@ -1218,10 +1652,10 @@
                   padding: '12px',
                   textAlign: 'center'
                 }
-              }, `Error generating SDL: ${error}`) :
+              }, `Error: ${error}`) :
 
               React.createElement('pre', {
-                key: 'sdl-preview',
+                key: 'content-preview',
                 style: {
                   flex: 1,
                   margin: 0,
@@ -1237,130 +1671,8 @@
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word'
                 }
-              }, sdlContent)
-            ]),
-
-            React.createElement('div', {
-              key: 'button-container',
-              style: {
-                display: 'flex',
-                gap: '8px',
-                marginTop: '8px',
-                alignSelf: 'flex-start'
-              }
-            }, [
-              React.createElement('button', {
-                key: 'download-btn',
-                onClick: () => {
-                  if (sdlContent) {
-                    const blob = new Blob([sdlContent], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'schema.graphql';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  }
-                },
-                disabled: !sdlContent || loading,
-                style: {
-                  padding: '8px 16px',
-                  backgroundColor: (!sdlContent || loading) ? '#ccc' : '#0366d6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: (!sdlContent || loading) ? 'not-allowed' : 'pointer',
-                  fontSize: '12px',
-                  fontWeight: '500'
-                },
-                onMouseOver: (e) => {
-                  if (!(!sdlContent || loading)) {
-                    e.target.style.backgroundColor = '#0256cc';
-                  }
-                },
-                onMouseOut: (e) => {
-                  if (!(!sdlContent || loading)) {
-                    e.target.style.backgroundColor = '#0366d6';
-                  }
-                }
-              }, 'Download schema.graphql'),
-
-              React.createElement('button', {
-                key: 'copy-btn',
-                onClick: async (e) => {
-                  if (sdlContent) {
-                    try {
-                      await navigator.clipboard.writeText(sdlContent);
-                      // Visual feedback - temporarily change button text
-                      const btn = e.target;
-                      const originalText = btn.textContent;
-                      btn.textContent = 'Copied!';
-                      btn.style.backgroundColor = '#28a745';
-                      setTimeout(() => {
-                        btn.textContent = originalText;
-                        btn.style.backgroundColor = '#0366d6';
-                      }, 2000);
-                    } catch (err) {
-                      // Fallback for older browsers
-                      const textArea = document.createElement('textarea');
-                      textArea.value = sdlContent;
-                      textArea.style.position = 'fixed';
-                      textArea.style.opacity = '0';
-                      document.body.appendChild(textArea);
-                      textArea.select();
-                      try {
-                        document.execCommand('copy');
-                        const btn = e.target;
-                        const originalText = btn.textContent;
-                        btn.textContent = 'Copied!';
-                        btn.style.backgroundColor = '#28a745';
-                        setTimeout(() => {
-                          btn.textContent = originalText;
-                          btn.style.backgroundColor = '#0366d6';
-                        }, 2000);
-                      } catch (fallbackErr) {
-                        alert('Failed to copy schema');
-                      }
-                      document.body.removeChild(textArea);
-                    }
-                  }
-                },
-                disabled: !sdlContent || loading,
-                style: {
-                  padding: '8px 16px',
-                  backgroundColor: (!sdlContent || loading) ? '#ccc' : '#0366d6',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: (!sdlContent || loading) ? 'not-allowed' : 'pointer',
-                  fontSize: '12px',
-                  fontWeight: '500'
-                },
-                onMouseOver: (e) => {
-                  if (!(!sdlContent || loading)) {
-                    e.target.style.backgroundColor = '#0256cc';
-                  }
-                },
-                onMouseOut: (e) => {
-                  if (!(!sdlContent || loading) && e.target.textContent !== 'Copied!') {
-                    e.target.style.backgroundColor = '#0366d6';
-                  }
-                }
-              }, 'Copy schema.graphql')
-            ]),
-
-            React.createElement('div', {
-              key: 'info',
-              style: {
-                padding: '12px',
-                backgroundColor: '#f6f8fa',
-                borderRadius: '4px',
-                fontSize: '11px',
-                color: '#586069'
-              }
-            }, 'The SDL is generated from schema introspection and contains the complete schema definition including types, queries, mutations, and subscriptions.')
+              }, searchQuery.trim() ? highlightMatches(filteredContent, searchQuery) : filteredContent)
+            ])
           ]);
         }
       };
@@ -1769,11 +2081,11 @@
           React.createElement('circle', { key: 'node5', cx: '20', cy: '12', r: '2', fill: 'currentColor' }),
           React.createElement('circle', { key: 'node6', cx: '18', cy: '6', r: '2', fill: 'currentColor' }),
           // Fork connections - straight lines branching out
-          React.createElement('line', { key: 'line1', x1: '8', y1: '12', x2: '11', y2: '6', stroke: 'currentColor', strokeWidth: '1.2' }),
-          React.createElement('line', { key: 'line2', x1: '8', y1: '12', x2: '11', y2: '12', stroke: 'currentColor', strokeWidth: '1.2' }),
-          React.createElement('line', { key: 'line3', x1: '8', y1: '12', x2: '11', y2: '18', stroke: 'currentColor', strokeWidth: '1.2' }),
-          React.createElement('line', { key: 'line4', x1: '15', y1: '12', x2: '18', y2: '12', stroke: 'currentColor', strokeWidth: '1.2' }),
-          React.createElement('line', { key: 'line5', x1: '15', y1: '6', x2: '16', y2: '6', stroke: 'currentColor', strokeWidth: '1.2' })
+          React.createElement('line', { key: 'line1', x1: '8', y1: '12', x2: '11', y2: '6', stroke: 'currentColor', strokeWidth: '1' }),
+          React.createElement('line', { key: 'line2', x1: '8', y1: '12', x2: '11', y2: '12', stroke: 'currentColor', strokeWidth: '1' }),
+          React.createElement('line', { key: 'line3', x1: '8', y1: '12', x2: '11', y2: '18', stroke: 'currentColor', strokeWidth: '1' }),
+          React.createElement('line', { key: 'line4', x1: '15', y1: '12', x2: '18', y2: '12', stroke: 'currentColor', strokeWidth: '1' }),
+          React.createElement('line', { key: 'line5', x1: '15', y1: '6', x2: '16', y2: '6', stroke: 'currentColor', strokeWidth: '1' })
         ]),
         content: () => {
           const [loading, setLoading] = React.useState(true);
@@ -3963,24 +4275,11 @@
         return result.data;
       };
 
-      // Call Gemini API
-      const callGeminiAPI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
-        const apiKey = getGeminiApiKey();
-        const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-3-flash-preview';
+      // --- Shared AI System Prompt ---
+      const buildSystemPrompt = (currentQuery, currentVariables, currentHeaders, { includeTools = false, forceJsonInstruction = false } = {}) => {
+        const schemaContext = buildSchemaContext(window._queryGeneratorSchemaData);
 
-        if (!apiKey) {
-          throw new Error('API key not configured. Please go to Settings to add your Gemini API key.');
-        }
-
-        // Ensure schema is loaded (fetch if needed)
-        const schemaData = await ensureSchemaLoaded();
-
-        const schemaContext = buildSchemaContext(schemaData);
-
-        // Check if tools are enabled before building prompt
-        const toolsEnabled = localStorage.getItem('graphiql:enable-tools') !== 'false';
-
-        const toolsSection = toolsEnabled ? `
+        const toolsSection = includeTools ? `
 AVAILABLE TOOLS:
 You have access to these tools - USE THEM when relevant:
 - **Google Search**: Use this to look up current/live information (weather, news, documentation, examples, etc.)
@@ -3990,7 +4289,11 @@ You have access to these tools - USE THEM when relevant:
 When the user asks about something that requires current information (weather, live data, recent events), USE Google Search to get accurate, up-to-date answers.
 ` : '';
 
-        const systemPrompt = `You are a GraphQL query assistant. You help users create and modify GraphQL queries, variables, and headers based on their natural language requests. You can also answer general questions and have normal conversations.
+        const jsonInstruction = forceJsonInstruction ? `
+CRITICAL: You MUST respond with ONLY a single raw JSON object. No markdown, no code fences, no explanation text before or after. Your entire response must be parseable by JSON.parse(). Use \\n for newlines inside the "query" string field — never use backslash line continuations.
+` : '';
+
+        return `You are a GraphQL query assistant. You help users create and modify GraphQL queries, variables, and headers based on their natural language requests. You can also answer general questions and have normal conversations.
 
 ${schemaContext}
 
@@ -4009,15 +4312,17 @@ INSTRUCTIONS:
 2. If the query requires variables, provide them as valid JSON
 3. If authentication or custom headers are needed, provide them as valid JSON
 4. If the user's request is clear, generate a complete query with any needed variables/headers
-5. If you need clarification, ask specific questions
+5. BIAS TOWARD ACTION: When the user asks for something, DO IT — generate the query immediately. Only ask a clarifying question if the request is genuinely impossible to fulfill without more information. If you can make a reasonable assumption, do so and mention it briefly. Never ask "would you like X or Y?" when you can just provide X and let the user ask for changes.
 6. When modifying existing content, preserve the structure where possible
 7. Always explain what you're doing
 8. Keep your message responses concise and conversational - avoid long lists or excessive formatting
 9. Use simple markdown sparingly: **bold** for emphasis, \`code\` for field names. Avoid headers, numbered lists, or complex formatting
 10. IMPORTANT: Only suggest queries when the user is asking about GraphQL or the schema. For general questions (weather, greetings, off-topic chat), just respond conversationally - do NOT include a query
-11. CRITICAL: NEVER remove, delete, or consolidate content from the editor unless the user EXPLICITLY asks you to. If the editor has multiple operations, your suggestions must include ALL of them. The user's editor content is sacred.
+11. When MODIFYING an existing query (adding fields, changing filters, etc.), preserve the full editor content — include ALL existing operations in your response. But when the user asks for something completely NEW or DIFFERENT (e.g. "show all queries", "write a mutation for X", "create a subscription"), set "isNewQuery": true and generate ONLY the new query — do NOT include or concatenate the existing editor content.
+12. CRITICAL: When the user asks you to modify, add, or change anything in the query — you MUST include the full updated query in the "query" field of your JSON response, even if you think you already suggested it before. Never say "I already included it" or similar — always provide the actual query so the UI can apply it. The UI can only apply changes when the "query" field is present.
+13. Only use inline fragments (\`... on Type\`) when the schema field returns a UNION or INTERFACE type. For regular object type fields, use direct field selections. Check the schema carefully before using fragments — most fields return a concrete type, not a union.
 
-RESPONSE FORMAT - You must respond with valid JSON:
+RESPONSE FORMAT - Your ENTIRE response must be a single JSON object. No text before or after it. No markdown. No code fences. Just JSON:
 {
   "type": "query" | "question" | "suggestion" | "chat",
   "message": "Your explanation or question to the user",
@@ -4033,7 +4338,7 @@ RESPONSE FORMAT - You must respond with valid JSON:
 }
 
 IMPORTANT RULES:
-1. Always include the "suggestions" array with 4 helpful follow-up actions. These MUST be contextual and follow on from the conversation - suggest logical next steps based on what the user just asked and what query is currently in the editor. For example, if the user just added a query for users, suggest adding fields, filtering, pagination, or related queries. Don't repeat generic suggestions.
+1. Always include the "suggestions" array with 4 helpful follow-up actions. These MUST be contextual and follow on from the conversation - suggest logical next steps based on what the user just asked and what query is currently in the editor. IMPORTANT: Vary the length and style of suggestions — mix short ones (2-3 words like "Add pagination") with longer, more specific ones (6-10 words like "Filter posts by published status only"). Include a mix of: field additions, filtering/sorting, related queries, running/analyzing results, and schema exploration. Don't repeat generic suggestions or use the same phrasing patterns.
 
 2. Set "needsResults": true when:
    - The user asks you to "show me", "what are the results", "run this", or similar requests to see actual data
@@ -4065,50 +4370,137 @@ Examples:
 - Simple query: {"type": "query", "message": "Here's a query to fetch all users:", "query": "{ users { id name } }", "resultsSummary": "Reviewing the list of users", "suggestions": ["Add email field", "Add pagination", "Filter by status", "Sort by name"]}
 - Asking for clarification: {"type": "question", "message": "Which user ID would you like to look up?", "options": ["Let me enter an ID", "Show all users instead"], "suggestions": ["Show all users", "Search by email", "List recent users", "Count total users"]}
 - Requesting to analyze results: {"type": "query", "message": "Here's the query. Click 'Run & Analyze' and I'll examine the results for you:", "query": "{ users { id name status } }", "needsResults": true, "resultsSummary": "Analysing user status distribution", "suggestions": ["Filter active users", "Sort by name", "Add email field", "Count users"]}
-- General chat (no query needed): {"type": "chat", "message": "The weather in London is currently 12°C and cloudy with a chance of rain later today.", "suggestions": ["Back to queries", "Show schema", "Help me build a query", "What can you do?"]}`;
+- General chat (no query needed): {"type": "chat", "message": "The weather in London is currently 12°C and cloudy with a chance of rain later today.", "suggestions": ["Back to queries", "Show schema", "Help me build a query", "What can you do?"]}
+${jsonInstruction}`;
+      };
+
+      // --- Shared Conversation History Filter ---
+      const filterConversationHistory = (conversationHistory) => {
+        return conversationHistory.filter(msg => {
+          if (msg.role !== 'user' && msg.role !== 'assistant') return false;
+          if (!msg.content || !msg.content.trim()) return false;
+          if (msg.role === 'assistant' && msg.type === 'error') return false;
+          if (msg.content.startsWith('Error:')) return false;
+          return true;
+        });
+      };
+
+      // --- Shared Response Parser (strips markdown fences, parses JSON) ---
+      // Attempts to repair truncated JSON (from token limit cutoff)
+      const repairTruncatedJSON = (text) => {
+        // Find the start of our JSON object
+        const start = text.indexOf('{');
+        if (start === -1) return null;
+        let s = text.substring(start);
+
+        // Close any open string (odd number of unescaped quotes)
+        let inString = false;
+        for (let i = 0; i < s.length; i++) {
+          if (s[i] === '\\') { i++; continue; }
+          if (s[i] === '"') inString = !inString;
+        }
+        if (inString) s += '"';
+
+        // Remove trailing comma if present
+        s = s.replace(/,\s*$/, '');
+
+        // Count open brackets/braces and close them
+        let braces = 0, brackets = 0;
+        inString = false;
+        for (let i = 0; i < s.length; i++) {
+          if (s[i] === '\\') { i++; continue; }
+          if (s[i] === '"') { inString = !inString; continue; }
+          if (inString) continue;
+          if (s[i] === '{') braces++;
+          if (s[i] === '}') braces--;
+          if (s[i] === '[') brackets++;
+          if (s[i] === ']') brackets--;
+        }
+        while (brackets > 0) { s += ']'; brackets--; }
+        while (braces > 0) { s += '}'; braces--; }
+
+        try {
+          const parsed = JSON.parse(s);
+          if (parsed && parsed.type) return parsed;
+        } catch {}
+        return null;
+      };
+
+      const parseAIResponse = (textContent) => {
+        if (!textContent) throw new Error('No response from AI');
+
+        // Strip markdown code fences if present
+        let cleaned = textContent.trim();
+        if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+        }
+
+        // 1. Try direct JSON parse
+        try {
+          return JSON.parse(cleaned);
+        } catch {}
+
+        // 2. Try to find a {"type": ...} JSON response object in the text
+        const typePattern = /\{\s*"type"\s*:/g;
+        let match;
+        while ((match = typePattern.exec(cleaned)) !== null) {
+          const start = match.index;
+          for (let i = cleaned.length - 1; i > start; i--) {
+            if (cleaned[i] === '}') {
+              try {
+                const parsed = JSON.parse(cleaned.substring(start, i + 1));
+                if (parsed && parsed.type) return parsed;
+              } catch {}
+            }
+          }
+        }
+
+        // 3. Try to repair truncated JSON (token limit cutoff)
+        const repaired = repairTruncatedJSON(cleaned);
+        if (repaired) return repaired;
+
+        // 4. Fallback: extract GraphQL from markdown fences and build response
+        const graphqlMatch = cleaned.match(/```graphql\s*\n([\s\S]*?)```/);
+        if (graphqlMatch) {
+          const query = graphqlMatch[1].trim();
+          const message = cleaned.substring(0, cleaned.indexOf('```')).trim()
+            || 'Here is the updated query:';
+          return { type: 'query', message, query };
+        }
+
+        return { type: 'suggestion', message: cleaned, query: null };
+      };
+
+      // Call Gemini API
+      const callGeminiAPI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
+        const apiKey = getAPIKey();
+        const model = getAPIModel() || 'gemini-3-flash-preview';
+
+        if (!apiKey) {
+          throw new Error('API key not configured. Please go to Settings to add your API key.');
+        }
+
+        const schemaData = await ensureSchemaLoaded();
+        const toolsEnabled = localStorage.getItem('graphiql:enable-tools') !== 'false';
+        const systemPrompt = buildSystemPrompt(currentQuery, currentVariables, currentHeaders, { includeTools: toolsEnabled, forceJsonInstruction: true });
 
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-        // Build conversation contents - only include user and assistant messages with actual text content
-        // Filter out error messages and system messages
         const contents = [];
-
-        conversationHistory
-          .filter(msg => {
-            // Only include user and assistant messages
-            if (msg.role !== 'user' && msg.role !== 'assistant') return false;
-            // Must have content
-            if (!msg.content || !msg.content.trim()) return false;
-            // Filter out error messages from assistant
-            if (msg.role === 'assistant' && msg.type === 'error') return false;
-            // Filter out messages that are just error text
-            if (msg.content.startsWith('Error:')) return false;
-            return true;
-          })
-          .forEach(msg => {
-            contents.push({
-              role: msg.role === 'user' ? 'user' : 'model',
-              parts: [{ text: String(msg.content) }]
-            });
+        filterConversationHistory(conversationHistory).forEach(msg => {
+          contents.push({
+            role: msg.role === 'user' ? 'user' : 'model',
+            parts: [{ text: String(msg.content) }]
           });
-
-        // Always add the new user message
+        });
         contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
-        // Build request body
         const requestBody = {
-          // Use systemInstruction to always provide schema context
-          systemInstruction: {
-            parts: [{ text: systemPrompt }]
-          },
+          systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: contents,
-          generationConfig: {
-            responseMimeType: 'application/json'
-          }
+          generationConfig: { responseMimeType: 'application/json' }
         };
 
-        // Add tools if enabled (Google Search, Code Execution)
-        // Note: url_context (Browse) is not supported by all models
         if (toolsEnabled) {
           requestBody.tools = [
             { google_search: {} },
@@ -4118,9 +4510,7 @@ Examples:
 
         const response = await fetch(apiUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody)
         });
 
@@ -4132,44 +4522,25 @@ Examples:
         const data = await response.json();
         const candidate = data.candidates?.[0];
         const parts = candidate?.content?.parts || [];
-
-        // Extract text content (may be in any part)
         const textContent = parts.find(p => p.text)?.text;
 
-        if (!textContent) {
-          throw new Error('No response from AI');
-        }
+        if (!textContent) throw new Error('No response from AI');
 
-        // Extract tool usage metadata
+        // Extract Gemini-specific tool usage metadata
         const toolUsage = {};
-
-        // Grounding metadata analysis
         const groundingMetadata = candidate?.groundingMetadata;
         if (groundingMetadata) {
           const searchQueries = groundingMetadata.webSearchQueries || [];
           const webSources = (groundingMetadata.groundingChunks || [])
             .filter(c => c.web)
             .map(c => ({ title: c.web.title, uri: c.web.uri }));
-
-          // If there are search queries, it's Google Search
-          // If there are web sources but NO search queries, it's URL Context
           const hasSearchQueries = searchQueries.some(q => q && q.trim());
-
           if (hasSearchQueries) {
-            // Google Search was used
-            toolUsage.googleSearch = {
-              queries: searchQueries,
-              sources: webSources
-            };
+            toolUsage.googleSearch = { queries: searchQueries, sources: webSources };
           } else if (webSources.length > 0) {
-            // URL Context was used (web sources without search queries)
-            toolUsage.urlContext = {
-              urls: webSources.map(s => s.uri)
-            };
+            toolUsage.urlContext = { urls: webSources.map(s => s.uri) };
           }
         }
-
-        // Code execution results
         const executableCode = parts.find(p => p.executableCode);
         const codeResult = parts.find(p => p.codeExecutionResult);
         if (executableCode || codeResult) {
@@ -4180,48 +4551,118 @@ Examples:
             output: codeResult?.codeExecutionResult?.output || ''
           };
         }
-
-        // Also check for retrievedContext (alternative URL context format)
         const retrievedContextChunks = (groundingMetadata?.groundingChunks || [])
           .filter(c => c.retrievedContext?.uri);
         if (retrievedContextChunks.length > 0 && !toolUsage.urlContext) {
-          toolUsage.urlContext = {
-            urls: retrievedContextChunks.map(c => c.retrievedContext.uri)
-          };
+          toolUsage.urlContext = { urls: retrievedContextChunks.map(c => c.retrievedContext.uri) };
         }
-
-        // Check urlContextMetadata (separate field for URL context tool)
         const urlContextMetadata = candidate?.urlContextMetadata;
         if (urlContextMetadata?.urlMetadata?.length > 0) {
           const successfulUrls = urlContextMetadata.urlMetadata
             .filter(u => u.urlRetrievalStatus === 'URL_RETRIEVAL_STATUS_SUCCESS')
             .map(u => u.retrievedUrl);
           if (successfulUrls.length > 0) {
-            toolUsage.urlContext = {
-              urls: successfulUrls
-            };
+            toolUsage.urlContext = { urls: successfulUrls };
           }
         }
 
-        // Parse the JSON response
-        let parsedResponse;
-        try {
-          parsedResponse = JSON.parse(textContent);
-        } catch {
-          // If JSON parsing fails, wrap in suggestion
-          parsedResponse = {
-            type: 'suggestion',
-            message: textContent,
-            query: null
-          };
-        }
-
-        // Attach tool usage if any tools were used
+        const parsedResponse = parseAIResponse(textContent);
         if (Object.keys(toolUsage).length > 0) {
           parsedResponse.toolUsage = toolUsage;
         }
-
         return parsedResponse;
+      };
+
+      // Call Puter AI
+      const callPuterAI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
+        const model = getAPIModel() || 'gemini-3-flash-preview';
+
+        const schemaData = await ensureSchemaLoaded();
+        const systemPrompt = buildSystemPrompt(currentQuery, currentVariables, currentHeaders, { forceJsonInstruction: true });
+
+        const messages = [{ role: 'system', content: systemPrompt }];
+        filterConversationHistory(conversationHistory).forEach(msg => {
+          messages.push({ role: msg.role, content: String(msg.content) });
+        });
+        messages.push({ role: 'user', content: userMessage });
+
+        const response = await puter.ai.chat(messages, { model, stream: false });
+        const textContent = typeof response === 'string' ? response
+          : response?.result?.message?.content
+            || response?.message?.content
+            || (typeof response?.message === 'string' ? response.message : '')
+            || '';
+
+        if (!textContent && response && typeof response === 'object') {
+          // Last resort: stringify and try to extract
+          return parseAIResponse(JSON.stringify(response));
+        }
+        return parseAIResponse(textContent);
+      };
+
+      // Call OpenAI-compatible API (OpenRouter, OpenAI, Custom)
+      const callOpenAICompatibleAPI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
+        const apiKey = getAPIKey();
+        const model = getAPIModel() || 'gpt-4o';
+        const provider = getAPIProvider();
+
+        if (!apiKey) {
+          throw new Error('API key not configured. Please go to Settings to add your API key.');
+        }
+
+        const baseUrl = provider === 'openrouter' ? 'https://openrouter.ai/api/v1'
+          : provider === 'openai' ? 'https://api.openai.com/v1'
+          : getAPIBaseUrl();
+
+        if (!baseUrl) {
+          throw new Error('Base URL not configured. Please set a base URL in Settings for your custom provider.');
+        }
+
+        const schemaData = await ensureSchemaLoaded();
+        const systemPrompt = buildSystemPrompt(currentQuery, currentVariables, currentHeaders, { forceJsonInstruction: true });
+
+        const messages = [{ role: 'system', content: systemPrompt }];
+        filterConversationHistory(conversationHistory).forEach(msg => {
+          messages.push({ role: msg.role, content: String(msg.content) });
+        });
+        messages.push({ role: 'user', content: userMessage });
+
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({ model, messages, response_format: { type: 'json_object' } })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error?.message || `API request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const textContent = data.choices?.[0]?.message?.content;
+        return parseAIResponse(textContent);
+      };
+
+      // Unified AI call dispatcher
+      const callAI = async (userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory = []) => {
+        const provider = getAPIProvider();
+
+        if (!provider) {
+          throw new Error('Please configure an AI provider in Settings. Click the gear icon above.');
+        }
+
+        if (provider === API_PROVIDERS.PUTER) {
+          return callPuterAI(userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory);
+        }
+
+        if (provider === API_PROVIDERS.GEMINI) {
+          return callGeminiAPI(userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory);
+        }
+
+        return callOpenAICompatibleAPI(userMessage, currentQuery, currentVariables, currentHeaders, conversationHistory);
       };
 
       // Get current query from GraphiQL
@@ -4854,7 +5295,7 @@ Examples:
       };
 
       // Message Component with inline diff support
-      const MessageComponent = ({ message, onOptionClick, showDiff, diffStatus, onAccept, onReject, onAcceptAndRun, onRunAndAnalyze }) => {
+      const MessageComponent = ({ message, onOptionClick, showDiff, diffStatus, onAccept, onReject, onAcceptAndRun, onRunAndAnalyze, onRetry }) => {
         const isUser = message.role === 'user';
         const isSystem = message.role === 'system';
         const isResultsFeedback = message.type === 'results-feedback';
@@ -5148,7 +5589,80 @@ Examples:
                   e.target.style.borderColor = 'var(--color-border, #d1d5da)';
                 }
               }, option)
-            ))
+            )),
+            // Retry button — subtle, bottom-right of bubble
+            !isUser && !isSystem && !isAnalyzingStatus && onRetry && React.createElement('div', {
+              key: 'retry',
+              style: {
+                display: 'flex',
+                justifyContent: 'flex-end',
+                marginTop: '6px'
+              }
+            }, React.createElement('div', {
+              style: { position: 'relative', display: 'inline-flex' },
+              onMouseOver: (e) => {
+                const tip = e.currentTarget.querySelector('[data-tooltip]');
+                if (tip) tip.style.opacity = '1';
+              },
+              onMouseOut: (e) => {
+                const tip = e.currentTarget.querySelector('[data-tooltip]');
+                if (tip) tip.style.opacity = '0';
+              }
+            }, [
+              React.createElement('span', {
+                key: 'tip',
+                'data-tooltip': true,
+                style: {
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  marginBottom: '4px',
+                  padding: '3px 8px',
+                  backgroundColor: '#24292e',
+                  color: 'white',
+                  fontSize: '10px',
+                  borderRadius: '4px',
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  opacity: 0,
+                  transition: 'opacity 0.15s'
+                }
+              }, 'Retry'),
+              React.createElement('button', {
+                key: 'btn',
+                type: 'button',
+                onClick: (e) => { e.preventDefault(); onRetry(); },
+                style: {
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '20px',
+                  height: '20px',
+                  padding: 0,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--color-alpha-tertiary, #b0b8c4)',
+                  borderRadius: '4px',
+                  transition: 'color 0.15s'
+                },
+                onMouseOver: (e) => { e.currentTarget.style.color = 'var(--color-alpha-secondary, #586069)'; },
+                onMouseOut: (e) => { e.currentTarget.style.color = 'var(--color-alpha-tertiary, #b0b8c4)'; }
+              }, React.createElement('svg', {
+                width: 12,
+                height: 12,
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.5,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round'
+              }, [
+                React.createElement('polyline', { key: 'p1', points: '1 4 1 10 7 10' }),
+                React.createElement('path', { key: 'p2', d: 'M3.51 15a9 9 0 1 0 2.13-9.36L1 10' })
+              ]))
+            ]))
           ])  // Close content-wrapper
           ]),  // Close bubble
 
@@ -5585,43 +6099,115 @@ Examples:
 
       // Settings Popup Content Component (for Query Generator)
       const SettingsPopupContent = ({ onClose }) => {
-        const originalApiKey = React.useRef(getGeminiApiKey());
+        const [provider, setProvider] = React.useState(() => getAPIProvider());
+        const originalApiKey = React.useRef(getAPIKey());
         const [apiKey, setApiKey] = React.useState(originalApiKey.current);
         const [showApiKey, setShowApiKey] = React.useState(false);
+        const [apiBaseUrl, setApiBaseUrl] = React.useState(() => getAPIBaseUrl());
         const [selectedModel, setSelectedModel] = React.useState(() =>
-          localStorage.getItem('graphiql:gemini-model') || ''
+          localStorage.getItem(`graphiql:model:${getAPIProvider()}`) || localStorage.getItem('graphiql:api-model') || ''
         );
+        const [modelSearch, setModelSearch] = React.useState('');
+        const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false);
+        const modelDropdownRef = React.useRef(null);
+        const modelInputRef = React.useRef(null);
+        const [modelDropdownPos, setModelDropdownPos] = React.useState(null);
         const [persistChat, setPersistChat] = React.useState(() =>
-          localStorage.getItem('graphiql:persist-chat') !== 'false' // default true
+          localStorage.getItem('graphiql:persist-chat') !== 'false'
         );
         const [enableTools, setEnableTools] = React.useState(() =>
-          localStorage.getItem('graphiql:enable-tools') !== 'false' // default true
+          localStorage.getItem('graphiql:enable-tools') !== 'false'
         );
         const [models, setModels] = React.useState([]);
         const [loadingModels, setLoadingModels] = React.useState(false);
         const [apiKeySaveStatus, setApiKeySaveStatus] = React.useState(null);
         const lastFetchedKeyRef = React.useRef(null);
 
-        // Check if API key has been modified
-        const apiKeyChanged = apiKey !== originalApiKey.current;
+        // Puter auth state
+        const [puterUser, setPuterUser] = React.useState(null);
+        const [puterChecking, setPuterChecking] = React.useState(false);
 
-        const loadModels = React.useCallback(async (key) => {
-          if (!key) {
-            setModels([]);
-            return;
+        // Check Puter auth status (isSignedIn is synchronous, getUser is async)
+        React.useEffect(() => {
+          if (typeof puter !== 'undefined' && puter.auth.isSignedIn()) {
+            setPuterChecking(true);
+            puter.auth.getUser().then(user => {
+              setPuterUser(user);
+              setPuterChecking(false);
+            }).catch(() => setPuterChecking(false));
           }
-          // Don't refetch if we already fetched for this key
-          if (lastFetchedKeyRef.current === key && models.length > 0) {
-            return;
-          }
+        }, []);
+
+        // Close model dropdown on outside click
+        React.useEffect(() => {
+          if (!modelDropdownOpen) return;
+          const handler = (e) => {
+            if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target)) {
+              setModelDropdownOpen(false);
+            }
+          };
+          document.addEventListener('mousedown', handler);
+          return () => document.removeEventListener('mousedown', handler);
+        }, [modelDropdownOpen]);
+
+        const apiKeyChanged = apiKey !== originalApiKey.current;
+        const isPuter = provider === API_PROVIDERS.PUTER;
+        const needsApiKey = !isPuter && provider;
+
+        const handleProviderChange = (p) => {
+          setProvider(p);
+          localStorage.setItem('graphiql:api-provider', p);
+          // Restore per-provider model selection
+          const savedModel = localStorage.getItem(`graphiql:model:${p}`) || '';
+          setSelectedModel(savedModel);
+          localStorage.setItem('graphiql:api-model', savedModel);
+          setModelSearch('');
+          setModelDropdownOpen(false);
+        };
+
+        // --- Model loading (Puter, Gemini, OpenAI) ---
+        const loadModels = React.useCallback(async (source) => {
           setLoadingModels(true);
           try {
-            const fetchedModels = await fetchGeminiModels(key);
+            let fetchedModels = [];
+            if (source === 'puter') {
+              if (typeof puter !== 'undefined') {
+                const raw = await puter.ai.listModels();
+                fetchedModels = (raw || []).map(m => ({
+                  id: m.id,
+                  name: m.name || m.id
+                })).sort((a, b) => a.name.localeCompare(b.name));
+              }
+            } else if (source === 'openai') {
+              const key = getAPIKey();
+              if (!key) { setModels([]); setLoadingModels(false); return; }
+              const res = await fetch('https://api.openai.com/v1/models', {
+                headers: { 'Authorization': `Bearer ${key}` }
+              });
+              if (res.ok) {
+                const data = await res.json();
+                fetchedModels = (data.data || [])
+                  .filter(m => m.id && !m.id.includes('realtime') && !m.id.includes('audio') && !m.id.includes('tts') && !m.id.includes('whisper') && !m.id.includes('dall-e') && !m.id.includes('embedding') && !m.id.includes('moderation'))
+                  .map(m => ({ id: m.id, name: m.id }))
+                  .sort((a, b) => a.name.localeCompare(b.name));
+              }
+            } else {
+              // Gemini — source is the API key
+              if (!source || source.length < 10) { setModels([]); setLoadingModels(false); return; }
+              if (lastFetchedKeyRef.current === source && models.length > 0) { setLoadingModels(false); return; }
+              fetchedModels = await fetchGeminiModels(source);
+              lastFetchedKeyRef.current = source;
+            }
             setModels(fetchedModels);
-            lastFetchedKeyRef.current = key;
             if (fetchedModels.length > 0 && !selectedModel) {
-              const defaultModel = fetchedModels.find(m => m.id.includes('flash')) || fetchedModels[0];
+              const defaultModel = source === 'puter'
+                ? fetchedModels.find(m => m.id.includes('gemini') && m.id.includes('flash')) || fetchedModels[0]
+                : source === 'openai'
+                ? fetchedModels.find(m => m.id === 'gpt-4o') || fetchedModels[0]
+                : fetchedModels.find(m => m.id.includes('flash')) || fetchedModels[0];
               setSelectedModel(defaultModel.id);
+              localStorage.setItem(`graphiql:model:${provider}`, defaultModel.id);
+              localStorage.setItem('graphiql:api-model', defaultModel.id);
             }
           } catch (err) {
             console.error('Failed to fetch models:', err);
@@ -5631,186 +6217,350 @@ Examples:
           }
         }, [selectedModel, models.length]);
 
-        // Auto-fetch models when API key changes (debounced)
+        // Providers that support model list fetching
+        const modelListProviders = [API_PROVIDERS.PUTER, API_PROVIDERS.GEMINI, API_PROVIDERS.OPENAI];
+
+        // Auto-fetch models when API key changes (debounced) for key-based providers
         React.useEffect(() => {
-          if (!apiKey || apiKey.length < 10) return; // Don't fetch for very short keys
+          if (provider === API_PROVIDERS.GEMINI && apiKey && apiKey.length >= 10) {
+            const timer = setTimeout(() => loadModels(apiKey), 500);
+            return () => clearTimeout(timer);
+          }
+          if (provider === API_PROVIDERS.OPENAI && apiKey && apiKey.length >= 10) {
+            const timer = setTimeout(() => loadModels('openai'), 500);
+            return () => clearTimeout(timer);
+          }
+        }, [apiKey, provider]);
 
-          const timer = setTimeout(() => {
-            loadModels(apiKey);
-          }, 500); // 500ms debounce
-
-          return () => clearTimeout(timer);
-        }, [apiKey]);
-
-        // Initial load on mount
+        // Load models on mount or when provider changes
         React.useEffect(() => {
-          if (apiKey) loadModels(apiKey);
-        }, []);
+          if (provider === API_PROVIDERS.PUTER) loadModels('puter');
+          else if (provider === API_PROVIDERS.GEMINI && apiKey) loadModels(apiKey);
+          else if (provider === API_PROVIDERS.OPENAI && apiKey) loadModels('openai');
+          else setModels([]);
+        }, [provider]);
 
-        // Save API key only
         const handleSaveApiKey = () => {
-          localStorage.setItem('graphiql:gemini-api-key', apiKey);
+          localStorage.setItem('graphiql:api-key', apiKey);
           originalApiKey.current = apiKey;
           setApiKeySaveStatus('saved');
           setTimeout(() => setApiKeySaveStatus(null), 1500);
         };
 
-        // Auto-save model when changed
         const handleModelChange = (newModel) => {
           setSelectedModel(newModel);
-          localStorage.setItem('graphiql:gemini-model', newModel);
+          localStorage.setItem(`graphiql:model:${provider}`, newModel);
+          localStorage.setItem('graphiql:api-model', newModel); // keep in sync for runtime readers
         };
 
-        // Auto-save persist chat when changed
+        const handleBaseUrlChange = (url) => {
+          setApiBaseUrl(url);
+          localStorage.setItem('graphiql:api-base-url', url);
+        };
+
         const handlePersistChatChange = (enabled) => {
           setPersistChat(enabled);
           localStorage.setItem('graphiql:persist-chat', enabled ? 'true' : 'false');
-          if (!enabled) {
-            localStorage.removeItem('graphiql:chat-messages');
-          }
+          if (!enabled) localStorage.removeItem('graphiql:chat-messages');
         };
 
-        // Auto-save tools setting when changed
         const handleToolsChange = (enabled) => {
           setEnableTools(enabled);
           localStorage.setItem('graphiql:enable-tools', enabled ? 'true' : 'false');
         };
 
-        return React.createElement(React.Fragment, null, [
-          // Header (using native GraphiQL classes)
-          React.createElement('div', {
-            key: 'header',
-            className: 'graphiql-dialog-header'
-          }, [
-            React.createElement('h2', {
-              key: 'title',
-              className: 'graphiql-dialog-title'
-            }, 'Query Generator Settings'),
-            React.createElement('button', {
-              key: 'close',
-              onClick: onClose,
-              type: 'button',
-              'aria-label': 'Close dialog',
-              style: {
-                position: 'absolute',
-                top: '21px',
-                right: '21px',
-                background: '#ffffff',
-                border: '2px solid #e0e0e0',
-                cursor: 'pointer',
-                width: '38px',
-                height: '38px',
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#5c6370',
-                fontSize: '24px',
-                lineHeight: 0,
-                fontWeight: '300',
-                paddingBottom: '2px'
-              },
-              onMouseEnter: (e) => e.currentTarget.style.background = '#f5f5f5',
-              onMouseLeave: (e) => e.currentTarget.style.background = '#ffffff'
-            }, '×')
-          ]),
+        const handlePuterSignIn = async () => {
+          try {
+            await puter.auth.signIn();
+            const user = await puter.auth.getUser();
+            setPuterUser(user);
+          } catch (err) {
+            console.error('Puter sign-in failed:', err);
+          }
+        };
 
-          // API Key Section (using native GraphiQL classes)
-          React.createElement('div', { key: 'api-key-section', className: 'graphiql-dialog-section' }, [
+        const handlePuterSignOut = async () => {
+          try {
+            await puter.auth.signOut();
+            setPuterUser(null);
+          } catch (err) {
+            console.error('Puter sign-out failed:', err);
+          }
+        };
+
+        const defaultModels = {
+          [API_PROVIDERS.PUTER]: 'gemini-3-flash-preview',
+          [API_PROVIDERS.GEMINI]: 'gemini-3-flash-preview',
+          [API_PROVIDERS.OPENROUTER]: 'google/gemini-2.5-flash',
+          [API_PROVIDERS.OPENAI]: 'gpt-4o',
+          [API_PROVIDERS.CUSTOM]: 'gpt-4o'
+        };
+
+        const sections = [];
+
+        // --- Header ---
+        sections.push(React.createElement('div', {
+          key: 'header', className: 'graphiql-dialog-header'
+        }, [
+          React.createElement('h2', { key: 'title', className: 'graphiql-dialog-title' }, 'Query Generator Settings'),
+          React.createElement('button', {
+            key: 'close', onClick: onClose, type: 'button', 'aria-label': 'Close dialog',
+            style: {
+              position: 'absolute', top: '21px', right: '21px',
+              background: '#ffffff', border: '2px solid #e0e0e0', cursor: 'pointer',
+              width: '38px', height: '38px', borderRadius: '6px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#5c6370', fontSize: '24px', lineHeight: 0, fontWeight: '300', paddingBottom: '2px'
+            },
+            onMouseEnter: (e) => e.currentTarget.style.background = '#f5f5f5',
+            onMouseLeave: (e) => e.currentTarget.style.background = '#ffffff'
+          }, '\u00d7')
+        ]));
+
+        // --- Service ---
+        sections.push(React.createElement('div', { key: 'provider-section', className: 'graphiql-dialog-section' }, [
+          React.createElement('div', { key: 'info' }, [
+            React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Service'),
+            React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Select the AI service for the query generator.')
+          ]),
+          React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' },
+            [API_PROVIDERS.PUTER, API_PROVIDERS.GEMINI, API_PROVIDERS.OPENROUTER, API_PROVIDERS.OPENAI, API_PROVIDERS.CUSTOM].map(p =>
+              React.createElement('button', {
+                key: p, type: 'button',
+                className: provider === p ? 'graphiql-button active' : 'graphiql-button',
+                onClick: () => handleProviderChange(p)
+              }, p === 'puter' ? 'Puter' : p === 'gemini' ? 'Gemini' : p === 'openrouter' ? 'OpenRouter' : p === 'openai' ? 'OpenAI' : 'Custom')
+            )
+          )
+        ]));
+
+        // --- Puter Account (when Puter selected) ---
+        if (isPuter) {
+          const puterContent = [];
+          if (puterChecking) {
+            puterContent.push(React.createElement('div', {
+              key: 'checking', className: 'graphiql-dialog-section-caption'
+            }, 'Checking sign-in status...'));
+          } else if (puterUser) {
+            puterContent.push(React.createElement('div', {
+              key: 'status', style: { display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }
+            }, [
+              React.createElement('span', { key: 'user', style: { color: '#2ea043' } },
+                'Signed in as @' + (puterUser.username || puterUser.email || 'user')),
+              React.createElement('button', {
+                key: 'signout', type: 'button', className: 'graphiql-button', onClick: handlePuterSignOut
+              }, 'Sign Out')
+            ]));
+          } else {
+            puterContent.push(React.createElement('div', {
+              key: 'not-signed-in', style: { display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }
+            }, [
+              React.createElement('span', { key: 'status', className: 'graphiql-dialog-section-caption' }, 'Not signed in'),
+              React.createElement('button', {
+                key: 'signin', type: 'button', className: 'graphiql-button',
+                onClick: handlePuterSignIn, style: { fontWeight: '600' }
+              }, 'Sign in with Puter')
+            ]));
+          }
+          sections.push(React.createElement('div', { key: 'puter-auth-section', className: 'graphiql-dialog-section' }, [
             React.createElement('div', { key: 'info' }, [
-              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Gemini API Key'),
-              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Enter your Google AI Studio API key to enable the query generator.')
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Account'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Sign in to access 500+ AI models with no API key required.')
+            ]),
+            ...puterContent
+          ]));
+        }
+
+        // --- API Key (when non-Puter selected) ---
+        if (needsApiKey) {
+          const captions = {
+            [API_PROVIDERS.GEMINI]: 'Enter your Google AI Studio API key.',
+            [API_PROVIDERS.OPENROUTER]: 'Enter your OpenRouter API key.',
+            [API_PROVIDERS.OPENAI]: 'Enter your OpenAI API key.',
+            [API_PROVIDERS.CUSTOM]: 'Enter the API key for your custom endpoint.'
+          };
+          sections.push(React.createElement('div', { key: 'api-key-section', className: 'graphiql-dialog-section' }, [
+            React.createElement('div', { key: 'info' }, [
+              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'API Key'),
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, captions[provider] || captions[API_PROVIDERS.CUSTOM])
             ]),
             React.createElement('div', { key: 'input-row', style: { display: 'flex', gap: '8px' } }, [
               React.createElement('input', {
-                key: 'input',
-                type: showApiKey ? 'text' : 'password',
-                value: apiKey,
-                onChange: (e) => setApiKey(e.target.value),
-                placeholder: 'Enter API key',
-                className: 'graphiql-button',
-                style: {
-                  flex: 1,
-                  fontFamily: 'monospace',
-                  textAlign: 'left'
-                }
+                key: 'input', type: showApiKey ? 'text' : 'password',
+                value: apiKey, onChange: (e) => setApiKey(e.target.value),
+                placeholder: 'Enter API key', className: 'graphiql-button',
+                style: { flex: 1, fontFamily: 'monospace', textAlign: 'left' }
               }),
-              // Show/Hide button transforms to Save button when API key is edited
               React.createElement('button', {
                 key: 'action-btn',
                 onClick: apiKeyChanged ? handleSaveApiKey : () => setShowApiKey(!showApiKey),
-                type: 'button',
-                className: 'graphiql-button',
-                style: { minWidth: '70px' }
+                type: 'button', className: 'graphiql-button', style: { minWidth: '70px' }
               }, apiKeyChanged ? (apiKeySaveStatus === 'saved' ? 'Saved!' : 'Save') : (showApiKey ? 'Hide' : 'Show'))
             ])
-          ]),
+          ]));
 
-          // Model selector Section (using native GraphiQL classes) - auto-saves
-          React.createElement('div', { key: 'model-section', className: 'graphiql-dialog-section' }, [
-            React.createElement('div', { key: 'info' }, [
-              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Model'),
-              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Select the Gemini model to use for generating queries.')
-            ]),
-            models.length > 0 ?
-              React.createElement('select', {
-                key: 'select',
-                value: selectedModel,
-                onChange: (e) => handleModelChange(e.target.value),
-                className: 'graphiql-button',
-                style: { cursor: 'pointer' }
-              }, models.map(m => React.createElement('option', { key: m.id, value: m.id }, m.name)))
-            :
-              React.createElement('div', {
-                key: 'no-models',
-                className: 'graphiql-dialog-section-caption'
-              }, loadingModels ? 'Loading models...' : (apiKey ? 'No models found' : 'Enter API key to load models'))
-          ]),
+          // Custom base URL
+          if (provider === API_PROVIDERS.CUSTOM) {
+            sections.push(React.createElement('div', { key: 'base-url-section', className: 'graphiql-dialog-section' }, [
+              React.createElement('div', { key: 'info' }, [
+                React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Base URL'),
+                React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'OpenAI-compatible API base URL (e.g., https://api.example.com/v1).')
+              ]),
+              React.createElement('input', {
+                key: 'input', type: 'text', value: apiBaseUrl,
+                onChange: (e) => handleBaseUrlChange(e.target.value),
+                placeholder: 'https://api.example.com/v1', className: 'graphiql-button',
+                style: { width: '100%', fontFamily: 'monospace', textAlign: 'left', boxSizing: 'border-box' }
+              })
+            ]));
+          }
+        }
 
-          // Persist chat toggle Section (using native GraphiQL classes) - auto-saves
-          React.createElement('div', { key: 'persist-section', className: 'graphiql-dialog-section' }, [
-            React.createElement('div', { key: 'info' }, [
-              React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Chat History'),
-              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Persist chat history between sessions.')
-            ]),
-            React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' }, [
-              React.createElement('button', {
-                key: 'on',
-                type: 'button',
-                className: persistChat ? 'graphiql-button active' : 'graphiql-button',
-                onClick: () => handlePersistChatChange(true)
-              }, 'On'),
-              React.createElement('button', {
-                key: 'off',
-                type: 'button',
-                className: !persistChat ? 'graphiql-button active' : 'graphiql-button',
-                onClick: () => handlePersistChatChange(false)
-              }, 'Off')
-            ])
-          ]),
+        // --- Model ---
+        if (provider) {
+          const hasModelList = modelListProviders.includes(provider);
+          const modelContent = [];
+          modelContent.push(React.createElement('div', { key: 'info' }, [
+            React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Model'),
+            React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' },
+              hasModelList ? 'Search and select a model.' : 'Enter the model identifier to use.')
+          ]));
 
-          // Tools toggle Section
-          React.createElement('div', { key: 'tools-section', className: 'graphiql-dialog-section' }, [
+          if (hasModelList) {
+            if (models.length > 0) {
+              // Filter models by search term
+              const searchLower = modelSearch.toLowerCase();
+              const filtered = searchLower
+                ? models.filter(m => m.id.toLowerCase().includes(searchLower) || m.name.toLowerCase().includes(searchLower))
+                : models;
+              // Compute dropdown position from the input's bounding rect
+              const updateDropdownPos = () => {
+                if (!modelInputRef.current) return;
+                const rect = modelInputRef.current.getBoundingClientRect();
+                setModelDropdownPos({ top: rect.bottom, left: rect.left, width: rect.width });
+              };
+
+              const getDropdownStyle = () => {
+                if (!modelDropdownPos) return { display: 'none' };
+                return {
+                  position: 'fixed',
+                  top: modelDropdownPos.top + 'px',
+                  left: modelDropdownPos.left + 'px',
+                  width: modelDropdownPos.width + 'px',
+                  zIndex: 10000,
+                  maxHeight: '280px', overflowY: 'auto',
+                  background: '#fff', border: '1px solid #d0d7de', borderRadius: '0 0 6px 6px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                };
+              };
+
+              modelContent.push(React.createElement('div', {
+                key: 'model-picker', ref: modelDropdownRef
+              }, [
+                // Search input
+                React.createElement('input', {
+                  key: 'search',
+                  ref: modelInputRef,
+                  type: 'text',
+                  value: modelDropdownOpen ? modelSearch : selectedModel,
+                  onChange: (e) => { setModelSearch(e.target.value); setModelDropdownOpen(true); updateDropdownPos(); },
+                  onFocus: () => { setModelSearch(''); setModelDropdownOpen(true); updateDropdownPos(); },
+                  placeholder: 'Search models...',
+                  className: 'graphiql-button',
+                  style: { width: '100%', fontFamily: 'monospace', textAlign: 'left', boxSizing: 'border-box' }
+                }),
+                // Dropdown list — rendered via portal to body so it escapes overflow clipping
+                modelDropdownOpen && createPortal(
+                  React.createElement('div', {
+                    key: 'dropdown',
+                    ref: (el) => {
+                      // Extend the outside-click ref to include the portal dropdown
+                      if (el) modelDropdownRef.current = { contains: (t) => el.contains(t) || (modelInputRef.current && modelInputRef.current.contains(t)) };
+                    },
+                    style: getDropdownStyle()
+                  }, filtered.length > 0
+                    ? filtered.slice(0, 100).map(m => React.createElement('div', {
+                        key: m.id,
+                        onMouseDown: (e) => { e.preventDefault(); handleModelChange(m.id); setModelDropdownOpen(false); setModelSearch(''); },
+                        style: {
+                          padding: '6px 10px', cursor: 'pointer', fontSize: '13px',
+                          fontFamily: 'monospace',
+                          background: m.id === selectedModel ? '#f0f4ff' : 'transparent',
+                          borderBottom: '1px solid #f0f0f0'
+                        },
+                        onMouseEnter: (e) => e.currentTarget.style.background = '#f0f4ff',
+                        onMouseLeave: (e) => e.currentTarget.style.background = m.id === selectedModel ? '#f0f4ff' : 'transparent'
+                      }, m.id))
+                    : React.createElement('div', {
+                        style: { padding: '8px 10px', color: '#888', fontSize: '13px' }
+                      }, 'No models match "' + modelSearch + '"')
+                  ),
+                  document.body
+                )
+              ]));
+            } else {
+              const emptyMsg = loadingModels ? 'Loading models...'
+                : provider === API_PROVIDERS.PUTER ? 'Sign in to load models'
+                : (apiKey ? 'No models found' : 'Enter API key to load models');
+              modelContent.push(React.createElement('div', {
+                key: 'no-models', className: 'graphiql-dialog-section-caption'
+              }, emptyMsg));
+            }
+          } else {
+            modelContent.push(React.createElement('input', {
+              key: 'model-input', type: 'text', value: selectedModel,
+              onChange: (e) => handleModelChange(e.target.value),
+              placeholder: defaultModels[provider] || 'gemini-3-flash-preview',
+              className: 'graphiql-button',
+              style: { width: '100%', fontFamily: 'monospace', textAlign: 'left', boxSizing: 'border-box' }
+            }));
+          }
+          sections.push(React.createElement('div', { key: 'model-section', className: 'graphiql-dialog-section' }, modelContent));
+        }
+
+        // --- Chat History ---
+        sections.push(React.createElement('div', { key: 'persist-section', className: 'graphiql-dialog-section' }, [
+          React.createElement('div', { key: 'info' }, [
+            React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Chat History'),
+            React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Persist chat history between sessions.')
+          ]),
+          React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' }, [
+            React.createElement('button', {
+              key: 'on', type: 'button',
+              className: persistChat ? 'graphiql-button active' : 'graphiql-button',
+              onClick: () => handlePersistChatChange(true)
+            }, 'On'),
+            React.createElement('button', {
+              key: 'off', type: 'button',
+              className: !persistChat ? 'graphiql-button active' : 'graphiql-button',
+              onClick: () => handlePersistChatChange(false)
+            }, 'Off')
+          ])
+        ]));
+
+        // --- Tools (Gemini only) ---
+        if (provider === API_PROVIDERS.GEMINI) {
+          sections.push(React.createElement('div', { key: 'tools-section', className: 'graphiql-dialog-section' }, [
             React.createElement('div', { key: 'info' }, [
               React.createElement('div', { key: 'title', className: 'graphiql-dialog-section-title' }, 'Tools'),
-              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Allow AI to search Google, fetch URLs, and execute code.')
+              React.createElement('div', { key: 'caption', className: 'graphiql-dialog-section-caption' }, 'Allow AI to search Google, fetch URLs, and execute code. (Gemini only)')
             ]),
             React.createElement('div', { key: 'buttons', className: 'graphiql-button-group' }, [
               React.createElement('button', {
-                key: 'on',
-                type: 'button',
+                key: 'on', type: 'button',
                 className: enableTools ? 'graphiql-button active' : 'graphiql-button',
                 onClick: () => handleToolsChange(true)
               }, 'On'),
               React.createElement('button', {
-                key: 'off',
-                type: 'button',
+                key: 'off', type: 'button',
                 className: !enableTools ? 'graphiql-button active' : 'graphiql-button',
                 onClick: () => handleToolsChange(false)
               }, 'Off')
             ])
-          ])
-        ]);
+          ]));
+        }
+
+        return React.createElement(React.Fragment, null, sections);
       };
 
       // Helper to execute a GraphQL query and get results
@@ -5869,6 +6619,9 @@ Examples:
         const messagesContainerRef = React.useRef(null);
         const settingsRef = React.useRef(null);
         const settingsBtnRef = React.useRef(null);
+        const [currentProvider, setCurrentProvider] = React.useState(() => getAPIProvider());
+        const [currentModel, setCurrentModel] = React.useState(() => getAPIModel());
+        const refreshProviderModel = () => { setCurrentProvider(getAPIProvider()); setCurrentModel(getAPIModel()); };
 
         // Helper to get value from a CodeMirror editor
         const getEditorValue = (editor) => {
@@ -6164,14 +6917,12 @@ Examples:
 
         // Fetch initial suggestions based on schema (only used on first load)
         const fetchInitialSuggestions = React.useCallback(async () => {
-          const apiKey = getGeminiApiKey();
-          if (!apiKey) return;
+          if (!isAIReady()) return;
 
           setLoadingSuggestions(true);
           try {
             const schemaData = await ensureSchemaLoaded();
             const schemaContext = buildSchemaContext(schemaData);
-            const model = localStorage.getItem('graphiql:gemini-model') || 'gemini-3-flash-preview';
 
             const prompt = `Based on this GraphQL schema, suggest 4 short (2-5 words each) natural language queries a user might want to start with. Return ONLY a JSON array of strings, no explanation.
 
@@ -6179,26 +6930,26 @@ ${schemaContext}
 
 Example output format: ["Get all users", "Find product by ID", "List recent orders", "Search customers"]`;
 
-            const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: prompt }] }],
-                  generationConfig: { responseMimeType: 'application/json' }
-                })
-              }
+            // Use callAI with a minimal wrapper that extracts the array
+            const response = await callAI(
+              prompt,
+              '', '{}', '{}',
+              []
             );
 
-            if (response.ok) {
-              const data = await response.json();
-              const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) {
-                const parsed = JSON.parse(text);
+            // The response might be a parsed JSON object or contain suggestions
+            // Try to extract array from the response
+            if (response.suggestions && Array.isArray(response.suggestions)) {
+              setSuggestions(response.suggestions.slice(0, 4));
+            } else if (response.message) {
+              // Try parsing the message as a JSON array
+              try {
+                const parsed = JSON.parse(response.message);
                 if (Array.isArray(parsed) && parsed.length > 0) {
                   setSuggestions(parsed.slice(0, 4));
                 }
+              } catch {
+                // Use any available suggestions from the response format
               }
             }
           } catch (err) {
@@ -6208,10 +6959,9 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
           }
         }, []);
 
-        // Fetch initial suggestions on mount if we have an API key and no messages yet
+        // Fetch initial suggestions on mount if AI is configured and no messages yet
         React.useEffect(() => {
-          const apiKey = getGeminiApiKey();
-          if (apiKey && messages.length === 0) {
+          if (isAIReady() && messages.length === 0) {
             fetchInitialSuggestions();
           }
         }, []);
@@ -6260,9 +7010,8 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
           const text = messageText || inputValue;
           if (!text.trim() || isLoading) return;
 
-          const apiKey = getGeminiApiKey();
-          if (!apiKey) {
-            setError('Please configure your Gemini API key. Click the gear icon ⚙ above.');
+          if (!isAIReady()) {
+            setError('Please configure an AI provider in Settings. Click the gear icon ⚙ above.');
             return;
           }
 
@@ -6274,7 +7023,7 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
 
           try {
             const currentState = getEditorState();
-            const response = await callGeminiAPI(
+            const response = await callAI(
               text,
               currentState.query,
               currentState.variables,
@@ -6327,6 +7076,85 @@ Example output format: ["Get all users", "Find product by ID", "List recent orde
         // Handle option click from AI response
         const handleOptionClick = (option) => {
           sendMessage(option);
+        };
+
+        // Retry a bad AI response — keeps bad response in context, replaces it seamlessly
+        const handleRetry = async (msgIndex) => {
+          if (isLoading) return;
+
+          // Find the preceding user message
+          let userMsgIndex = msgIndex - 1;
+          while (userMsgIndex >= 0 && messages[userMsgIndex].role !== 'user') {
+            userMsgIndex--;
+          }
+          if (userMsgIndex < 0) return;
+
+          const originalUserText = messages[userMsgIndex].content;
+
+          if (!isAIReady()) {
+            setError('Please configure an AI provider in Settings.');
+            return;
+          }
+
+          // Build history that includes everything up to AND including the bad response
+          // so the AI can see where it went wrong
+          const historyWithBadResponse = messages.slice(0, msgIndex + 1);
+
+          // Remove the bad assistant message from the visible UI
+          setMessages(prev => prev.filter((_, idx) => idx !== msgIndex));
+          setIsLoading(true);
+          setError(null);
+
+          try {
+            const currentState = getEditorState();
+            const retryInstruction = `[RETRY - my previous request was not handled correctly. Your response did not apply the changes I asked for. Please try again and make sure to include the updated query in the "query" field of your JSON response.]\n\n${originalUserText}`;
+
+            const response = await callAI(
+              retryInstruction,
+              currentState.query,
+              currentState.variables,
+              currentState.headers,
+              historyWithBadResponse
+            );
+
+            const aiMessage = {
+              role: 'assistant',
+              content: response.message,
+              type: response.type,
+              query: response.query,
+              variables: response.variables,
+              headers: response.headers,
+              options: response.options,
+              needsResults: response.needsResults || false,
+              isNewQuery: response.isNewQuery || false,
+              resultsSummary: response.resultsSummary || null,
+              toolUsage: response.toolUsage || null,
+              executeOperationName: response.executeOperationName || null
+            };
+
+            const hasChanges = response.query || response.variables || response.headers;
+            if ((response.type === 'query' || response.type === 'suggestion') && hasChanges) {
+              aiMessage.originalQuery = currentState.query;
+              aiMessage.originalVariables = currentState.variables;
+              aiMessage.originalHeaders = currentState.headers;
+              aiMessage.diffStatus = 'pending';
+            }
+
+            setMessages(prev => [...prev, aiMessage]);
+
+            if (response.suggestions && Array.isArray(response.suggestions) && response.suggestions.length > 0) {
+              setSuggestions(response.suggestions.slice(0, 4));
+            }
+          } catch (err) {
+            setError(err.message);
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              type: 'error',
+              content: `Error: ${err.message}`
+            }]);
+          } finally {
+            setIsLoading(false);
+          }
         };
 
         // Accept suggestion - takes message index and mode ('default', 'newTab', 'newQuery')
@@ -6759,7 +7587,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
 - REQUIRED: Include "executeOperationName" in your response to specify which operation should be executed when the user clicks Accept & Run
 - The user's editor content is sacred - modifying it without permission is unacceptable` : ''}`;
 
-            const response = await callGeminiAPI(
+            const response = await callAI(
               analysisPrompt,
               currentEditorState.query || msg.query,
               currentEditorState.variables || msg.variables,
@@ -6945,7 +7773,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
             style: {
               flex: 1,
               overflow: 'auto',
-              padding: '0',
+              padding: '0 8px 0 0',
               display: 'flex',
               flexDirection: 'column'
             }
@@ -7019,7 +7847,8 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 onAccept: (mode) => handleAccept(idx, mode),
                 onReject: () => handleReject(idx),
                 onAcceptAndRun: (mode) => handleAcceptAndRun(idx, mode),
-                onRunAndAnalyze: (mode) => handleRunAndAnalyze(idx, mode)
+                onRunAndAnalyze: (mode) => handleRunAndAnalyze(idx, mode),
+                onRetry: () => handleRetry(idx)
               });
             }),
 
@@ -7037,9 +7866,15 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 borderRadius: '12px',
                 background: 'var(--color-base-bg, #f1f3f5)',
                 color: 'var(--color-alpha-secondary, #586069)',
-                fontSize: '13px'
+                fontSize: '13px',
+                display: 'flex',
+                gap: '4px'
               }
-            }, '● ● ●')),
+            }, [
+              React.createElement('span', { key: 'd1', style: { animation: 'dotPulse 1.4s infinite ease-in-out', animationDelay: '0s' } }, '●'),
+              React.createElement('span', { key: 'd2', style: { animation: 'dotPulse 1.4s infinite ease-in-out', animationDelay: '0.2s' } }, '●'),
+              React.createElement('span', { key: 'd3', style: { animation: 'dotPulse 1.4s infinite ease-in-out', animationDelay: '0.4s' } }, '●')
+            ])),
 
           ]),
 
@@ -7169,14 +8004,42 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                   transition: 'background-color 0.15s ease'
                 }
               }, isLoading ? '...' : 'Send')
-            ])
+            ]),
+            // Provider and model bubbles
+            React.createElement('div', {
+              key: 'model-indicator',
+              style: {
+                marginTop: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                flexWrap: 'wrap'
+              }
+            }, (() => {
+              const providerLabels = { puter: 'Puter', gemini: 'Gemini', openrouter: 'OpenRouter', openai: 'OpenAI', custom: 'Custom' };
+              const label = providerLabels[currentProvider];
+              const bubbleStyle = {
+                fontSize: '11px',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                background: 'var(--color-alpha-background, #f1f3f5)',
+                color: 'var(--color-alpha-secondary, #586069)',
+                border: '1px solid var(--color-border, #e1e4e8)',
+                lineHeight: '18px'
+              };
+              if (!label) return [React.createElement('span', { key: 'none', style: { ...bubbleStyle, fontStyle: 'italic' } }, 'No provider')];
+              return [
+                React.createElement('span', { key: 'provider', style: bubbleStyle }, label),
+                React.createElement('span', { key: 'model', style: bubbleStyle }, currentModel || 'default')
+              ];
+            })())
           ]),
 
           // Settings Modal (centered dialog with backdrop - matches GraphiQL native style)
           showSettings && React.createElement('div', {
             key: 'settings-backdrop',
-            onClick: (e) => {
-              if (e.target === e.currentTarget) setShowSettings(false);
+            onMouseDown: (e) => {
+              if (e.target === e.currentTarget) { setShowSettings(false); refreshProviderModel(); }
             },
             style: {
               position: 'fixed',
@@ -7194,9 +8057,9 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
             key: 'settings-dialog',
             ref: settingsRef,
             className: 'graphiql-dialog',
-            onClick: (e) => e.stopPropagation(),
-            style: { pointerEvents: 'auto' }
-          }, React.createElement(SettingsPopupContent, { onClose: () => setShowSettings(false) })))
+            onMouseDown: (e) => e.stopPropagation(),
+            style: { pointerEvents: 'auto', width: '560px', maxWidth: '90vw' }
+          }, React.createElement(SettingsPopupContent, { onClose: () => { setShowSettings(false); refreshProviderModel(); } })))
         ]);
       };
 
@@ -7209,34 +8072,19 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
           viewBox: '0 0 24 24',
           fill: 'none',
           stroke: 'currentColor',
-          strokeWidth: '2',
+          strokeWidth: '1.5',
           strokeLinecap: 'round',
           strokeLinejoin: 'round'
         }, [
-          // Rounded square with open top-right corner (cut off at 50%)
+          // Chat bubble
           React.createElement('path', {
-            key: 'box',
-            d: 'M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V12',
-            fill: 'none'
+            key: 'bubble',
+            d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'
           }),
-          // Large sparkle (center-right, crevices curve inward)
+          // Sparkle inside bubble
           React.createElement('path', {
-            key: 'sparkle1',
-            d: 'M16.6 0.3 Q17.2 7.5 24.4 8.1 Q17.2 8.7 16.6 15.9 Q16 8.7 8.8 8.1 Q16 7.5 16.6 0.3 Z',
-            fill: 'currentColor',
-            stroke: 'none'
-          }),
-          // Small sparkle (bottom-left inside, moved up 2px and right 2px)
-          React.createElement('path', {
-            key: 'sparkle2',
-            d: 'M9 13l.75-1.5.75 1.5 1.5.75-1.5.75-.75 1.5-.75-1.5-1.5-.75z',
-            fill: 'currentColor',
-            stroke: 'none'
-          }),
-          // Tiny sparkle (top-right outside, moved up 1px)
-          React.createElement('path', {
-            key: 'sparkle3',
-            d: 'M20 3l.5-1 .5 1 1 .5-1 .5-.5 1-.5-1-1-.5z',
+            key: 'sparkle',
+            d: 'M12 6l1 2.5 2.5 1-2.5 1-1 2.5-1-2.5L8.5 9.5l2.5-1z',
             fill: 'currentColor',
             stroke: 'none'
           })
@@ -7368,9 +8216,8 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
 
           const hasResponse = response.trim().length > 0;
 
-          const apiKey = getGeminiApiKey();
-          if (!apiKey) {
-            setPopup({ message: 'Please configure your Gemini API key in the Query Generator settings first.' });
+          if (!isAIReady()) {
+            setPopup({ message: 'Please configure an AI provider in the Query Generator settings first.' });
             return;
           }
 
@@ -7475,7 +8322,7 @@ Please analyse this query. Focus on:
 
 Feel free to suggest improvements to the query if you see any.`;
 
-            const aiResponse = await callGeminiAPI(
+            const aiResponse = await callAI(
               analysisPrompt,
               query,
               variables,
