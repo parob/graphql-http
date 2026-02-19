@@ -1239,12 +1239,23 @@
             const queryType = rawData.__schema.queryType?.name;
             const mutationType = rawData.__schema.mutationType?.name;
             const subscriptionType = rawData.__schema.subscriptionType?.name;
-            const queryFields = queryType ? (allTypes.find(t => t.name === queryType)?.fields || []).length : 0;
-            const mutationFields = mutationType ? (allTypes.find(t => t.name === mutationType)?.fields || []).length : 0;
-            const subscriptionFields = subscriptionType ? (allTypes.find(t => t.name === subscriptionType)?.fields || []).length : 0;
-            const enums = userTypes.filter(t => t.kind === 'ENUM').length;
-            const inputs = userTypes.filter(t => t.kind === 'INPUT_OBJECT').length;
-            return { types: userTypes.length, queries: queryFields, mutations: mutationFields, subscriptions: subscriptionFields, enums, inputs };
+            const queryFieldNames = queryType ? (allTypes.find(t => t.name === queryType)?.fields || []).map(f => f.name) : [];
+            const mutationFieldNames = mutationType ? (allTypes.find(t => t.name === mutationType)?.fields || []).map(f => f.name) : [];
+            const subscriptionFieldNames = subscriptionType ? (allTypes.find(t => t.name === subscriptionType)?.fields || []).map(f => f.name) : [];
+            const enumTypes = userTypes.filter(t => t.kind === 'ENUM');
+            const inputTypes = userTypes.filter(t => t.kind === 'INPUT_OBJECT');
+            return {
+              types: userTypes.length, queries: queryFieldNames.length, mutations: mutationFieldNames.length,
+              subscriptions: subscriptionFieldNames.length, enums: enumTypes.length, inputs: inputTypes.length,
+              names: {
+                types: userTypes.map(t => t.name).sort(),
+                queries: queryFieldNames.sort(),
+                mutations: mutationFieldNames.sort(),
+                subscriptions: subscriptionFieldNames.sort(),
+                enums: enumTypes.map(t => t.name).sort(),
+                inputs: inputTypes.map(t => t.name).sort()
+              }
+            };
           }, [rawData]);
 
           // Compute displayed content based on format
@@ -1341,28 +1352,55 @@
                 gap: '6px'
               }
             }, [
-              { key: 'types', label: 'Types', value: stats.types },
-              { key: 'queries', label: 'Queries', value: stats.queries },
-              stats.mutations > 0 && { key: 'mutations', label: 'Mutations', value: stats.mutations },
-              stats.subscriptions > 0 && { key: 'subscriptions', label: 'Subscriptions', value: stats.subscriptions },
-              { key: 'enums', label: 'Enums', value: stats.enums },
-              { key: 'inputs', label: 'Inputs', value: stats.inputs }
-            ].filter(Boolean).map(s => React.createElement('span', {
+              { key: 'types', label: 'Types', value: stats.types, names: stats.names.types },
+              { key: 'queries', label: 'Queries', value: stats.queries, names: stats.names.queries },
+              stats.mutations > 0 && { key: 'mutations', label: 'Mutations', value: stats.mutations, names: stats.names.mutations },
+              stats.subscriptions > 0 && { key: 'subscriptions', label: 'Subscriptions', value: stats.subscriptions, names: stats.names.subscriptions },
+              { key: 'enums', label: 'Enums', value: stats.enums, names: stats.names.enums },
+              { key: 'inputs', label: 'Inputs', value: stats.inputs, names: stats.names.inputs }
+            ].filter(Boolean).map(s => React.createElement('div', {
               key: s.key,
-              style: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '3px 10px',
-                backgroundColor: '#f0f3f6',
-                border: '1px solid #e1e4e8',
-                borderRadius: '12px',
-                fontSize: '11px',
-                color: '#586069'
-              }
+              style: { position: 'relative', display: 'inline-flex' },
+              onMouseOver: (e) => { const tip = e.currentTarget.querySelector('[data-stat-tooltip]'); if (tip) tip.style.opacity = '1'; },
+              onMouseOut: (e) => { const tip = e.currentTarget.querySelector('[data-stat-tooltip]'); if (tip) tip.style.opacity = '0'; }
             }, [
-              React.createElement('span', { key: 'l', style: { fontWeight: '500' } }, s.label),
-              React.createElement('span', { key: 'v', style: { color: '#24292e', fontWeight: '600' } }, String(s.value))
+              React.createElement('span', {
+                key: 'bubble',
+                style: {
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '3px 10px',
+                  backgroundColor: '#f0f3f6',
+                  border: '1px solid #e1e4e8',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  color: '#586069',
+                  cursor: 'default'
+                }
+              }, [
+                React.createElement('span', { key: 'l', style: { fontWeight: '500' } }, s.label),
+                React.createElement('span', { key: 'v', style: { color: '#24292e', fontWeight: '600' } }, String(s.value))
+              ]),
+              s.names.length > 0 && React.createElement('div', {
+                key: 'tip',
+                'data-stat-tooltip': true,
+                style: {
+                  position: 'absolute', top: '100%', left: '0', marginTop: '6px',
+                  padding: '8px 0', backgroundColor: 'white', border: '1px solid #e1e4e8',
+                  borderRadius: '8px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
+                  fontSize: '11px', color: '#24292e', whiteSpace: 'nowrap', pointerEvents: 'none',
+                  opacity: 0, transition: 'opacity 0.15s', zIndex: 1000,
+                  maxHeight: '200px', overflowY: 'auto', minWidth: '120px'
+                }
+              }, s.names.map((name, i) => React.createElement('div', {
+                key: i,
+                style: {
+                  padding: '2px 12px',
+                  fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                  fontSize: '11px', lineHeight: '1.6'
+                }
+              }, name)))
             ]))),
 
             // Format selector
