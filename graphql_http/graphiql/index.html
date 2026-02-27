@@ -48,7 +48,7 @@
       .schema-visualizer {
         height: 100%;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        background: #fafbfc;
+        background: hsl(var(--color-base));
         border-radius: 8px;
         overflow: hidden;
       }
@@ -95,7 +95,7 @@
       }
 
       .react-flow__edge.selected .react-flow__edge-path {
-        stroke: #0366d6;
+        stroke: hsl(var(--color-primary));
         stroke-width: 3;
       }
 
@@ -134,6 +134,8 @@
       .react-flow__controls button:hover {
         transform: scale(1.1);
       }
+
+      /* Dark mode overrides no longer needed — CSS vars handle both modes */
     </style>
     <!-- React Flow CSS removed - using custom styles -->
     <script src="https://js.puter.com/v2/"></script>
@@ -184,6 +186,147 @@
         useReactFlow
       } from 'reactflow';
       import ELK from 'elkjs';
+
+      // --- Dark Mode Theme Support ---
+      // GraphiQL applies dark mode via three mechanisms:
+      //   1. body.graphiql-dark class → force dark
+      //   2. body.graphiql-light class → force light
+      //   3. Neither → follow prefers-color-scheme media query
+      function useGraphiQLTheme() {
+        const getIsDark = () => {
+          if (document.body.classList.contains('graphiql-dark')) return true;
+          if (document.body.classList.contains('graphiql-light')) return false;
+          return window.matchMedia('(prefers-color-scheme: dark)').matches;
+        };
+        const [isDark, setIsDark] = React.useState(getIsDark);
+        React.useEffect(() => {
+          const update = () => setIsDark(getIsDark());
+          // Watch body class changes (explicit theme toggle)
+          const observer = new MutationObserver(update);
+          observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+          // Watch OS color scheme changes
+          const mq = window.matchMedia('(prefers-color-scheme: dark)');
+          mq.addEventListener('change', update);
+          return () => { observer.disconnect(); mq.removeEventListener('change', update); };
+        }, []);
+        return isDark;
+      }
+
+      function getThemeColors(isDark) {
+        // Use GraphiQL's own CSS variables so colors always match the native UI
+        return {
+          // Base surfaces
+          bg:              'hsl(var(--color-base))',
+          bgSubtle:        'hsla(var(--color-neutral), var(--alpha-background-light))',
+          bgMuted:         'hsla(var(--color-neutral), var(--alpha-background-medium))',
+          bgInset:         'hsla(var(--color-neutral), 0.04)',
+          bgOverlay:       'hsla(var(--color-neutral), var(--alpha-background-heavy))',
+
+          // Text
+          textPrimary:     'hsl(var(--color-neutral))',
+          textSecondary:   'hsla(var(--color-neutral), var(--alpha-secondary))',
+          textTertiary:    'hsla(var(--color-neutral), var(--alpha-tertiary))',
+          textMuted:       'hsla(var(--color-neutral), 0.3)',
+          textDimmed:      'hsla(var(--color-neutral), 0.3)',
+          textDescription: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+
+          // Borders
+          border:          'hsla(var(--color-neutral), var(--alpha-background-heavy))',
+          borderStrong:    'hsla(var(--color-neutral), 0.25)',
+          borderSubtle:    'hsla(var(--color-neutral), var(--alpha-background-light))',
+
+          // Semantic: Query (blue/info tint)
+          queryBg:         'hsla(var(--color-info), var(--alpha-background-light))',
+          queryBgStrong:   'hsla(var(--color-info), var(--alpha-background-medium))',
+          queryText:       'hsl(var(--color-info))',
+
+          // Semantic: Mutation (red/error tint)
+          mutationBg:      'hsla(var(--color-error), var(--alpha-background-light))',
+          mutationText:    'hsl(var(--color-error))',
+
+          // Semantic: Subscription (purple/secondary tint)
+          subscriptionBg:  'hsla(var(--color-secondary), var(--alpha-background-light))',
+          subscriptionText:'hsl(var(--color-secondary))',
+
+          // Semantic: Success
+          successBg:       'hsla(var(--color-success), var(--alpha-background-light))',
+          successOutputBg: 'hsla(var(--color-success), var(--alpha-background-light))',
+          successText:     'hsl(var(--color-success))',
+          successBorder:   'hsla(var(--color-success), 0.4)',
+
+          // Semantic: Error
+          errorBg:         'hsla(var(--color-error), var(--alpha-background-light))',
+          errorOutputBg:   'hsla(var(--color-error), var(--alpha-background-light))',
+          errorText:       'hsl(var(--color-error))',
+          errorBorder:     'hsla(var(--color-error), 0.4)',
+
+          // Semantic: Warning
+          warningBg:       'hsla(var(--color-warning), var(--alpha-background-light))',
+          warningText:     'hsl(var(--color-warning))',
+
+          // Accent / Primary
+          accent:          'hsl(var(--color-primary))',
+          accentStrong:    'hsl(var(--color-primary))',
+          accentBg:        'hsla(var(--color-primary), var(--alpha-background-medium))',
+          accentBgHover:   'hsl(var(--color-primary))',
+
+          // Selected state
+          selectedBg:      'hsla(var(--color-primary), var(--alpha-background-medium))',
+          downstreamBg:    'hsla(var(--color-neutral), var(--alpha-background-light))',
+          relationshipBg:  'hsla(var(--color-neutral), var(--alpha-background-light))',
+
+          // Graph edges
+          edgeDefault:     'hsla(var(--color-neutral), 0.25)',
+          edgeHighlight:   'hsl(var(--color-primary))',
+          edgeArgument:    'hsla(var(--color-neutral), var(--alpha-tertiary))',
+
+          // Hover states
+          hoverBg:         'hsla(var(--color-neutral), var(--alpha-background-heavy))',
+          hoverBgSubtle:   'hsla(var(--color-neutral), var(--alpha-background-light))',
+
+          // Overlays
+          backdropBg:      'hsla(var(--color-neutral), 0.25)',
+          semiWhite:       'hsla(var(--color-neutral), var(--alpha-background-medium))',
+
+          // Code
+          codeBg:          'hsla(var(--color-neutral), var(--alpha-background-medium))',
+
+          // Diff
+          diffAddedBg:     'hsla(var(--color-success), var(--alpha-background-heavy))',
+          diffRemovedBg:   'hsla(var(--color-error), var(--alpha-background-heavy))',
+          diffAddedText:   'hsl(var(--color-success))',
+          diffRemovedText: 'hsl(var(--color-error))',
+
+          // Search highlight
+          highlightBg:     'hsla(var(--color-warning), 0.3)',
+          highlightText:   'hsl(var(--color-neutral))',
+
+          // Tooltip (inverted)
+          tooltipBg:       'hsl(var(--color-neutral))',
+          tooltipText:     'hsl(var(--color-base))',
+
+          // User message bubble
+          userBubbleBg:    'hsla(var(--color-primary), var(--alpha-background-medium))',
+          userBubbleText:  'hsl(var(--color-primary))',
+
+          // New query notice
+          newQueryBg:      'hsla(var(--color-info), var(--alpha-background-light))',
+          newQuerySubtext: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+
+          // Schema visualizer
+          schemaVisBg:     'hsl(var(--color-base))',
+
+          // Tool usage
+          toolUsageBg:     'hsla(var(--color-neutral), var(--alpha-background-light))',
+
+          // Box shadows
+          shadowDefault:   isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.1)',
+          shadowDimmed:    isDark ? '0 1px 3px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.05)',
+          shadowSelected:  isDark ? '0 8px 24px rgba(56,139,253,0.4), 0 0 0 1px rgba(56,139,253,0.1)' : '0 8px 24px rgba(3,102,214,0.4), 0 0 0 1px rgba(3,102,214,0.1)',
+          shadowDownstream:isDark ? '0 4px 12px rgba(56,139,253,0.2), 0 0 0 1px rgba(56,139,253,0.05)' : '0 4px 12px rgba(3,102,214,0.2), 0 0 0 1px rgba(3,102,214,0.05)',
+          shadowDropdown:  isDark ? '0 4px 12px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.12)',
+        };
+      }
 
       // Environment-injected Gemini API key (set via GRAPHIQL_GEMINI_API_KEY env var)
       // Server replaces __GEMINI_API_KEY__ with env value or empty string
@@ -240,6 +383,8 @@
 
       // Custom Graph Node - contains our entire graph visualization
       const GraphVisualizationNode = ({ data }) => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const { getViewport, fitBounds, setViewport, zoomIn, zoomOut } = useReactFlow();
         const reactFlowViewport = getViewport();
 
@@ -840,8 +985,8 @@
                   cx: 4,
                   cy: 4,
                   r: 3,
-                  fill: '#d0d0d0',
-                  stroke: '#d0d0d0',
+                  fill: t.edgeDefault,
+                  stroke: t.edgeDefault,
                   strokeWidth: 1
                 })
               ]),
@@ -860,8 +1005,8 @@
                   cx: 4,
                   cy: 4,
                   r: 3,
-                  fill: '#0366d6',
-                  stroke: '#0366d6',
+                  fill: t.edgeHighlight,
+                  stroke: t.edgeHighlight,
                   strokeWidth: 1
                 })
               ])
@@ -880,7 +1025,7 @@
                 return React.createElement('path', {
                   key: edge.id,
                   d: edge.data.pathData,
-                  stroke: isArgHighlighted ? '#0366d6' : '#9ca3af', // Blue when highlighted, grey otherwise
+                  stroke: isArgHighlighted ? t.edgeHighlight : t.edgeArgument, // Blue when highlighted, grey otherwise
                   strokeWidth: isArgHighlighted ? 2 : 1, // Thicker when highlighted but not as thick as regular edges
                   strokeDasharray: '3,3', // Always dashed
                   fill: 'none',
@@ -895,7 +1040,7 @@
               return React.createElement('path', {
                 key: edge.id,
                 d: edge.data.pathData,
-                stroke: isHighlighted ? '#0366d6' : '#d0d0d0',
+                stroke: isHighlighted ? t.edgeHighlight : t.edgeDefault,
                 strokeWidth: isHighlighted ? 5 : 2,
                 fill: 'none',
                 markerEnd: isHighlighted ? 'url(#circleEndHighlight)' : 'url(#circleEnd)',
@@ -925,8 +1070,9 @@
                 cursor: 'pointer'
               }
             }, [
-              // Render the node content directly
-              GraphQLTypeNode({
+              // Render the node content as a React element (not a plain call) so hooks work
+              React.createElement(GraphQLTypeNode, {
+                key: node.id,
                 data: {
                   ...node.data,
                   nodeId: node.id,
@@ -1196,6 +1342,8 @@
           React.createElement('line', { key: 'l2', x1: '8', y1: '17', x2: '16', y2: '17' })
         ]),
         content: () => {
+          const isDark = useGraphiQLTheme();
+          const t = getThemeColors(isDark);
           const [sdlContent, setSdlContent] = React.useState('');
           const [rawData, setRawData] = React.useState(null);
           const [schemaRef, setSchemaRef] = React.useState(null);
@@ -1301,8 +1449,8 @@
                 ? React.createElement('mark', {
                     key: i,
                     style: {
-                      backgroundColor: '#fff3b0',
-                      color: '#24292e',
+                      backgroundColor: t.highlightBg,
+                      color: t.highlightText,
                       borderRadius: '2px',
                       padding: '0 1px'
                     }
@@ -1339,7 +1487,7 @@
               className: 'graphiql-markdown-description',
               style: {
                 margin: '0',
-                color: 'rgba(59, 75, 104, 0.76)'
+                color: t.textDescription
               }
             }, 'Explore, search, and download your GraphQL schema in multiple formats.'),
 
@@ -1371,25 +1519,25 @@
                   alignItems: 'center',
                   gap: '5px',
                   padding: '3px 10px',
-                  backgroundColor: '#f0f3f6',
-                  border: '1px solid #e1e4e8',
+                  backgroundColor: t.bgOverlay,
+                  border: `1px solid ${t.border}`,
                   borderRadius: '12px',
                   fontSize: '11px',
-                  color: '#586069',
+                  color: t.textSecondary,
                   cursor: 'default'
                 }
               }, [
                 React.createElement('span', { key: 'l', style: { fontWeight: '500' } }, s.label),
-                React.createElement('span', { key: 'v', style: { color: '#24292e', fontWeight: '600' } }, String(s.value))
+                React.createElement('span', { key: 'v', style: { color: t.textPrimary, fontWeight: '600' } }, String(s.value))
               ]),
               s.names.length > 0 && React.createElement('div', {
                 key: 'tip',
                 'data-stat-tooltip': true,
                 style: {
                   position: 'absolute', top: '100%', left: '0', marginTop: '6px',
-                  padding: '8px 0', backgroundColor: 'white', border: '1px solid #e1e4e8',
-                  borderRadius: '8px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.12)',
-                  fontSize: '11px', color: '#24292e', whiteSpace: 'nowrap', pointerEvents: 'none',
+                  padding: '8px 0', backgroundColor: t.bg, border: `1px solid ${t.border}`,
+                  borderRadius: '8px', boxShadow: t.shadowDropdown,
+                  fontSize: '11px', color: t.textPrimary, whiteSpace: 'nowrap', pointerEvents: 'none',
                   opacity: 0, transition: 'opacity 0.15s', zIndex: 1000,
                   maxHeight: '200px', overflowY: 'auto', minWidth: '120px'
                 }
@@ -1454,18 +1602,20 @@
                   style: {
                     flex: 1,
                     padding: '6px 10px',
-                    border: '1px solid #e1e4e8',
+                    border: `1px solid ${t.border}`,
                     borderRadius: '4px',
                     fontSize: '12px',
                     outline: 'none',
-                    fontFamily: 'inherit'
+                    fontFamily: 'inherit',
+                    backgroundColor: 'hsl(var(--color-base))',
+                    color: 'hsl(var(--color-neutral))'
                   }
                 }),
                 searchQuery.trim() && React.createElement('span', {
                   key: 'match-count',
                   style: {
                     fontSize: '11px',
-                    color: '#586069',
+                    color: t.textSecondary,
                     whiteSpace: 'nowrap'
                   }
                 }, `${matchCount} match${matchCount !== 1 ? 'es' : ''}`),
@@ -1487,7 +1637,7 @@
                         setTimeout(() => {
                           delete tip.dataset.copied;
                           tip.textContent = `Copy ${fileExtension}`;
-                          tip.style.backgroundColor = '#24292e';
+                          tip.style.backgroundColor = t.tooltipBg;
                         }, 150);
                       }
                     }
@@ -1503,8 +1653,8 @@
                       transform: 'translateX(-50%)',
                       marginBottom: '6px',
                       padding: '4px 8px',
-                      backgroundColor: '#24292e',
-                      color: 'white',
+                      backgroundColor: t.tooltipBg,
+                      color: t.tooltipText,
                       fontSize: '11px',
                       borderRadius: '4px',
                       whiteSpace: 'nowrap',
@@ -1544,11 +1694,11 @@
                         btn.style.borderColor = '#28a745';
                         setTimeout(() => {
                           btn.style.backgroundColor = 'transparent';
-                          btn.style.color = '#586069';
-                          btn.style.borderColor = '#e1e4e8';
+                          btn.style.color = t.textSecondary;
+                          btn.style.borderColor = t.border;
                           if (tip) {
                             tip.textContent = `Copy ${fileExtension}`;
-                            tip.style.backgroundColor = '#24292e';
+                            tip.style.backgroundColor = t.tooltipBg;
                             tip.style.opacity = '0';
                             delete tip.dataset.copied;
                           }
@@ -1563,21 +1713,21 @@
                       height: '28px',
                       padding: 0,
                       backgroundColor: 'transparent',
-                      border: '1px solid #e1e4e8',
+                      border: `1px solid ${t.border}`,
                       borderRadius: '4px',
                       cursor: 'pointer',
-                      color: '#586069'
+                      color: t.textSecondary
                     },
                     onMouseOver: (e) => {
                       if (!e.currentTarget.dataset.copied) {
-                        e.currentTarget.style.backgroundColor = '#f0f0f0';
-                        e.currentTarget.style.color = '#24292e';
+                        e.currentTarget.style.backgroundColor = t.hoverBg;
+                        e.currentTarget.style.color = t.textPrimary;
                       }
                     },
                     onMouseOut: (e) => {
                       if (!e.currentTarget.dataset.copied) {
                         e.currentTarget.style.backgroundColor = 'transparent';
-                        e.currentTarget.style.color = '#586069';
+                        e.currentTarget.style.color = t.textSecondary;
                       }
                     }
                   }, React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
@@ -1609,8 +1759,8 @@
                       transform: 'translateX(-50%)',
                       marginBottom: '6px',
                       padding: '4px 8px',
-                      backgroundColor: '#24292e',
-                      color: 'white',
+                      backgroundColor: t.tooltipBg,
+                      color: t.tooltipText,
                       fontSize: '11px',
                       borderRadius: '4px',
                       whiteSpace: 'nowrap',
@@ -1642,18 +1792,18 @@
                       height: '28px',
                       padding: 0,
                       backgroundColor: 'transparent',
-                      border: '1px solid #e1e4e8',
+                      border: `1px solid ${t.border}`,
                       borderRadius: '4px',
                       cursor: 'pointer',
-                      color: '#586069'
+                      color: t.textSecondary
                     },
                     onMouseOver: (e) => {
-                      e.currentTarget.style.backgroundColor = '#f0f0f0';
-                      e.currentTarget.style.color = '#24292e';
+                      e.currentTarget.style.backgroundColor = t.hoverBg;
+                      e.currentTarget.style.color = t.textPrimary;
                     },
                     onMouseOut: (e) => {
                       e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = '#586069';
+                      e.currentTarget.style.color = t.textSecondary;
                     }
                   }, React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }, [
                     React.createElement('path', { key: 'p1', d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
@@ -1671,10 +1821,10 @@
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: '#f6f8fa',
+                  backgroundColor: t.bgSubtle,
                   borderRadius: '4px',
                   fontSize: '12px',
-                  color: '#586069'
+                  color: t.textSecondary
                 }
               }, 'Loading schema...') :
 
@@ -1685,10 +1835,10 @@
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: '#ffeaea',
+                  backgroundColor: t.errorBg,
                   borderRadius: '4px',
                   fontSize: '12px',
-                  color: '#d73a49',
+                  color: t.errorText,
                   padding: '12px',
                   textAlign: 'center'
                 }
@@ -1700,14 +1850,14 @@
                   flex: 1,
                   margin: 0,
                   padding: '12px',
-                  backgroundColor: '#f6f8fa',
+                  backgroundColor: t.bgSubtle,
                   borderRadius: '4px',
                   fontSize: '11px',
                   lineHeight: '1.5',
-                  color: '#24292e',
+                  color: t.textPrimary,
                   fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
                   overflow: 'auto',
-                  border: '1px solid #e1e4e8',
+                  border: `1px solid ${t.border}`,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word'
                 }
@@ -1721,6 +1871,8 @@
 
       // Custom GraphQL Type Node Component
       const GraphQLTypeNode = ({ data }) => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const { type, getTypeString, getCoreTypeName, isScalarType, onFieldClick, shouldDim, isSelected, isDownstreamOfSelected, schemaData } = data;
         const isQueryType = data.isQueryType;
         const isMutationType = data.isMutationType;
@@ -1776,19 +1928,19 @@
             }
           },
           style: {
-            background: isSelected ? 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)' :
-                       isDownstreamOfSelected ? 'linear-gradient(135deg, #f8f9ff 0%, #f4f6ff 100%)' : 'white',
-            border: shouldDim ? '2px solid #e1e4e8' : '2px solid #d1d5da',
-            outline: isSelected ? '5px solid #0366d6' :
-                    isDownstreamOfSelected ? '3px solid #0366d6' : 'none',
+            background: isSelected ? t.selectedBg :
+                       isDownstreamOfSelected ? t.downstreamBg : t.bg,
+            border: shouldDim ? `2px solid ${t.border}` : `2px solid ${t.borderStrong}`,
+            outline: isSelected ? `5px solid ${t.edgeHighlight}` :
+                    isDownstreamOfSelected ? `3px solid ${t.edgeHighlight}` : 'none',
             borderRadius: '8px',
             overflow: 'visible',
             minWidth: isRootType ? '350px' : '280px',
             maxWidth: 'none',
             width: 'fit-content',
-            boxShadow: isSelected ? '0 8px 24px rgba(3,102,214,0.4), 0 0 0 1px rgba(3,102,214,0.1)' :
-                       isDownstreamOfSelected ? '0 4px 12px rgba(3,102,214,0.2), 0 0 0 1px rgba(3,102,214,0.05)' :
-                       shouldDim ? '0 1px 3px rgba(0,0,0,0.05)' : '0 2px 8px rgba(0,0,0,0.1)',
+            boxShadow: isSelected ? t.shadowSelected :
+                       isDownstreamOfSelected ? t.shadowDownstream :
+                       shouldDim ? t.shadowDimmed : t.shadowDefault,
             position: 'relative',
             opacity: data.hidden ? 0 : (shouldDim ? 0.15 : 1), // More faded out for better contrast
             visibility: data.hidden ? 'hidden' : 'visible', // Also use visibility for better performance
@@ -1803,14 +1955,14 @@
             key: 'root-type-label',
             style: {
               padding: '6px 16px',
-              background: isQueryType ? '#f0f8ff' : isMutationType ? '#fff5f5' : isSubscriptionType ? '#f8f0ff' : '#f6f8fa',
-              color: isQueryType ? '#0969da' : isMutationType ? '#d1242f' : '#8250df',
+              background: isQueryType ? t.queryBg : isMutationType ? t.mutationBg : isSubscriptionType ? t.subscriptionBg : t.bgSubtle,
+              color: isQueryType ? t.queryText : isMutationType ? t.mutationText : t.subscriptionText,
               fontSize: '10px',
               fontWeight: '600',
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
               borderRadius: '6px 6px 0 0',
-              borderBottom: '1px solid #e1e4e8'
+              borderBottom: `1px solid ${t.border}`
             }
           }, isQueryType ? 'Query Root Type' : isMutationType ? 'Mutation Root Type' : 'Subscription Root Type'),
 
@@ -1819,10 +1971,10 @@
             key: 'header',
             style: {
               padding: '12px 16px',
-              background: isQueryType ? '#e6f3ff' : isMutationType ? '#fff5f5' : isSubscriptionType ? '#f0fff4' : '#f6f8fa',
-              color: '#24292e',
+              background: isQueryType ? t.queryBgStrong : isMutationType ? t.mutationBg : isSubscriptionType ? t.successOutputBg : t.bgSubtle,
+              color: t.textPrimary,
               borderRadius: isRootType ? '0' : '6px 6px 0 0',
-              borderBottom: '1px solid #d1d5da'
+              borderBottom: `1px solid ${t.borderStrong}`
             }
           }, [
             React.createElement('div', {
@@ -1919,8 +2071,8 @@
               },
               style: {
                 padding: '0',
-                borderBottom: fieldIndex < totalItems - 1 ? '1px solid #f1f3f4' : 'none',
-                backgroundColor: isRelationship ? '#f8f9ff' : 'white',
+                borderBottom: fieldIndex < totalItems - 1 ? `1px solid ${t.borderSubtle}` : 'none',
+                backgroundColor: isRelationship ? t.relationshipBg : t.bg,
                 cursor: 'default',
                 position: 'relative'
               },
@@ -1941,7 +2093,7 @@
                 React.createElement('span', {
                   key: 'name',
                   style: {
-                    color: '#24292e',
+                    color: t.textPrimary,
                     fontWeight: '500',
                     fontSize: isRootType ? '21px' : '19.5px',
                     wordBreak: 'break-word',
@@ -1955,7 +2107,7 @@
                 !isEnumValue && React.createElement('span', {
                   key: 'type',
                   style: {
-                    color: isRelationship ? '#0366d6' : '#656d76',
+                    color: isRelationship ? t.accent : t.textTertiary,
                     fontWeight: isRelationship ? '600' : '400',
                     fontSize: '18px',
                     fontFamily: 'SFMono-Regular, Consolas, monospace',
@@ -1987,7 +2139,7 @@
                 key: 'field-args',
                 style: {
                   padding: '0 16px 8px 48px', // More inset for arguments
-                  backgroundColor: 'white' // Always white background for arguments
+                  backgroundColor: t.bg // Always match base background for arguments
                 }
               }, [
                 // Arguments header
@@ -1996,7 +2148,7 @@
                   style: {
                     fontSize: '10px',
                     fontWeight: 'bold',
-                    color: '#999', // Dimmer color
+                    color: t.textDimmed, // Dimmer color
                     marginBottom: '4px',
                     marginLeft: '-16px', // Outdent the header
                     textTransform: 'uppercase',
@@ -2057,13 +2209,13 @@
                     alignItems: 'center',
                     padding: '4px 0',
                     fontSize: '16px',
-                    color: '#999' // Dimmer color for arguments
+                    color: t.textDimmed // Dimmer color for arguments
                   }
                 }, [
                   React.createElement('span', {
                     key: 'arg-name',
                     style: {
-                      color: '#8c959f', // Lighter color for argument names
+                      color: t.textMuted, // Lighter color for argument names
                       fontWeight: '400',
                       fontSize: '16px'
                     },
@@ -2072,7 +2224,7 @@
                   React.createElement('span', {
                     key: 'arg-type',
                     style: {
-                      color: isArgRelationship ? '#0366d6' : '#9ca3af', // Blue for relationships (clickable), grey for scalars
+                      color: isArgRelationship ? t.accent : t.edgeArgument, // Blue for relationships (clickable), grey for scalars
                       fontWeight: '400',
                       fontSize: '16px',
                       fontFamily: 'SFMono-Regular, Consolas, monospace',
@@ -2128,6 +2280,8 @@
           React.createElement('line', { key: 'line5', x1: '15', y1: '6', x2: '16', y2: '6', stroke: 'currentColor', strokeWidth: '1' })
         ]),
         content: () => {
+          const isDark = useGraphiQLTheme();
+          const t = getThemeColors(isDark);
           const [loading, setLoading] = React.useState(true);
           const [error, setError] = React.useState(null);
           const [schemaData, setSchemaData] = React.useState(null);
@@ -3633,25 +3787,25 @@
                       type: 'elk', // Use ELK-calculated edge paths
                       animated: isDownstreamEdge,
                       style: {
-                        stroke: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#d0d0d0',
+                        stroke: isDownstreamEdge ? t.edgeHighlight : shouldDimEdge ? t.borderStrong : t.edgeDefault,
                         strokeWidth: isDownstreamEdge ? 3 : shouldDimEdge ? 1 : 2,
                         strokeDasharray: '0',
                         opacity: shouldDimEdge ? 0.3 : 1
                       },
                       markerEnd: {
                         type: 'arrowclosed',
-                        color: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#d1d5da' : '#d0d0d0',
+                        color: isDownstreamEdge ? t.edgeHighlight : shouldDimEdge ? t.borderStrong : t.edgeDefault,
                         width: isDownstreamEdge ? 16 : 12,
                         height: isDownstreamEdge ? 16 : 12
                       },
                       label: field.name,
                       labelStyle: {
                         fontSize: '10px',
-                        color: isDownstreamEdge ? '#0366d6' : shouldDimEdge ? '#656d76' : '#24292e',
-                        background: isDownstreamEdge ? 'rgba(3, 102, 214, 0.1)' : 'rgba(255, 255, 255, 0.95)',
+                        color: isDownstreamEdge ? t.edgeHighlight : shouldDimEdge ? t.textTertiary : t.textPrimary,
+                        background: isDownstreamEdge ? 'rgba(3, 102, 214, 0.1)' : t.semiWhite,
                         padding: '2px 6px',
                         borderRadius: '3px',
-                        border: isDownstreamEdge ? '1px solid #0366d6' : '1px solid #d1d5da',
+                        border: isDownstreamEdge ? `1px solid ${t.edgeHighlight}` : `1px solid ${t.borderStrong}`,
                         boxShadow: isDownstreamEdge ? '0 2px 6px rgba(3,102,214,0.2)' : '0 1px 3px rgba(0,0,0,0.1)',
                         opacity: shouldDimEdge ? 0.6 : 1
                       },
@@ -3686,25 +3840,25 @@
                             type: 'elk',
                             animated: false,
                             style: {
-                              stroke: '#9ca3af', // Grey to match non-highlighted state
+                              stroke: t.edgeArgument, // Grey to match non-highlighted state
                               strokeWidth: 1,
                               strokeDasharray: '3,3', // Dashed line to distinguish from field edges
                               opacity: 0.6 // Higher opacity for better visibility
                             },
                             markerEnd: {
                               type: 'arrowclosed',
-                              color: '#9ca3af', // Grey for arrow
+                              color: t.edgeArgument, // Grey for arrow
                               width: 10,
                               height: 10
                             },
                             label: `${field.name}.${arg.name}`,
                             labelStyle: {
                               fontSize: '9px',
-                              color: '#7c9eff',
-                              background: 'rgba(124, 158, 255, 0.1)',
+                              color: t.accent,
+                              background: t.accentBg,
                               padding: '1px 4px',
                               borderRadius: '2px',
-                              border: '1px solid #7c9eff',
+                              border: `1px solid ${t.accent}`,
                               opacity: 0.8
                             },
                             labelBgPadding: [2, 1],
@@ -3735,7 +3889,7 @@
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '14px',
-                color: '#666'
+                color: t.textSecondary
               }
             }, React.createElement('div', { key: 'loading-text' }, 'Loading schema...'));
           }
@@ -3748,7 +3902,7 @@
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontSize: '14px',
-                color: '#d73a49',
+                color: t.errorText,
                 textAlign: 'center',
                 padding: '20px'
               }
@@ -3766,7 +3920,7 @@
               display: 'flex',
               flexDirection: 'column',
               gap: '16px',
-              background: 'white'
+              background: t.bg
             }
           }, [
             // Title
@@ -3783,7 +3937,7 @@
               className: 'graphiql-markdown-description',
               style: {
                 margin: '0 0 20px 0',
-                color: 'rgba(59, 75, 104, 0.76)'
+                color: t.textDescription
               }
             }, 'Explore your GraphQL schema with an interactive visual graph.'),
 
@@ -3806,7 +3960,7 @@
                 top: '50%',
                 left: '50%',
                 transform: 'translate(-50%, -50%)',
-                color: '#656d76',
+                color: t.textTertiary,
                 fontSize: '16px',
                 fontFamily: 'SF Pro Display, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                 opacity: 0.7,
@@ -3871,7 +4025,7 @@
               translateExtent: [[-Infinity, -Infinity], [Infinity, Infinity]],
               nodeExtent: [[-Infinity, -Infinity], [Infinity, Infinity]],
               style: {
-                background: '#fafbfc',
+                background: t.schemaVisBg,
                 opacity: graphVisible ? 1 : 0,
                 transition: 'opacity 0.6s ease-in-out'
               }
@@ -3900,24 +4054,24 @@
                   style: {
                     width: '40px',
                     height: '40px',
-                    border: '1px solid #d1d5da',
+                    border: `1px solid ${t.borderStrong}`,
                     borderRadius: '4px',
-                    background: 'rgba(255, 255, 255, 0.95)',
+                    background: t.semiWhite,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '16px',
                     fontWeight: 'bold',
-                    color: '#24292e',
+                    color: t.textPrimary,
                     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
                     transition: 'all 0.2s ease'
                   },
                   onMouseEnter: (e) => {
-                    e.target.style.background = 'rgba(225, 228, 232, 0.95)';
+                    e.target.style.background = t.hoverBg;
                   },
                   onMouseLeave: (e) => {
-                    e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.target.style.background = t.semiWhite;
                   }
                 }, '+'),
 
@@ -3932,24 +4086,24 @@
                   style: {
                     width: '40px',
                     height: '40px',
-                    border: '1px solid #d1d5da',
+                    border: `1px solid ${t.borderStrong}`,
                     borderRadius: '4px',
-                    background: 'rgba(255, 255, 255, 0.95)',
+                    background: t.semiWhite,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '16px',
                     fontWeight: 'bold',
-                    color: '#24292e',
+                    color: t.textPrimary,
                     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
                     transition: 'all 0.2s ease'
                   },
                   onMouseEnter: (e) => {
-                    e.target.style.background = 'rgba(225, 228, 232, 0.95)';
+                    e.target.style.background = t.hoverBg;
                   },
                   onMouseLeave: (e) => {
-                    e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.target.style.background = t.semiWhite;
                   }
                 }, '−'),
 
@@ -3999,23 +4153,23 @@
                   style: {
                     width: '40px',
                     height: '40px',
-                    border: '1px solid #d1d5da',
+                    border: `1px solid ${t.borderStrong}`,
                     borderRadius: '4px',
-                    background: 'rgba(255, 255, 255, 0.95)',
+                    background: t.semiWhite,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '14px',
-                    color: '#24292e',
+                    color: t.textPrimary,
                     boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
                     transition: 'all 0.2s ease'
                   },
                   onMouseEnter: (e) => {
-                    e.target.style.background = 'rgba(225, 228, 232, 0.95)';
+                    e.target.style.background = t.hoverBg;
                   },
                   onMouseLeave: (e) => {
-                    e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                    e.target.style.background = t.semiWhite;
                   }
                 }, React.createElement('svg', {
                   width: '16',
@@ -4883,12 +5037,14 @@ ${jsonInstruction}`;
 
       // Inline Diff Viewer Component
       const InlineDiffViewer = ({ originalQuery, suggestedQuery, onAccept, onReject, onAcceptAndRun }) => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const diff = computeDiff(originalQuery, suggestedQuery);
 
         return React.createElement('div', {
           style: {
-            borderTop: '1px solid var(--color-border, #e1e4e8)',
-            background: 'var(--color-base-bg, #f6f8fa)'
+            borderTop: `1px solid ${t.border}`,
+            background: t.bgSubtle
           }
         }, [
           // Diff Header
@@ -4899,7 +5055,7 @@ ${jsonInstruction}`;
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              borderBottom: '1px solid var(--color-border, #e1e4e8)'
+              borderBottom: `1px solid ${t.border}`
             }
           }, [
             React.createElement('span', {
@@ -4907,7 +5063,7 @@ ${jsonInstruction}`;
               style: {
                 fontSize: '12px',
                 fontWeight: '600',
-                color: 'var(--color-base)'
+                color: t.textPrimary
               }
             }, 'Suggested Changes'),
 
@@ -4920,23 +5076,23 @@ ${jsonInstruction}`;
                 onClick: onReject,
                 style: {
                   padding: '5px 10px',
-                  background: 'var(--color-base-bg, white)',
-                  border: '1px solid var(--color-border, #d1d5da)',
+                  background: t.bg,
+                  border: `1px solid ${t.borderStrong}`,
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '11px',
-                  color: 'var(--color-base)',
+                  color: t.textPrimary,
                   transition: 'all 0.15s ease'
                 },
                 onMouseEnter: (e) => {
-                  e.target.style.background = '#ffeaea';
-                  e.target.style.borderColor = '#d73a49';
-                  e.target.style.color = '#d73a49';
+                  e.target.style.background = t.errorBg;
+                  e.target.style.borderColor = t.errorText;
+                  e.target.style.color = t.errorText;
                 },
                 onMouseLeave: (e) => {
-                  e.target.style.background = 'var(--color-base-bg, white)';
-                  e.target.style.borderColor = 'var(--color-border, #d1d5da)';
-                  e.target.style.color = 'var(--color-base)';
+                  e.target.style.background = t.bg;
+                  e.target.style.borderColor = t.borderStrong;
+                  e.target.style.color = t.textPrimary;
                 }
               }, 'Reject'),
 
@@ -4945,21 +5101,21 @@ ${jsonInstruction}`;
                 onClick: onAccept,
                 style: {
                   padding: '5px 10px',
-                  background: 'var(--color-base-bg, white)',
-                  border: '1px solid #28a745',
+                  background: t.bg,
+                  border: `1px solid ${t.successText}`,
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '11px',
-                  color: '#28a745',
+                  color: t.successText,
                   transition: 'all 0.15s ease'
                 },
                 onMouseEnter: (e) => {
-                  e.target.style.background = '#28a745';
-                  e.target.style.color = 'white';
+                  e.target.style.background = t.successText;
+                  e.target.style.color = t.bg;
                 },
                 onMouseLeave: (e) => {
-                  e.target.style.background = 'var(--color-base-bg, white)';
-                  e.target.style.color = '#28a745';
+                  e.target.style.background = t.bg;
+                  e.target.style.color = t.successText;
                 }
               }, 'Accept'),
 
@@ -4968,7 +5124,7 @@ ${jsonInstruction}`;
                 onClick: onAcceptAndRun,
                 style: {
                   padding: '5px 10px',
-                  background: 'hsl(var(--color-primary))',
+                  background: t.accentBgHover,
                   border: 'none',
                   borderRadius: '4px',
                   cursor: 'pointer',
@@ -5009,10 +5165,10 @@ ${jsonInstruction}`;
                 padding: '1px 6px',
                 marginLeft: '-6px',
                 marginRight: '-6px',
-                background: line.type === 'added' ? 'rgba(40, 167, 69, 0.15)' :
-                            line.type === 'removed' ? 'rgba(215, 58, 73, 0.15)' : 'transparent',
-                color: line.type === 'added' ? '#22863a' :
-                       line.type === 'removed' ? '#cb2431' : 'var(--color-base)',
+                background: line.type === 'added' ? t.diffAddedBg :
+                            line.type === 'removed' ? t.diffRemovedBg : 'transparent',
+                color: line.type === 'added' ? t.diffAddedText :
+                       line.type === 'removed' ? t.diffRemovedText : t.textPrimary,
                 textDecoration: line.type === 'removed' ? 'line-through' : 'none'
               }
             }, [
@@ -5021,8 +5177,8 @@ ${jsonInstruction}`;
                 style: {
                   display: 'inline-block',
                   width: '14px',
-                  color: line.type === 'added' ? '#22863a' :
-                         line.type === 'removed' ? '#cb2431' : 'var(--color-alpha-tertiary, #959da5)',
+                  color: line.type === 'added' ? t.diffAddedText :
+                         line.type === 'removed' ? t.diffRemovedText : t.textTertiary,
                   userSelect: 'none'
                 }
               }, line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '),
@@ -5035,6 +5191,8 @@ ${jsonInstruction}`;
       // Simple markdown renderer for message content
       const renderMarkdown = (text) => {
         if (!text) return null;
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
 
         // Split by code blocks first to preserve them
         const parts = text.split(/(`[^`]+`)/g);
@@ -5045,7 +5203,7 @@ ${jsonInstruction}`;
             return React.createElement('code', {
               key: index,
               style: {
-                background: 'rgba(27, 31, 35, 0.05)',
+                background: t.codeBg,
                 padding: '2px 5px',
                 borderRadius: '3px',
                 fontSize: '0.9em',
@@ -5085,6 +5243,8 @@ ${jsonInstruction}`;
       const ToolUsageIndicator = ({ toolUsage }) => {
         if (!toolUsage || Object.keys(toolUsage).length === 0) return null;
 
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const [expandedTool, setExpandedTool] = React.useState(null);
 
         const toolIndicators = [];
@@ -5110,7 +5270,7 @@ ${jsonInstruction}`;
                   gap: '6px',
                   cursor: sources.length > 0 ? 'pointer' : 'default',
                   fontSize: '11px',
-                  color: '#586069'
+                  color: t.textSecondary
                 }
               }, [
                 React.createElement('span', { key: 'icon' }, '\uD83D\uDD0D'),
@@ -5118,7 +5278,7 @@ ${jsonInstruction}`;
                 sources.length > 0 && React.createElement('span', {
                   key: 'expand',
                   style: {
-                    color: '#0366d6',
+                    color: t.accent,
                     fontSize: '10px'
                   }
                 }, expandedTool === 'search' ? '\u25BC' : `\u25B8 ${sources.length} source${sources.length > 1 ? 's' : ''}`)
@@ -5130,7 +5290,7 @@ ${jsonInstruction}`;
                   marginTop: '6px',
                   marginLeft: '20px',
                   fontSize: '10px',
-                  color: '#586069'
+                  color: t.textSecondary
                 }
               }, sources.slice(0, 5).map((source, idx) =>
                 React.createElement('div', {
@@ -5142,7 +5302,7 @@ ${jsonInstruction}`;
                     href: source.uri,
                     target: '_blank',
                     rel: 'noopener noreferrer',
-                    style: { color: '#0366d6', textDecoration: 'none' }
+                    style: { color: t.accent, textDecoration: 'none' }
                   }, source.title || source.uri)
                 ])
               ))
@@ -5170,22 +5330,22 @@ ${jsonInstruction}`;
                   gap: '6px',
                   cursor: 'pointer',
                   fontSize: '11px',
-                  color: '#586069'
+                  color: t.textSecondary
                 }
               }, [
                 React.createElement('span', { key: 'icon' }, '\uD83D\uDCBB'),
                 React.createElement('span', { key: 'text' }, 'Ran code'),
                 outcomeOk && shortOutput && React.createElement('span', {
                   key: 'output',
-                  style: { color: '#28a745', fontFamily: 'monospace', fontSize: '10px' }
+                  style: { color: t.successText, fontFamily: 'monospace', fontSize: '10px' }
                 }, `\u2192 ${shortOutput}`),
                 !outcomeOk && React.createElement('span', {
                   key: 'error',
-                  style: { color: '#d73a49', fontSize: '10px' }
+                  style: { color: t.errorText, fontSize: '10px' }
                 }, '\u2717 error'),
                 React.createElement('span', {
                   key: 'expand',
-                  style: { color: '#0366d6', fontSize: '10px' }
+                  style: { color: t.accent, fontSize: '10px' }
                 }, expandedTool === 'code' ? '\u25BC view' : '\u25B8 view')
               ]),
               // Expanded code view
@@ -5200,14 +5360,14 @@ ${jsonInstruction}`;
                 code && React.createElement('div', { key: 'code-section' }, [
                   React.createElement('div', {
                     key: 'label',
-                    style: { color: '#586069', marginBottom: '2px', fontWeight: 500 }
+                    style: { color: t.textSecondary, marginBottom: '2px', fontWeight: 500 }
                   }, 'Code:'),
                   React.createElement('pre', {
                     key: 'code',
                     style: {
                       margin: '0 0 8px 0',
                       padding: '6px',
-                      background: '#f6f8fa',
+                      background: t.bgSubtle,
                       borderRadius: '4px',
                       overflow: 'auto',
                       maxHeight: '100px',
@@ -5219,20 +5379,20 @@ ${jsonInstruction}`;
                 output && React.createElement('div', { key: 'output-section' }, [
                   React.createElement('div', {
                     key: 'label',
-                    style: { color: '#586069', marginBottom: '2px', fontWeight: 500 }
+                    style: { color: t.textSecondary, marginBottom: '2px', fontWeight: 500 }
                   }, 'Output:'),
                   React.createElement('pre', {
                     key: 'output',
                     style: {
                       margin: 0,
                       padding: '6px',
-                      background: outcomeOk ? '#f0fff4' : '#ffeef0',
+                      background: outcomeOk ? t.successOutputBg : t.errorOutputBg,
                       borderRadius: '4px',
                       overflow: 'auto',
                       maxHeight: '80px',
                       fontSize: '10px',
                       fontFamily: 'SFMono-Regular, Consolas, monospace',
-                      color: outcomeOk ? '#22863a' : '#cb2431'
+                      color: outcomeOk ? t.diffAddedText : t.diffRemovedText
                     }
                   }, output)
                 ])
@@ -5259,14 +5419,14 @@ ${jsonInstruction}`;
                   gap: '6px',
                   cursor: urls.length > 1 ? 'pointer' : 'default',
                   fontSize: '11px',
-                  color: '#586069'
+                  color: t.textSecondary
                 }
               }, [
                 React.createElement('span', { key: 'icon' }, '\uD83D\uDD17'),
                 React.createElement('span', { key: 'text' }, `Fetched ${urls.length} URL${urls.length > 1 ? 's' : ''}`),
                 urls.length > 1 && React.createElement('span', {
                   key: 'expand',
-                  style: { color: '#0366d6', fontSize: '10px' }
+                  style: { color: t.accent, fontSize: '10px' }
                 }, expandedTool === 'url' ? '\u25BC' : '\u25B8')
               ]),
               // Expanded URLs list
@@ -5276,7 +5436,7 @@ ${jsonInstruction}`;
                   marginTop: urls.length === 1 ? '2px' : '6px',
                   marginLeft: '20px',
                   fontSize: '10px',
-                  color: '#586069'
+                  color: t.textSecondary
                 }
               }, urls.slice(0, 5).map((url, idx) =>
                 React.createElement('div', {
@@ -5288,7 +5448,7 @@ ${jsonInstruction}`;
                     target: '_blank',
                     rel: 'noopener noreferrer',
                     style: {
-                      color: '#0366d6',
+                      color: t.accent,
                       textDecoration: 'none',
                       wordBreak: 'break-all'
                     }
@@ -5304,8 +5464,8 @@ ${jsonInstruction}`;
         return React.createElement('div', {
           style: {
             padding: '8px 10px',
-            background: '#f8f9fa',
-            borderBottom: '1px solid #e1e4e8',
+            background: t.toolUsageBg,
+            borderBottom: `1px solid ${t.border}`,
             borderRadius: '12px 12px 0 0',
             marginBottom: '-1px'
           }
@@ -5336,6 +5496,8 @@ ${jsonInstruction}`;
 
       // Message Component with inline diff support
       const MessageComponent = ({ message, onOptionClick, showDiff, diffStatus, onAccept, onReject, onAcceptAndRun, onRunAndAnalyze, onRetry }) => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const isUser = message.role === 'user';
         const isSystem = message.role === 'system';
         const isResultsFeedback = message.type === 'results-feedback';
@@ -5434,7 +5596,7 @@ ${jsonInstruction}`;
               style: {
                 fontSize: '10px',
                 fontWeight: '600',
-                color: 'var(--color-alpha-secondary, #586069)',
+                color: t.textSecondary,
                 marginBottom: '4px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.5px'
@@ -5443,10 +5605,10 @@ ${jsonInstruction}`;
             React.createElement('div', {
               key: 'content',
               style: {
-                background: 'var(--color-base-bg, white)',
+                background: t.bg,
                 borderRadius: '4px',
                 padding: '6px 8px',
-                border: '1px solid var(--color-border, #e1e4e8)'
+                border: `1px solid ${t.border}`
               }
             }, diff.map((line, idx) =>
               React.createElement('div', {
@@ -5455,10 +5617,10 @@ ${jsonInstruction}`;
                   fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
                   fontSize: '11px',
                   lineHeight: '1.4',
-                  background: line.type === 'added' ? 'rgba(40, 167, 69, 0.15)' :
-                              line.type === 'removed' ? 'rgba(215, 58, 73, 0.15)' : 'transparent',
-                  color: line.type === 'added' ? '#22863a' :
-                         line.type === 'removed' ? '#cb2431' : 'var(--color-base)',
+                  background: line.type === 'added' ? t.diffAddedBg :
+                              line.type === 'removed' ? t.diffRemovedBg : 'transparent',
+                  color: line.type === 'added' ? t.diffAddedText :
+                         line.type === 'removed' ? t.diffRemovedText : t.textPrimary,
                   textDecoration: line.type === 'removed' ? 'line-through' : 'none',
                   padding: '1px 4px',
                   margin: '0 -4px'
@@ -5469,8 +5631,8 @@ ${jsonInstruction}`;
                   style: {
                     display: 'inline-block',
                     width: '12px',
-                    color: line.type === 'added' ? '#22863a' :
-                           line.type === 'removed' ? '#cb2431' : '#959da5',
+                    color: line.type === 'added' ? t.diffAddedText :
+                           line.type === 'removed' ? t.diffRemovedText : t.textMuted,
                     userSelect: 'none'
                   }
                 }, line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '),
@@ -5497,16 +5659,16 @@ ${jsonInstruction}`;
             style: {
               maxWidth: '85%',
               borderRadius: '12px',
-              background: isUser ? '#e3f2fd' :
-                          isSystem ? 'var(--color-base-bg, #f6f8fa)' :
-                          isResultsFeedback ? '#f6f8fa' :
-                          message.type === 'error' ? '#ffeaea' : 'var(--color-base-bg, #f1f3f5)',
-              color: isUser ? '#1565c0' :
-                     isResultsFeedback ? '#24292e' :
-                     message.type === 'error' ? '#d73a49' : 'var(--color-base)',
+              background: isUser ? t.userBubbleBg :
+                          isSystem ? t.bgSubtle :
+                          isResultsFeedback ? t.bgSubtle :
+                          message.type === 'error' ? t.errorBg : t.bgMuted,
+              color: isUser ? t.userBubbleText :
+                     isResultsFeedback ? t.textPrimary :
+                     message.type === 'error' ? t.errorText : t.textPrimary,
               fontSize: '13px',
               lineHeight: '1.5',
-              border: isResultsFeedback ? '1px solid #e1e4e8' : 'none',
+              border: isResultsFeedback ? `1px solid ${t.border}` : 'none',
               overflow: 'hidden'
             }
           }, [
@@ -5529,7 +5691,7 @@ ${jsonInstruction}`;
                 key: 'summary',
                 style: {
                   cursor: 'pointer',
-                  color: '#24292e',
+                  color: t.textPrimary,
                   userSelect: 'none'
                 }
               }, 'Response Data'),
@@ -5541,15 +5703,15 @@ ${jsonInstruction}`;
                 // Query section
                 React.createElement('div', {
                   key: 'query-label',
-                  style: { fontWeight: 500, marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', color: '#586069' }
+                  style: { fontWeight: 500, marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', color: t.textSecondary }
                 }, 'Query'),
                 React.createElement('pre', {
                   key: 'query',
                   style: {
                     margin: '0 0 8px 0',
                     padding: '8px',
-                    background: '#f6f8fa',
-                    color: '#24292e',
+                    background: t.bgSubtle,
+                    color: t.textPrimary,
                     borderRadius: '4px',
                     overflow: 'auto',
                     maxHeight: '120px',
@@ -5561,15 +5723,15 @@ ${jsonInstruction}`;
                 // Results section
                 React.createElement('div', {
                   key: 'results-label',
-                  style: { fontWeight: 500, marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', color: '#586069' }
+                  style: { fontWeight: 500, marginBottom: '4px', fontSize: '10px', textTransform: 'uppercase', color: t.textSecondary }
                 }, 'Results'),
                 React.createElement('pre', {
                   key: 'results',
                   style: {
                     margin: 0,
                     padding: '8px',
-                    background: '#f6f8fa',
-                    color: '#24292e',
+                    background: t.bgSubtle,
+                    color: t.textPrimary,
                     borderRadius: '4px',
                     overflow: 'auto',
                     maxHeight: '150px',
@@ -5581,7 +5743,7 @@ ${jsonInstruction}`;
             ]) : isAnalyzingStatus ? React.createElement('div', {
               key: 'analyzing-content',
               style: {
-                color: '#586069',
+                color: t.textSecondary,
                 fontStyle: showDisplayText ? 'normal' : 'italic'
               }
             }, showDisplayText
@@ -5610,23 +5772,23 @@ ${jsonInstruction}`;
                 onClick: (e) => { e.preventDefault(); onOptionClick && onOptionClick(option); },
                 style: {
                   padding: '4px 10px',
-                  background: 'white',
-                  border: '1px solid var(--color-border, #d1d5da)',
+                  background: t.bg,
+                  border: `1px solid ${t.borderStrong}`,
                   borderRadius: '12px',
                   fontSize: '11px',
                   cursor: 'pointer',
-                  color: 'var(--color-base)',
+                  color: t.textPrimary,
                   transition: 'all 0.15s ease'
                 },
                 onMouseEnter: (e) => {
-                  e.target.style.background = 'hsl(var(--color-primary))';
-                  e.target.style.color = 'white';
-                  e.target.style.borderColor = 'hsl(var(--color-primary))';
+                  e.target.style.background = t.accentBgHover;
+                  e.target.style.color = t.bg;
+                  e.target.style.borderColor = t.accentBgHover;
                 },
                 onMouseLeave: (e) => {
-                  e.target.style.background = 'white';
-                  e.target.style.color = 'var(--color-base)';
-                  e.target.style.borderColor = 'var(--color-border, #d1d5da)';
+                  e.target.style.background = t.bg;
+                  e.target.style.color = t.textPrimary;
+                  e.target.style.borderColor = t.borderStrong;
                 }
               }, option)
             )),
@@ -5659,8 +5821,8 @@ ${jsonInstruction}`;
                   transform: 'translateX(-50%)',
                   marginBottom: '4px',
                   padding: '3px 8px',
-                  backgroundColor: '#24292e',
-                  color: 'white',
+                  backgroundColor: t.tooltipBg,
+                  color: t.tooltipText,
                   fontSize: '10px',
                   borderRadius: '4px',
                   whiteSpace: 'nowrap',
@@ -5683,12 +5845,12 @@ ${jsonInstruction}`;
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
-                  color: 'var(--color-alpha-tertiary, #b0b8c4)',
+                  color: t.textMuted,
                   borderRadius: '4px',
                   transition: 'color 0.15s'
                 },
-                onMouseOver: (e) => { e.currentTarget.style.color = 'var(--color-alpha-secondary, #586069)'; },
-                onMouseOut: (e) => { e.currentTarget.style.color = 'var(--color-alpha-tertiary, #b0b8c4)'; }
+                onMouseOver: (e) => { e.currentTarget.style.color = t.textSecondary; },
+                onMouseOut: (e) => { e.currentTarget.style.color = t.textMuted; }
               }, React.createElement('svg', {
                 width: 12,
                 height: 12,
@@ -5713,8 +5875,8 @@ ${jsonInstruction}`;
               marginTop: '8px',
               width: '100%',
               maxWidth: '95%',
-              background: 'var(--color-base-bg, #f6f8fa)',
-              border: `1px solid ${isApplied ? '#28a745' : isDismissed ? '#d73a49' : 'var(--color-border, #e1e4e8)'}`,
+              background: t.bgSubtle,
+              border: `1px solid ${isApplied ? t.successText : isDismissed ? t.errorText : t.border}`,
               borderRadius: '8px',
               overflow: 'hidden',
               opacity: isDismissed ? 0.6 : 1
@@ -5725,11 +5887,11 @@ ${jsonInstruction}`;
               key: 'status-header',
               style: {
                 padding: '6px 12px',
-                background: isApplied ? 'rgba(40, 167, 69, 0.1)' : 'rgba(215, 58, 73, 0.1)',
-                borderBottom: '1px solid var(--color-border, #e1e4e8)',
+                background: isApplied ? t.successBg : t.errorBg,
+                borderBottom: `1px solid ${t.border}`,
                 fontSize: '11px',
                 fontWeight: '500',
-                color: isApplied ? '#28a745' : '#d73a49'
+                color: isApplied ? t.successText : t.errorText
               }
             }, isApplied ? '✓ Applied to editor' : '✗ Dismissed'),
 
@@ -5738,18 +5900,18 @@ ${jsonInstruction}`;
               key: 'new-query-notice',
               style: {
                 padding: '10px 12px',
-                background: '#f0f7ff',
-                borderBottom: '1px solid var(--color-border, #e1e4e8)',
+                background: t.newQueryBg,
+                borderBottom: `1px solid ${t.border}`,
                 fontSize: '12px'
               }
             }, [
               React.createElement('div', {
                 key: 'title',
-                style: { fontWeight: '500', marginBottom: '4px', color: '#0969da' }
+                style: { fontWeight: '500', marginBottom: '4px', color: t.accentStrong }
               }, 'New Query'),
               React.createElement('div', {
                 key: 'subtitle',
-                style: { fontSize: '11px', color: '#57606a' }
+                style: { fontSize: '11px', color: t.newQuerySubtext }
               }, 'Applying will replace the current editor content')
             ]),
 
@@ -5766,14 +5928,14 @@ ${jsonInstruction}`;
               message.query && React.createElement('div', { key: 'query-preview' }, [
                 React.createElement('div', {
                   key: 'label',
-                  style: { fontSize: '10px', fontWeight: '600', color: '#57606a', marginBottom: '4px', textTransform: 'uppercase' }
+                  style: { fontSize: '10px', fontWeight: '600', color: t.newQuerySubtext, marginBottom: '4px', textTransform: 'uppercase' }
                 }, 'Query'),
                 React.createElement('pre', {
                   key: 'content',
                   style: {
                     margin: 0,
                     padding: '8px',
-                    background: '#f6f8fa',
+                    background: t.bgSubtle,
                     borderRadius: '4px',
                     fontSize: '11px',
                     fontFamily: 'SFMono-Regular, Consolas, monospace',
@@ -5787,14 +5949,14 @@ ${jsonInstruction}`;
               message.variables && message.variables !== '{}' && React.createElement('div', { key: 'vars-preview', style: { marginTop: '8px' } }, [
                 React.createElement('div', {
                   key: 'label',
-                  style: { fontSize: '10px', fontWeight: '600', color: '#57606a', marginBottom: '4px', textTransform: 'uppercase' }
+                  style: { fontSize: '10px', fontWeight: '600', color: t.newQuerySubtext, marginBottom: '4px', textTransform: 'uppercase' }
                 }, 'Variables'),
                 React.createElement('pre', {
                   key: 'content',
                   style: {
                     margin: 0,
                     padding: '8px',
-                    background: '#f6f8fa',
+                    background: t.bgSubtle,
                     borderRadius: '4px',
                     fontSize: '11px',
                     fontFamily: 'SFMono-Regular, Consolas, monospace',
@@ -5809,7 +5971,7 @@ ${jsonInstruction}`;
                 style: {
                   padding: '8px 12px',
                   fontSize: '12px',
-                  color: 'var(--color-alpha-secondary, #586069)',
+                  color: t.textSecondary,
                   fontStyle: 'italic',
                   display: 'flex',
                   alignItems: 'center',
@@ -5831,7 +5993,7 @@ ${jsonInstruction}`;
               key: 'actions',
               style: {
                 padding: '8px 12px',
-                borderTop: '1px solid var(--color-border, #e1e4e8)',
+                borderTop: `1px solid ${t.border}`,
                 display: 'flex',
                 gap: '12px',
                 alignItems: 'center',
@@ -5846,12 +6008,12 @@ ${jsonInstruction}`;
                 onClick: (e) => { e.preventDefault(); onReject && onReject(); },
                 style: {
                   padding: '5px 10px',
-                  background: 'var(--color-base-bg, white)',
-                  border: '1px solid var(--color-border, #d1d5da)',
+                  background: t.bg,
+                  border: `1px solid ${t.borderStrong}`,
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '11px',
-                  color: 'var(--color-base)'
+                  color: t.textPrimary
                 }
               }, 'Dismiss'),
               React.createElement('div', { key: 'spacer', style: { flex: 1 } }),
@@ -5863,7 +6025,7 @@ ${jsonInstruction}`;
                   alignItems: 'center',
                   gap: '4px',
                   fontSize: '11px',
-                  color: 'var(--color-alpha-secondary, #586069)',
+                  color: t.textSecondary,
                   cursor: 'pointer',
                   userSelect: 'none'
                 }
@@ -5890,13 +6052,13 @@ ${jsonInstruction}`;
                 },
                 style: {
                   padding: '5px 12px',
-                  background: '#28a745',
+                  background: t.successText,
                   border: 'none',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '11px',
                   fontWeight: '500',
-                  color: 'white'
+                  color: t.bg
                 }
               }, `Execute ${executeOpName}`)
             ] : [
@@ -5907,12 +6069,12 @@ ${jsonInstruction}`;
                 onClick: (e) => { e.preventDefault(); onReject && onReject(); },
                 style: {
                   padding: '5px 10px',
-                  background: 'var(--color-base-bg, white)',
-                  border: '1px solid var(--color-border, #d1d5da)',
+                  background: t.bg,
+                  border: `1px solid ${t.borderStrong}`,
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '11px',
-                  color: 'var(--color-base)'
+                  color: t.textPrimary
                 }
               }, 'Dismiss'),
 
@@ -5927,7 +6089,7 @@ ${jsonInstruction}`;
                   alignItems: 'center',
                   gap: '4px',
                   fontSize: '11px',
-                  color: 'var(--color-alpha-secondary, #586069)',
+                  color: t.textSecondary,
                   cursor: 'pointer',
                   userSelect: 'none'
                 }
@@ -5954,7 +6116,7 @@ ${jsonInstruction}`;
                   alignItems: 'center',
                   gap: '4px',
                   fontSize: '11px',
-                  color: executeEnabled ? 'var(--color-alpha-secondary, #586069)' : 'var(--color-border, #d1d5da)',
+                  color: executeEnabled ? t.textSecondary : t.borderStrong,
                   cursor: executeEnabled ? 'pointer' : 'not-allowed',
                   userSelect: 'none'
                 }
@@ -5987,14 +6149,14 @@ ${jsonInstruction}`;
                   style: {
                     padding: acceptDropdownOpen ? '5px 12px 6px 12px' : '5px 12px',
                     minWidth: '130px',
-                    background: 'var(--color-base-bg, white)',
-                    border: '1px solid #28a745',
+                    background: t.bg,
+                    border: `1px solid ${t.successText}`,
                     borderRadius: acceptDropdownOpen ? '4px 0 0 0' : '4px 0 0 4px',
                     borderRight: 'none',
-                    borderBottom: acceptDropdownOpen ? 'none' : '1px solid #28a745',
+                    borderBottom: acceptDropdownOpen ? 'none' : `1px solid ${t.successText}`,
                     cursor: 'pointer',
                     fontSize: '11px',
-                    color: '#28a745',
+                    color: t.successText,
                     fontWeight: '500'
                   }
                 }, 'Accept'),
@@ -6017,13 +6179,13 @@ ${jsonInstruction}`;
                   },
                   style: {
                     padding: acceptDropdownOpen ? '5px 6px 6px 6px' : '5px 6px',
-                    background: 'var(--color-base-bg, white)',
-                    border: '1px solid #28a745',
+                    background: t.bg,
+                    border: `1px solid ${t.successText}`,
                     borderRadius: acceptDropdownOpen ? '0 4px 0 0' : '0 4px 4px 0',
-                    borderBottom: acceptDropdownOpen ? 'none' : '1px solid #28a745',
+                    borderBottom: acceptDropdownOpen ? 'none' : `1px solid ${t.successText}`,
                     cursor: 'pointer',
                     fontSize: '10px',
-                    color: '#28a745',
+                    color: t.successText,
                     display: 'flex',
                     alignItems: 'center'
                   }
@@ -6039,10 +6201,10 @@ ${jsonInstruction}`;
                   top: dropdownPosition.top,
                   left: dropdownPosition.left,
                   width: dropdownPosition.width || 'auto',
-                  background: 'var(--color-base-bg, white)',
-                  borderLeft: '1px solid #28a745',
-                  borderRight: '1px solid #28a745',
-                  borderBottom: '1px solid #28a745',
+                  background: t.bg,
+                  borderLeft: `1px solid ${t.successText}`,
+                  borderRight: `1px solid ${t.successText}`,
+                  borderBottom: `1px solid ${t.successText}`,
                   borderRadius: '0 0 4px 4px',
                   zIndex: 10000,
                   overflow: 'hidden',
@@ -6060,16 +6222,16 @@ ${jsonInstruction}`;
                       padding: '6px 12px',
                       background: 'none',
                       border: 'none',
-                      borderTop: '1px solid #28a745',
-                      borderBottom: '1px solid rgba(40, 167, 69, 0.3)',
+                      borderTop: `1px solid ${t.successText}`,
+                      borderBottom: `1px solid ${t.successBorder}`,
                       textAlign: 'left',
                       cursor: 'pointer',
                       fontSize: '11px',
-                      color: '#28a745',
+                      color: t.successText,
                       fontWeight: '500',
                       boxSizing: 'border-box'
                     },
-                    onMouseEnter: (e) => e.target.style.background = 'rgba(40, 167, 69, 0.1)',
+                    onMouseEnter: (e) => e.target.style.background = t.successBg,
                     onMouseLeave: (e) => e.target.style.background = 'none'
                   }, 'Accept as New Query'),
                   React.createElement('button', {
@@ -6085,11 +6247,11 @@ ${jsonInstruction}`;
                       textAlign: 'left',
                       cursor: 'pointer',
                       fontSize: '11px',
-                      color: '#28a745',
+                      color: t.successText,
                       fontWeight: '500',
                       boxSizing: 'border-box'
                     },
-                    onMouseEnter: (e) => e.target.style.background = 'rgba(40, 167, 69, 0.1)',
+                    onMouseEnter: (e) => e.target.style.background = t.successBg,
                     onMouseLeave: (e) => e.target.style.background = 'none'
                   }, 'Accept in New Tab')
                 ])
@@ -6100,12 +6262,12 @@ ${jsonInstruction}`;
               key: 'analyzing',
               style: {
                 padding: '8px 12px',
-                borderTop: '1px solid var(--color-border, #e1e4e8)',
+                borderTop: `1px solid ${t.border}`,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
                 fontSize: '11px',
-                color: 'var(--color-alpha-secondary, #586069)'
+                color: t.textSecondary
               }
             }, [
               React.createElement('span', {
@@ -6122,12 +6284,12 @@ ${jsonInstruction}`;
               key: 'analyzed-badge',
               style: {
                 padding: '6px 12px',
-                borderTop: '1px solid var(--color-border, #e1e4e8)',
+                borderTop: `1px solid ${t.border}`,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
                 fontSize: '11px',
-                color: 'var(--color-alpha-secondary, #586069)'
+                color: t.textSecondary
               }
             }, [
               React.createElement('span', { key: 'icon' }, '✓'),
@@ -6139,6 +6301,8 @@ ${jsonInstruction}`;
 
       // Settings Popup Content Component (for Query Generator)
       const SettingsPopupContent = ({ onClose }) => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const [provider, setProvider] = React.useState(() => getAPIProvider());
         const originalApiKey = React.useRef(getAPIKey());
         const [apiKey, setApiKey] = React.useState(originalApiKey.current);
@@ -6352,13 +6516,13 @@ ${jsonInstruction}`;
             key: 'close', onClick: onClose, type: 'button', 'aria-label': 'Close dialog',
             style: {
               position: 'absolute', top: '21px', right: '21px',
-              background: '#ffffff', border: '2px solid #e0e0e0', cursor: 'pointer',
+              background: t.bg, border: `2px solid ${t.border}`, cursor: 'pointer',
               width: '38px', height: '38px', borderRadius: '6px',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#5c6370', fontSize: '24px', lineHeight: 0, fontWeight: '300', paddingBottom: '2px'
+              color: t.textSecondary, fontSize: '24px', lineHeight: 0, fontWeight: '300', paddingBottom: '2px'
             },
-            onMouseEnter: (e) => e.currentTarget.style.background = '#f5f5f5',
-            onMouseLeave: (e) => e.currentTarget.style.background = '#ffffff'
+            onMouseEnter: (e) => e.currentTarget.style.background = t.bgSubtle,
+            onMouseLeave: (e) => e.currentTarget.style.background = t.bg
           }, '\u00d7')
         ]));
 
@@ -6389,7 +6553,7 @@ ${jsonInstruction}`;
             puterContent.push(React.createElement('div', {
               key: 'status', style: { display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between' }
             }, [
-              React.createElement('span', { key: 'user', style: { color: '#2ea043' } },
+              React.createElement('span', { key: 'user', style: { color: t.successText } },
                 'Signed in as @' + (puterUser.username || puterUser.email || 'user')),
               React.createElement('button', {
                 key: 'signout', type: 'button', className: 'graphiql-button', onClick: handlePuterSignOut
@@ -6483,8 +6647,8 @@ ${jsonInstruction}`;
               maxWidth: '90vw',
               zIndex: 10000,
               maxHeight: '280px', overflowY: 'auto',
-              background: '#fff', border: '1px solid #d0d7de', borderRadius: '0 0 6px 6px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+              background: t.bg, border: `1px solid ${t.borderStrong}`, borderRadius: '0 0 6px 6px',
+              boxShadow: t.shadowDropdown
             };
           };
 
@@ -6523,14 +6687,14 @@ ${jsonInstruction}`;
                       style: {
                         padding: '6px 10px', cursor: 'pointer', fontSize: '13px',
                         fontFamily: 'monospace',
-                        background: m.id === selectedModel ? '#f0f4ff' : 'transparent',
-                        borderBottom: '1px solid #f0f0f0'
+                        background: m.id === selectedModel ? t.accentBg : 'transparent',
+                        borderBottom: `1px solid ${t.borderSubtle}`
                       },
-                      onMouseEnter: (e) => e.currentTarget.style.background = '#f0f4ff',
-                      onMouseLeave: (e) => e.currentTarget.style.background = m.id === selectedModel ? '#f0f4ff' : 'transparent'
+                      onMouseEnter: (e) => e.currentTarget.style.background = t.accentBg,
+                      onMouseLeave: (e) => e.currentTarget.style.background = m.id === selectedModel ? t.accentBg : 'transparent'
                     }, m.id))
                   : React.createElement('div', {
-                      style: { padding: '8px 10px', color: '#888', fontSize: '13px' }
+                      style: { padding: '8px 10px', color: t.textDimmed, fontSize: '13px' }
                     }, 'No models match "' + modelSearch + '"')
                 ),
                 document.body
@@ -6660,6 +6824,8 @@ ${jsonInstruction}`;
 
       // Query Generator Panel Component
       const QueryGeneratorPanel = () => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         // Use GraphiQL's editor context to access the query editor
         const editorContext = useEditorContext();
         const [messages, setMessages] = React.useState(() => window._queryGeneratorState.messages || []);
@@ -7763,7 +7929,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                   cursor: 'pointer',
                   padding: '8px',
                   borderRadius: '4px',
-                  color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+                  color: t.textSecondary,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -7794,7 +7960,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                   cursor: 'pointer',
                   padding: '8px',
                   borderRadius: '4px',
-                  color: 'hsla(var(--color-neutral), var(--alpha-secondary))',
+                  color: t.textSecondary,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -7817,7 +7983,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
             className: 'graphiql-markdown-description',
             style: {
               margin: '0 0 4px 0',
-              color: 'rgba(59, 75, 104, 0.76)'
+              color: t.textDescription
             }
           }, 'Describe what you want to query in natural language'),
 
@@ -7854,7 +8020,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                   height: '48px',
                   marginBottom: '16px',
                   borderRadius: '12px',
-                  background: 'hsla(var(--color-primary), 0.1)',
+                  background: t.accentBg,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -7863,7 +8029,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 width: '24',
                 height: '24',
                 viewBox: '0 0 24 24',
-                fill: 'hsl(var(--color-primary))'
+                fill: t.accent
               }, React.createElement('path', {
                 d: 'M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z'
               }))),
@@ -7873,7 +8039,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                   margin: '0 0 8px 0',
                   fontWeight: '600',
                   fontSize: '15px',
-                  color: 'hsla(var(--color-neutral), 1)'
+                  color: t.textPrimary
                 }
               }, 'Start a conversation'),
               React.createElement('p', {
@@ -7882,7 +8048,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 style: {
                   margin: 0,
                   fontSize: '13px',
-                  color: 'rgba(59, 75, 104, 0.76)',
+                  color: t.textDescription,
                   maxWidth: '240px'
                 }
               }, 'Type a message below to generate GraphQL queries using natural language')
@@ -7919,8 +8085,8 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
               style: {
                 padding: '10px 14px',
                 borderRadius: '12px',
-                background: 'var(--color-base-bg, #f1f3f5)',
-                color: 'var(--color-alpha-secondary, #586069)',
+                background: t.bgMuted,
+                color: t.textSecondary,
                 fontSize: '13px',
                 display: 'flex',
                 gap: '4px'
@@ -7938,10 +8104,10 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
             key: 'error',
             style: {
               padding: '10px 16px',
-              background: '#ffeaea',
-              color: '#d73a49',
+              background: t.errorBg,
+              color: t.errorText,
               fontSize: '12px',
-              borderTop: '1px solid #ffc4c4'
+              borderTop: `1px solid ${t.errorBorder}`
             }
           }, [
             React.createElement('span', { key: 'icon' }, '⚠ '),
@@ -7953,7 +8119,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
             key: 'input-area',
             style: {
               padding: '12px 16px',
-              borderTop: '1px solid var(--color-border, #e1e4e8)',
+              borderTop: `1px solid ${t.border}`,
               display: 'flex',
               flexDirection: 'column',
               gap: '10px'
@@ -7974,7 +8140,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 key: 'loading-suggestions',
                 style: {
                   fontSize: '11px',
-                  color: 'var(--color-alpha-secondary, #586069)',
+                  color: t.textSecondary,
                   fontStyle: 'italic'
                 }
               }, 'Loading suggestions...'),
@@ -7987,26 +8153,26 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                   disabled: isLoading,
                   style: {
                     padding: '5px 10px',
-                  background: '#e3f2fd',
-                  border: '1px solid #bbdefb',
+                  background: t.accentBg,
+                  border: `1px solid ${t.accent}`,
                   borderRadius: '12px',
                   fontSize: '11px',
                   cursor: isLoading ? 'not-allowed' : 'pointer',
-                  color: '#1565c0',
+                  color: t.userBubbleText,
                   transition: 'all 0.15s ease',
                   opacity: isLoading ? 0.5 : 1
                 },
                 onMouseEnter: (e) => {
                   if (!isLoading) {
-                    e.target.style.background = '#1976d2';
-                    e.target.style.color = 'white';
-                    e.target.style.borderColor = '#1976d2';
+                    e.target.style.background = t.accentStrong;
+                    e.target.style.color = t.bg;
+                    e.target.style.borderColor = t.accentStrong;
                   }
                 },
                 onMouseLeave: (e) => {
-                  e.target.style.background = '#e3f2fd';
-                  e.target.style.color = '#1565c0';
-                  e.target.style.borderColor = '#bbdefb';
+                  e.target.style.background = t.accentBg;
+                  e.target.style.color = t.userBubbleText;
+                  e.target.style.borderColor = t.accent;
                 }
               }, suggestion)
               ) : [])
@@ -8035,11 +8201,11 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 style: {
                   flex: 1,
                   padding: '8px 12px',
-                  border: '1px solid var(--color-border, #d1d5da)',
+                  border: `1px solid ${t.borderStrong}`,
                   borderRadius: '6px',
                   fontSize: '13px',
-                  background: 'var(--color-base-bg, white)',
-                  color: 'var(--color-base)'
+                  background: t.bg,
+                  color: t.textPrimary
                 }
               }),
               React.createElement('button', {
@@ -8049,7 +8215,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 disabled: isLoading || !inputValue.trim(),
                 style: {
                   padding: '8px 14px',
-                  backgroundColor: isLoading || !inputValue.trim() ? 'var(--color-alpha-tertiary, #ccc)' : 'hsl(var(--color-primary))',
+                  backgroundColor: isLoading || !inputValue.trim() ? t.textMuted : t.accentBgHover,
                   color: 'white',
                   border: 'none',
                   borderRadius: '6px',
@@ -8077,9 +8243,9 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
                 fontSize: '11px',
                 padding: '2px 8px',
                 borderRadius: '12px',
-                background: 'var(--color-alpha-background, #f1f3f5)',
-                color: 'var(--color-alpha-secondary, #586069)',
-                border: '1px solid var(--color-border, #e1e4e8)',
+                background: t.bgMuted,
+                color: t.textSecondary,
+                border: `1px solid ${t.border}`,
                 lineHeight: '18px'
               };
               if (!label) return [React.createElement('span', { key: 'none', style: { ...bubbleStyle, fontStyle: 'italic' } }, 'No provider')];
@@ -8102,7 +8268,7 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
               left: 0,
               right: 0,
               bottom: 0,
-              background: 'rgba(59, 75, 104, 0.15)',
+              background: t.backdropBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -8221,6 +8387,8 @@ CRITICAL - MULTI-OPERATION EDITOR: The editor currently has ${editorOperations.l
 
       // Analyse Button Component for the toolbar
       const AnalyseButton = () => {
+        const isDark = useGraphiQLTheme();
+        const t = getThemeColors(isDark);
         const editorContext = useEditorContext();
         const pluginContext = usePluginContext();
         const [isAnalysing, setIsAnalysing] = React.useState(false);
@@ -8441,7 +8609,7 @@ Feel free to suggest improvements to the query if you see any.`;
               top: '50%',
               left: '50%',
               transform: 'translate(-50%, -50%)',
-              background: 'white',
+              background: t.bg,
               padding: '20px 24px',
               borderRadius: '8px',
               boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
@@ -8452,15 +8620,15 @@ Feel free to suggest improvements to the query if you see any.`;
           }, [
             React.createElement('p', {
               key: 'message',
-              style: { margin: '0 0 16px 0', color: '#24292e', fontSize: '14px', lineHeight: '1.5' }
+              style: { margin: '0 0 16px 0', color: t.textPrimary, fontSize: '14px', lineHeight: '1.5' }
             }, popup.message),
             React.createElement('button', {
               key: 'close',
               onClick: () => setPopup(null),
               style: {
                 padding: '8px 20px',
-                background: '#e3f2fd',
-                color: '#1565c0',
+                background: t.accentBg,
+                color: t.userBubbleText,
                 border: 'none',
                 borderRadius: '6px',
                 fontSize: '13px',
@@ -8494,8 +8662,8 @@ Feel free to suggest improvements to the query if you see any.`;
               style: {
                 width: '18px',
                 height: '18px',
-                border: '2px solid hsla(var(--color-neutral), 0.2)',
-                borderTopColor: 'hsla(var(--color-neutral), var(--alpha-tertiary, 0.4))',
+                border: `2px solid ${t.borderSubtle}`,
+                borderTopColor: t.textMuted,
                 borderRadius: '50%',
                 animation: 'spin 0.8s linear infinite'
               }
@@ -8505,7 +8673,7 @@ Feel free to suggest improvements to the query if you see any.`;
               height: '22',
               viewBox: '0 0 24 24',
               fill: 'none',
-              style: { color: 'hsla(var(--color-neutral), var(--alpha-tertiary, 0.4))' }
+              style: { color: t.textMuted }
             }, [
               // Rounded square with open top-right corner (cut off at 50%)
               React.createElement('path', {
