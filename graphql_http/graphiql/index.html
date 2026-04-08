@@ -4692,7 +4692,7 @@ ${jsonInstruction}`;
         const requestBody = {
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: contents,
-          generationConfig: { responseMimeType: 'application/json' }
+          generationConfig: {}
         };
 
         if (toolsEnabled) {
