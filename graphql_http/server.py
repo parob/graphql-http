@@ -369,10 +369,6 @@ class GraphQLHTTP:
             html_content = f.read()
         html_content = html_content.replace("DEFAULT_QUERY", default_query)
 
-        # Inject Gemini API key from environment if set
-        gemini_api_key = os.environ.get("GRAPHIQL_GEMINI_API_KEY", "")
-        html_content = html_content.replace("__GEMINI_API_KEY__", gemini_api_key)
-
         return HTMLResponse(html_content)
 
     def _handle_options(self, request: Request) -> Optional[Response]:
