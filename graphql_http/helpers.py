@@ -1,6 +1,7 @@
 import json
 from collections import namedtuple
 from collections.abc import MutableMapping
+from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from graphql import (
@@ -13,6 +14,7 @@ from graphql import (
     validate,
 )
 from graphql.execution import ExecutionResult
+from graphql.language import DocumentNode
 from graphql.pyutils.awaitable_or_value import AwaitableOrValue
 
 from .error import HttpQueryError
@@ -182,6 +184,20 @@ def format_execution_result(
     return GraphQLResponse(response, status_code)
 
 
+@lru_cache(maxsize=512)
+def _parse_and_validate(
+    schema: GraphQLSchema, query: str
+) -> Tuple[DocumentNode, Tuple[GraphQLError, ...]]:
+    """Parse and validate a query, cached per (schema, query string).
+
+    Both depend only on the schema (fixed per server) and the query text, so
+    repeated queries skip the parse and validation passes entirely. Raised
+    parse errors are not cached by lru_cache, which is what we want.
+    """
+    document = parse(query)
+    return document, tuple(validate(schema, document))
+
+
 def execute_graphql_request(
     schema: GraphQLSchema,
     params: GraphQLParams,
@@ -193,7 +209,7 @@ def execute_graphql_request(
         raise HttpQueryError(400, "Must provide query string.")
 
     try:
-        document = parse(params.query)
+        document, validation_errors = _parse_and_validate(schema, params.query)
     except GraphQLError as e:
         return ExecutionResult(data=None, errors=[e])
     except Exception as e:
@@ -232,9 +248,8 @@ def execute_graphql_request(
     # Note: the schema is not validated here for performance reasons.
     # This should be done only once when starting the server.
 
-    validation_errors = validate(schema, document)
     if validation_errors:
-        return ExecutionResult(data=None, errors=validation_errors)
+        return ExecutionResult(data=None, errors=list(validation_errors))
 
     return execute(
         schema,

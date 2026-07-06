@@ -10,6 +10,7 @@ import uvicorn
 
 from graphql import GraphQLError, ExecutionResult
 from graphql.execution.execute import ExecutionContext
+from graphql.execution.middleware import MiddlewareManager
 from graphql.type.schema import GraphQLSchema
 from jwt import InvalidTokenError, PyJWKClient
 from starlette.applications import Starlette
@@ -136,6 +137,12 @@ class GraphQLHTTP:
         self.schema = schema
         self.root_value = root_value
         self.middleware = middleware
+        # Build the middleware chain once: graphql-core constructs a fresh
+        # MiddlewareManager per execution when handed a raw list, discarding
+        # its per-resolver wrapped-chain cache on every request.
+        self._middleware_manager = (
+            MiddlewareManager(*middleware) if middleware else None
+        )
         self.context_value = context_value
         self.serve_graphiql = serve_graphiql
         self.graphiql_example_query = self._resolve_graphiql_example_query(
@@ -535,7 +542,7 @@ class GraphQLHTTP:
                 allow_only_introspection=allow_only_introspection,
                 query_data=query_data,
                 root_value=self.root_value,
-                middleware=self.middleware,
+                middleware=self._middleware_manager,
                 context_value=context_value,
                 execution_context_class=self.execution_context_class,
             )
