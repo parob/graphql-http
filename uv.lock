@@ -370,7 +370,7 @@ wheels = [
 
 [[package]]
 name = "graphql-api"
-version = "1.4.18"
+version = "1.6.9"
 source = { registry = "https://pypi.python.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -380,9 +380,9 @@ dependencies = [
     { name = "requests" },
     { name = "typing-inspect" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/dd/f20656e1fee07232dcd6eb467196354cb5fd857fdd5b73a54f3fb9c9d7aa/graphql_api-1.4.18.tar.gz", hash = "sha256:7d0e8baaaed41ab22a94d0b8e59eb1ac0f937a515c4b408e687508e24f7183ae", size = 106233 }
+sdist = { url = "https://files.pythonhosted.org/packages/d4/18/c5150c5aa43389f2dca4f86965d551291b6c5f6685d0f0ef172bde4a982b/graphql_api-1.6.9.tar.gz", hash = "sha256:cb147c04ec51bbb983035135f3a8bd005aa474d7af60bfa4ab79bde8c6740794", size = 263579 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/29/294f1e667d1ff6e4dad3e4ae48f00e025294f64ed0fe137a3e23877586d7/graphql_api-1.4.18-py3-none-any.whl", hash = "sha256:bcfe4d31894e99ea33c8059cafca0b515e7f2772d0e607f7c22886916e606b38", size = 117104 },
+    { url = "https://files.pythonhosted.org/packages/da/62/07a19823f57ac603bcfb7886d0cf30f07eea4aa1d1ace4d86d5343c77ab2/graphql_api-1.6.9-py3-none-any.whl", hash = "sha256:584d3221e97d40ede7d808dca53777bde508201d0501cbc49be0e35323b25c5d", size = 73505 },
 ]
 
 [[package]]
@@ -422,7 +422,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "graphql-api" },
+    { name = "graphql-api", specifier = ">=1.6.9" },
     { name = "graphql-core" },
     { name = "graphql-schema-diff" },
     { name = "httpx" },

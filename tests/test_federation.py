@@ -337,7 +337,7 @@ def federation_example_api():
     )(api)  # type: ignore
 
     composeDirective(name="@custom")(api)  # type: ignore
-    schema, _ = api.build_schema()
+    schema, _ = api.build()
 
     return api
 
