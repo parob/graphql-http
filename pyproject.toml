@@ -22,9 +22,9 @@ dependencies = [
     "packaging",
     "graphql-schema-diff",
     "pyjwt[crypto]",
-    "starlette",
+    "starlette>=1.0.1",
     "uvicorn",
-    "python-multipart",
+    "python-multipart>=0.0.27",
     "httpx",
 ]
 
