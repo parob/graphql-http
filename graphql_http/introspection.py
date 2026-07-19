@@ -196,8 +196,12 @@ def _check_introspection_string(query_str: str) -> bool:
     clean_query = re.sub(r"'[^']*'", '', clean_query)  # Remove string literals
     clean_query = clean_query.lower()
 
-    # Check for non-query operations first (immediate block)
-    if re.search(r'\b(mutation|subscription)\s*\{', clean_query):
+    # Check for non-query operations first (immediate block). This must
+    # catch named operations too ("subscription Foo { ... }") so that a
+    # subscription or mutation document can never bypass authentication.
+    # Introspection results like "subscriptionType" are not matched because
+    # of the trailing word boundary.
+    if re.search(r'\b(mutation|subscription)\b', clean_query):
         logger.debug("Found mutation or subscription - blocking immediately")
         return False
 

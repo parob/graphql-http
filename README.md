@@ -18,6 +18,7 @@ A lightweight, production-ready HTTP server for GraphQL APIs built on top of Sta
 - 🎨 **GraphiQL Integration**: Interactive GraphQL IDE for development
 - 📊 **Health Checks**: Built-in health check endpoints
 - 🔄 **Batch Queries**: Support for batched GraphQL operations
+- 📡 **Subscriptions**: GraphQL subscriptions streamed over Server-Sent Events ([graphql-sse](https://github.com/enisdenjo/graphql-sse/blob/master/PROTOCOL.md) compatible)
 
 ## Installation
 
@@ -78,6 +79,127 @@ class Query:
 server = GraphQLHTTP.from_api(api)
 server.run()
 ```
+
+## Subscriptions (Server-Sent Events)
+
+GraphQL subscriptions are served over Server-Sent Events, following the
+[GraphQL over SSE protocol](https://github.com/enisdenjo/graphql-sse/blob/master/PROTOCOL.md)
+in **distinct connections mode**: each operation gets its own SSE connection, results
+stream as `next` events, and a final `complete` event signals the end of the stream.
+
+Any request whose `Accept` header includes `text/event-stream` (with a non-zero
+q-value) is answered over SSE — subscriptions stream one `next` event per result,
+while queries and mutations respond with a single `next` followed by `complete`.
+A valid subscription sent *without* `Accept: text/event-stream` is rejected with
+`406 Not Acceptable`.
+
+### Defining a subscription with graphql-api
+
+Any field returning an `AsyncGenerator` becomes a subscription:
+
+```python
+import asyncio
+from typing import AsyncGenerator
+
+from graphql_api import GraphQLAPI
+from graphql_http import GraphQLHTTP
+
+api = GraphQLAPI()
+
+@api.type(is_root_type=True)
+class Root:
+    @api.field
+    def hello(self) -> str:
+        return "world"
+
+    @api.field
+    async def countdown(self, start: int = 3) -> AsyncGenerator[int, None]:
+        while start >= 0:
+            yield start
+            start -= 1
+            await asyncio.sleep(1)
+
+server = GraphQLHTTP.from_api(api)
+server.run()
+```
+
+### Consuming with curl
+
+```bash
+curl -N \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "subscription { countdown(start: 3) }"}' \
+  http://localhost:5000/graphql
+```
+
+```
+event: next
+data: {"data":{"countdown":3}}
+
+event: next
+data: {"data":{"countdown":2}}
+
+event: next
+data: {"data":{"countdown":1}}
+
+event: next
+data: {"data":{"countdown":0}}
+
+event: complete
+data: 
+```
+
+### Consuming with the graphql-sse JavaScript client
+
+The [`graphql-sse`](https://github.com/enisdenjo/graphql-sse) client uses distinct
+connections mode by default (`singleConnection: false`):
+
+```javascript
+import { createClient } from 'graphql-sse';
+
+const client = createClient({
+  url: 'http://localhost:5000/graphql',
+});
+
+const unsubscribe = client.subscribe(
+  { query: 'subscription { countdown(start: 3) }' },
+  {
+    next: (result) => console.log(result),   // { data: { countdown: 3 } } ...
+    error: (error) => console.error(error),
+    complete: () => console.log('done'),
+  },
+);
+```
+
+### Behavior notes
+
+- **Auth**: SSE requests go through the same JWT/auth enforcement as regular
+  requests. Authentication failures are returned as HTTP-level JSON errors
+  (401/403) before any stream is opened. The introspection auth-bypass never
+  applies to subscription operations.
+- **Errors**: per the graphql-sse protocol, errors raised before execution
+  starts — missing query, parse errors, validation errors, and `subscribe()`
+  failures — are delivered over the accepted `200 text/event-stream` response
+  as a `next` event carrying the errors, followed by `complete` (a `400` would
+  leave e.g. a browser `EventSource` with no error detail). Resolver errors
+  during the stream ride inside `next` payloads as standard GraphQL errors; a
+  fatal source error emits a final `next` carrying the error, then `complete`.
+- **Middleware & execution context**: subscription events resolve through the
+  same `middleware` chain and `execution_context_class` as queries and
+  mutations, so field-authorization or error-masking middleware applies to
+  streamed results too.
+- **Keep-alive**: while a stream is idle the server emits `: ping` SSE comments
+  every 15 seconds so intermediary proxies don't drop the connection. Configure
+  with `GraphQLHTTP(..., sse_keepalive_interval=30.0)` (must be positive;
+  `None` disables pings).
+- **Concurrency limit**: at most `sse_max_streams` subscription streams
+  (default 100) may be open concurrently per server; further subscription
+  requests are rejected with `429 Too Many Requests` until a slot frees up.
+  Pass `sse_max_streams=None` to remove the limit.
+- **Disconnects**: when the client closes the connection the underlying
+  subscription generator is closed promptly — including `await`-based cleanup
+  in its `finally` block — with no leaked tasks.
 
 ## Related Projects
 

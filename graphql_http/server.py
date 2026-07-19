@@ -1,14 +1,24 @@
+import asyncio
 import copy
 import json
 import os
 from json import JSONDecodeError
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
+from typing import Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Type, Union
 from logging import getLogger
 
+import anyio
 import jwt
 import uvicorn
 
-from graphql import GraphQLError, ExecutionResult
+from graphql import (
+    GraphQLError,
+    ExecutionResult,
+    OperationType,
+    create_source_event_stream,
+    execute,
+    get_operation_ast,
+)
+from graphql.execution import MapAsyncIterator
 from graphql.execution.execute import ExecutionContext
 from graphql.execution.middleware import MiddlewareManager
 from graphql.type.schema import GraphQLSchema
@@ -17,13 +27,22 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware as StarletteMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from graphql_http.helpers import (
     HttpQueryError,
+    _parse_and_validate,
     encode_execution_results,
+    format_execution_result,
+    get_graphql_params,
     json_encode,
     load_json_body,
     run_http_query,
@@ -40,6 +59,59 @@ logger = getLogger(__name__)
 GRAPHIQL_DIR = os.path.join(os.path.dirname(__file__), "graphiql")
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
+
+# GraphQL over Server-Sent Events ("distinct connections mode"):
+# https://github.com/enisdenjo/graphql-sse/blob/master/PROTOCOL.md
+SSE_CONTENT_TYPE = "text/event-stream"
+DEFAULT_SSE_KEEPALIVE_INTERVAL = 15.0
+DEFAULT_SSE_MAX_STREAMS = 100
+_SSE_PING = b": ping\n\n"
+# The spec requires an empty `data:` field so EventSource listeners fire.
+_SSE_COMPLETE = b"event: complete\ndata: \n\n"
+
+
+class _SSEStreamingResponse(StreamingResponse):
+    """StreamingResponse that always closes its body iterator.
+
+    Starlette does not ``aclose()`` the body iterator when the transport
+    errors out (e.g. a client disconnect surfacing as an OSError from
+    ``send``), which would leave the subscription source generator suspended
+    until garbage collection. Closing it here guarantees prompt cleanup.
+
+    The close runs inside a shielded cancel scope: on client disconnect
+    Starlette cancels its response cancel scope, which would otherwise
+    re-deliver CancelledError at every await inside the source generator's
+    ``finally`` block, aborting async cleanup (e.g. ``await unsubscribe()``).
+
+    ``on_close`` is invoked exactly once when the response is finished,
+    regardless of how it ended (used to release the concurrent-stream slot).
+    """
+
+    def __init__(
+        self, *args, on_close: Optional[Callable[[], None]] = None, **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._on_close = on_close
+
+    async def stream_response(self, send) -> None:
+        try:
+            await super().stream_response(send)
+        finally:
+            try:
+                with anyio.CancelScope(shield=True):
+                    aclose = getattr(self.body_iterator, "aclose", None)
+                    if aclose is not None:
+                        try:
+                            await aclose()
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.debug(
+                                "Error closing SSE body iterator",
+                                exc_info=True)
+            finally:
+                if self._on_close is not None:
+                    self._on_close()
 
 
 class GraphQLHTTP:
@@ -99,6 +171,8 @@ class GraphQLHTTP:
         auth_audience: Optional[str] = None,
         auth_enabled: bool = False,
         auth_bypass_during_introspection: bool = True,
+        sse_keepalive_interval: Optional[float] = DEFAULT_SSE_KEEPALIVE_INTERVAL,
+        sse_max_streams: Optional[int] = DEFAULT_SSE_MAX_STREAMS,
     ) -> None:
         """Initialize GraphQL HTTP server.
 
@@ -118,6 +192,14 @@ class GraphQLHTTP:
             auth_audience: Expected JWT audience
             auth_enabled: Whether to enable JWT authentication
             auth_bypass_during_introspection: Whether auth is required for introspection only queries
+            sse_keepalive_interval: Seconds between ``: ping`` keep-alive
+                comments emitted while a Server-Sent Events subscription
+                stream is idle (so proxies don't kill the connection).
+                Must be positive; None disables keep-alive pings
+            sse_max_streams: Maximum number of concurrently open SSE
+                subscription streams; further subscription requests are
+                rejected with 429 until a slot frees up. Must be positive;
+                None removes the limit
 
         Raises:
             ValueError: If invalid configuration is provided
@@ -130,6 +212,8 @@ class GraphQLHTTP:
             auth_issuer=auth_issuer,
             auth_audience=auth_audience,
             health_path=health_path,
+            sse_keepalive_interval=sse_keepalive_interval,
+            sse_max_streams=sse_max_streams,
         )
         if middleware is None:
             middleware = []
@@ -156,6 +240,9 @@ class GraphQLHTTP:
         self.auth_audience = auth_audience
         self.auth_enabled = auth_enabled
         self.auth_bypass_during_introspection = auth_bypass_during_introspection
+        self.sse_keepalive_interval = sse_keepalive_interval
+        self.sse_max_streams = sse_max_streams
+        self._sse_open_streams = 0
 
         if auth_jwks_uri:
             self.jwks_client = PyJWKClient(auth_jwks_uri)
@@ -185,6 +272,8 @@ class GraphQLHTTP:
         auth_issuer: Optional[str],
         auth_audience: Optional[str],
         health_path: Optional[str],
+        sse_keepalive_interval: Optional[float],
+        sse_max_streams: Optional[int],
     ) -> None:
         """Validate server configuration.
 
@@ -195,6 +284,8 @@ class GraphQLHTTP:
             auth_issuer: JWT issuer
             auth_audience: JWT audience
             health_path: Health check path
+            sse_keepalive_interval: SSE keep-alive ping interval
+            sse_max_streams: Maximum concurrent SSE subscription streams
 
         Raises:
             ValueError: If configuration is invalid
@@ -215,6 +306,18 @@ class GraphQLHTTP:
                 raise ValueError("health_path must be a string")
             if not health_path.startswith('/'):
                 raise ValueError("health_path must start with '/'")
+
+        if sse_keepalive_interval is not None and sse_keepalive_interval <= 0:
+            raise ValueError(
+                "sse_keepalive_interval must be positive "
+                "(use None to disable keep-alive pings)"
+            )
+
+        if sse_max_streams is not None and sse_max_streams <= 0:
+            raise ValueError(
+                "sse_max_streams must be positive "
+                "(use None for no limit)"
+            )
 
     def _resolve_graphiql_example_query(
         self,
@@ -535,6 +638,28 @@ class GraphQLHTTP:
             for key, value in request.query_params.items():
                 query_data[key] = value
 
+            # GraphQL over Server-Sent Events (graphql-sse
+            # "distinct connections mode"). Batched (list) requests are not
+            # eligible and fall through to the regular JSON pipeline.
+            accepts_sse = self._request_accepts_sse(request)
+            if isinstance(data, dict):
+                operation_type = self._get_operation_type(data, query_data)
+                if operation_type == OperationType.SUBSCRIPTION and not accepts_sse:
+                    raise HttpQueryError(
+                        406,
+                        "Subscription operations require Server-Sent Events. "
+                        "Retry the request with an "
+                        "'Accept: text/event-stream' header.",
+                    )
+                if accepts_sse:
+                    return await self._handle_sse_request(
+                        request_method,
+                        data,
+                        query_data,
+                        context_value,
+                        operation_type,
+                    )
+
             execution_results, all_params = run_http_query(
                 self.schema,
                 request_method,
@@ -569,6 +694,296 @@ class GraphQLHTTP:
 
         except HttpQueryError as e:
             return self.error_response(e, status=getattr(e, "status_code", None))
+
+    @staticmethod
+    def _request_accepts_sse(request: Request) -> bool:
+        """Check whether the Accept header includes text/event-stream.
+
+        An entry with ``q=0`` is an explicit refusal per RFC 9110, so
+        ``Accept: application/json, text/event-stream;q=0`` is not treated
+        as SSE-capable. ``*/*`` deliberately does not count as accepting
+        SSE — only an explicit text/event-stream entry does.
+        """
+        accept_header = request.headers.get("accept", "").lower()
+        if SSE_CONTENT_TYPE not in accept_header:
+            return False
+        for entry in accept_header.split(","):
+            media_type, _, params = entry.partition(";")
+            if media_type.strip() != SSE_CONTENT_TYPE:
+                continue
+            quality = 1.0
+            for param in params.split(";"):
+                name, _, value = param.partition("=")
+                if name.strip() == "q":
+                    try:
+                        quality = float(value.strip())
+                    except ValueError:
+                        quality = 1.0
+            if quality > 0:
+                return True
+        return False
+
+    def _get_operation_type(
+        self, data: Dict, query_data: Dict
+    ) -> Optional[OperationType]:
+        """Best-effort operation type of a single (non-batched) request.
+
+        Returns None when the operation cannot be determined (missing query,
+        parse error, ambiguous operation name) or when the document fails
+        validation — those errors are reported by the regular request
+        pipeline (or over an accepted SSE stream), never here. In
+        particular an invalid subscription document without an SSE Accept
+        header surfaces its validation errors instead of a 406.
+        """
+        try:
+            params = get_graphql_params(data, query_data)
+            if not params.query:
+                return None
+            document, validation_errors = _parse_and_validate(
+                self.schema, params.query
+            )
+            if validation_errors:
+                return None
+            operation_ast = get_operation_ast(document, params.operation_name)
+            return operation_ast.operation if operation_ast else None
+        except Exception:
+            return None
+
+    async def _handle_sse_request(
+        self,
+        request_method: str,
+        data: Dict,
+        query_data: Dict,
+        context_value: Any,
+        operation_type: Optional[OperationType],
+    ) -> Response:
+        """Handle a request whose Accept header includes text/event-stream.
+
+        Subscriptions are executed via graphql-core and streamed as `next`
+        events followed by a `complete` event. Queries and mutations respond
+        over SSE with a single `next` (the execution result) followed by
+        `complete`, per the graphql-sse protocol's distinct connections mode.
+
+        Per that protocol, errors raised before execution starts (missing
+        query, parse errors, validation errors, and subscribe() failures)
+        MUST also be delivered over an accepted 200 text/event-stream
+        response, as a `next` event carrying the errors followed by
+        `complete` — a 400 would leave e.g. a browser EventSource with a
+        bare `error` event holding no detail.
+        """
+        params = get_graphql_params(data, query_data)
+        if not params.query:
+            return self._sse_error_response(
+                GraphQLError("Must provide query string.")
+            )
+
+        try:
+            document, validation_errors = _parse_and_validate(
+                self.schema, params.query
+            )
+        except GraphQLError as e:
+            return self._sse_error_response(e)
+        except Exception as e:
+            return self._sse_error_response(
+                GraphQLError(str(e), original_error=e)
+            )
+
+        if validation_errors:
+            return self._sse_error_response(*validation_errors)
+
+        if operation_type == OperationType.SUBSCRIPTION:
+            if (
+                self.sse_max_streams is not None
+                and self._sse_open_streams >= self.sse_max_streams
+            ):
+                raise HttpQueryError(
+                    429,
+                    "Too many concurrent subscription streams. "
+                    "Retry once an existing stream has closed.",
+                )
+            result = await self._subscribe(document, params, context_value)
+            if isinstance(result, ExecutionResult):
+                # subscribe() failed before producing a source stream
+                # (e.g. the subscribe resolver raised).
+                payload, _ = format_execution_result(
+                    result, self.format_error)
+                return self._sse_response(payload or {})
+
+            self._sse_open_streams += 1
+            return _SSEStreamingResponse(
+                self._sse_stream(result),
+                media_type=SSE_CONTENT_TYPE,
+                headers=self._sse_headers(),
+                on_close=self._release_sse_stream,
+            )
+
+        # Query or mutation over SSE: execute through the same pipeline as
+        # regular requests, then emit a single `next` followed by `complete`.
+        execution_results, _ = run_http_query(
+            self.schema,
+            request_method,
+            data,
+            allow_only_introspection=False,
+            query_data=query_data,
+            root_value=self.root_value,
+            middleware=self._middleware_manager,
+            context_value=context_value,
+            execution_context_class=self.execution_context_class,
+        )
+        execution_result = execution_results[0]
+        if isinstance(execution_result, Awaitable):
+            awaited_execution_result: ExecutionResult = await execution_result
+        else:
+            awaited_execution_result = execution_result or ExecutionResult(
+                data=None, errors=[]
+            )
+        payload, _ = format_execution_result(
+            awaited_execution_result, self.format_error
+        )
+        return self._sse_response(payload or {})
+
+    async def _subscribe(
+        self, document, params, context_value
+    ) -> Union[AsyncIterator[ExecutionResult], ExecutionResult]:
+        """graphql-core's subscribe(), honoring middleware and context class.
+
+        graphql-core 3.2's ``subscribe()`` accepts neither ``middleware``
+        nor ``execution_context_class``, which would let subscription
+        events bypass field-authorization or error-masking configured on
+        the server. Recreate it from ``create_source_event_stream`` plus a
+        per-event ``execute()`` that applies both, exactly like queries
+        and mutations.
+        """
+        result_or_stream = await create_source_event_stream(
+            self.schema,
+            document,
+            root_value=self.root_value,
+            context_value=context_value,
+            variable_values=params.variables,
+            operation_name=params.operation_name,
+        )
+        if isinstance(result_or_stream, ExecutionResult):
+            return result_or_stream
+
+        async def map_source_to_response(payload: Any) -> ExecutionResult:
+            result = execute(
+                self.schema,
+                document,
+                root_value=payload,
+                context_value=context_value,
+                variable_values=params.variables,
+                operation_name=params.operation_name,
+                middleware=self._middleware_manager,
+                execution_context_class=self.execution_context_class,
+            )
+            if isinstance(result, Awaitable):
+                return await result
+            return result
+
+        return MapAsyncIterator(result_or_stream, map_source_to_response)
+
+    def _release_sse_stream(self) -> None:
+        """Release a concurrent-subscription-stream slot."""
+        self._sse_open_streams -= 1
+
+    def _sse_response(self, payload: Union[Dict, List]) -> Response:
+        """A complete SSE body: one `next` event, then `complete`."""
+        body = self._encode_sse_event("next", payload) + _SSE_COMPLETE
+        return Response(
+            content=body,
+            media_type=SSE_CONTENT_TYPE,
+            headers=self._sse_headers(),
+        )
+
+    def _sse_error_response(self, *errors: GraphQLError) -> Response:
+        """Report pre-execution errors over an accepted SSE connection."""
+        return self._sse_response(
+            {"errors": [self.format_error(e) for e in errors]}
+        )
+
+    @staticmethod
+    def _sse_headers() -> Dict[str, str]:
+        return {
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        }
+
+    @staticmethod
+    def _encode_sse_event(event: str, payload: Union[Dict, List]) -> bytes:
+        """Encode an SSE event with a JSON payload as its data field."""
+        return f"event: {event}\ndata: {json_encode(payload)}\n\n".encode(
+            "utf-8"
+        )
+
+    async def _sse_stream(
+        self, source: AsyncIterator[ExecutionResult]
+    ) -> AsyncGenerator[bytes, None]:
+        """Stream execution results from source as SSE next/complete events.
+
+        Emits `: ping` comment lines every ``sse_keepalive_interval`` seconds
+        while the source is idle (never when the interval is None). The
+        source async iterator is always closed on the way out — including on
+        client disconnect, which surfaces here as a CancelledError/
+        GeneratorExit at the current suspension point. Teardown runs inside
+        a shielded cancel scope so that Starlette's disconnect cancellation
+        cannot interrupt async cleanup in the source generator's ``finally``.
+        """
+        next_task: Optional[asyncio.Task] = None
+        try:
+            while True:
+                if next_task is None:
+                    next_task = asyncio.ensure_future(source.__anext__())
+                done, _ = await asyncio.wait(
+                    {next_task}, timeout=self.sse_keepalive_interval
+                )
+                if not done:
+                    yield _SSE_PING
+                    continue
+                finished, next_task = next_task, None
+                try:
+                    result = finished.result()
+                except StopAsyncIteration:
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    # Fatal source error: report it in a final `next` payload
+                    # as a standard GraphQL error, then complete the stream.
+                    error = (
+                        e
+                        if isinstance(e, GraphQLError)
+                        else GraphQLError(str(e), original_error=e)
+                    )
+                    yield self._encode_sse_event(
+                        "next", {"errors": [self.format_error(error)]}
+                    )
+                    break
+                payload, _ = format_execution_result(
+                    result, self.format_error)
+                yield self._encode_sse_event("next", payload or {})
+            yield _SSE_COMPLETE
+        finally:
+            with anyio.CancelScope(shield=True):
+                if next_task is not None:
+                    next_task.cancel()
+                    try:
+                        await next_task
+                    except BaseException:
+                        pass
+                await self._aclose_source(source)
+
+    @staticmethod
+    async def _aclose_source(source: AsyncIterator) -> None:
+        """Close the subscription source iterator, best-effort."""
+        aclose = getattr(source, "aclose", None)
+        if aclose is None:
+            return
+        try:
+            await aclose()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Error closing subscription source", exc_info=True)
 
     async def health_check(self, request: Request) -> Response:
         return PlainTextResponse("OK")
