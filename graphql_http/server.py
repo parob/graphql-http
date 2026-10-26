@@ -14,12 +14,10 @@ from graphql import (
     GraphQLError,
     ExecutionResult,
     OperationType,
-    create_source_event_stream,
-    execute,
     get_operation_ast,
+    subscribe,
 )
-from graphql.execution import MapAsyncIterator
-from graphql.execution.execute import ExecutionContext
+from graphql.execution.executor import Executor
 from graphql.execution.middleware import MiddlewareManager
 from graphql.type.schema import GraphQLSchema
 from jwt import InvalidTokenError, PyJWKClient
@@ -150,7 +148,7 @@ class GraphQLHTTP:
             root_value=root_value,
             middleware=middleware,
             context_value=context,
-            execution_context_class=executor.execution_context_class,
+            executor_class=executor.executor_class,
             **kwargs,
         )
 
@@ -165,7 +163,7 @@ class GraphQLHTTP:
         graphiql_example_query_path: Optional[str] = None,
         allow_cors: bool = False,
         health_path: Optional[str] = None,
-        execution_context_class: Optional[Type[ExecutionContext]] = None,
+        executor_class: Optional[Type[Executor]] = None,
         auth_jwks_uri: Optional[str] = None,
         auth_issuer: Optional[str] = None,
         auth_audience: Optional[str] = None,
@@ -186,7 +184,8 @@ class GraphQLHTTP:
             graphiql_example_query_path: Path to file containing example query for GraphiQL
             allow_cors: Whether to enable CORS middleware
             health_path: Path for health check endpoint (e.g., '/health')
-            execution_context_class: Custom execution context class
+            executor_class: Custom graphql-core Executor class (graphql-core 3.3
+                renamed ExecutionContext to Executor)
             auth_jwks_uri: JWKS URI for JWT token validation
             auth_issuer: Expected JWT issuer
             auth_audience: Expected JWT audience
@@ -234,7 +233,7 @@ class GraphQLHTTP:
         )
         self.allow_cors = allow_cors
         self.health_path = health_path
-        self.execution_context_class = execution_context_class
+        self.executor_class = executor_class
         self.auth_jwks_uri = auth_jwks_uri
         self.auth_issuer = auth_issuer
         self.auth_audience = auth_audience
@@ -669,7 +668,7 @@ class GraphQLHTTP:
                 root_value=self.root_value,
                 middleware=self._middleware_manager,
                 context_value=context_value,
-                execution_context_class=self.execution_context_class,
+                executor_class=self.executor_class,
             )
 
             results = []
@@ -828,7 +827,7 @@ class GraphQLHTTP:
             root_value=self.root_value,
             middleware=self._middleware_manager,
             context_value=context_value,
-            execution_context_class=self.execution_context_class,
+            executor_class=self.executor_class,
         )
         execution_result = execution_results[0]
         if isinstance(execution_result, Awaitable):
@@ -845,42 +844,23 @@ class GraphQLHTTP:
     async def _subscribe(
         self, document, params, context_value
     ) -> Union[AsyncIterator[ExecutionResult], ExecutionResult]:
-        """graphql-core's subscribe(), honoring middleware and context class.
-
-        graphql-core 3.2's ``subscribe()`` accepts neither ``middleware``
-        nor ``execution_context_class``, which would let subscription
-        events bypass field-authorization or error-masking configured on
-        the server. Recreate it from ``create_source_event_stream`` plus a
-        per-event ``execute()`` that applies both, exactly like queries
-        and mutations.
+        """graphql-core's subscribe(), with the server's middleware and executor
+        class, so field-authorization or error-masking configured on the server
+        applies to subscription events exactly as to queries and mutations.
         """
-        result_or_stream = await create_source_event_stream(
+        result = subscribe(
             self.schema,
             document,
             root_value=self.root_value,
             context_value=context_value,
             variable_values=params.variables,
             operation_name=params.operation_name,
+            middleware=self._middleware_manager,
+            executor_class=self.executor_class,
         )
-        if isinstance(result_or_stream, ExecutionResult):
-            return result_or_stream
-
-        async def map_source_to_response(payload: Any) -> ExecutionResult:
-            result = execute(
-                self.schema,
-                document,
-                root_value=payload,
-                context_value=context_value,
-                variable_values=params.variables,
-                operation_name=params.operation_name,
-                middleware=self._middleware_manager,
-                execution_context_class=self.execution_context_class,
-            )
-            if isinstance(result, Awaitable):
-                return await result
-            return result
-
-        return MapAsyncIterator(result_or_stream, map_source_to_response)
+        if isinstance(result, Awaitable):
+            return await result
+        return result
 
     def _release_sse_stream(self) -> None:
         """Release a concurrent-subscription-stream slot."""

@@ -444,7 +444,7 @@ class TestSSESubscriptions:
         assert response.json() == {"data": {"hello": "world"}}
 
 
-class TestSSEMiddlewareAndExecutionContext:
+class TestSSEMiddlewareAndExecutor:
     """Subscription events run through the same middleware chain and
     execution context class as queries and mutations."""
 
@@ -488,20 +488,19 @@ class TestSSEMiddlewareAndExecutionContext:
 
         assert seen == ["hello", "countdown"]
 
-    def test_subscription_events_use_execution_context_class(self):
-        from graphql.execution.execute import ExecutionContext
+    def test_subscription_events_use_executor_class(self):
+        from graphql.execution.executor import Executor
 
-        class CountingContext(ExecutionContext):
-            built = 0
+        class CountingExecutor(Executor):
+            events = 0
 
-            @classmethod
-            def build(cls, *args, **kwargs):
-                CountingContext.built += 1
-                return super().build(*args, **kwargs)
+            def build_per_event_executor(self, payload):
+                CountingExecutor.events += 1
+                return super().build_per_event_executor(payload)
 
         server = GraphQLHTTP(
             schema=build_schema(),
-            execution_context_class=CountingContext,
+            executor_class=CountingExecutor,
         )
         client = server.client()
 
@@ -512,8 +511,8 @@ class TestSSEMiddlewareAndExecutionContext:
         )
 
         assert response.status_code == 200
-        # One build per streamed event (3 events for start: 2).
-        assert CountingContext.built == 3
+        # One executor per streamed event (3 events for start: 2).
+        assert CountingExecutor.events == 3
 
 
 class TestSSEStreamLimits:

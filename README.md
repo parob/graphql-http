@@ -186,7 +186,7 @@ const unsubscribe = client.subscribe(
   during the stream ride inside `next` payloads as standard GraphQL errors; a
   fatal source error emits a final `next` carrying the error, then `complete`.
 - **Middleware & execution context**: subscription events resolve through the
-  same `middleware` chain and `execution_context_class` as queries and
+  same `middleware` chain and `executor_class` as queries and
   mutations, so field-authorization or error-masking middleware applies to
   streamed results too.
 - **Keep-alive**: while a stream is idle the server emits `: ping` SSE comments

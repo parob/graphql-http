@@ -26,7 +26,7 @@ GraphQLHTTP(
     graphiql_example_query_path: Optional[str] = None,
     allow_cors: bool = False,
     health_path: Optional[str] = None,
-    execution_context_class: Optional[Type[ExecutionContext]] = None,
+    executor_class: Optional[Type[Executor]] = None,
     auth_enabled: bool = False,
     auth_jwks_uri: Optional[str] = None,
     auth_issuer: Optional[str] = None,
@@ -45,7 +45,7 @@ GraphQLHTTP(
 | `root_value` | `Any` | `None` | Root value passed to resolvers |
 | `middleware` | `List[Callable]` | `None` | List of middleware functions for field resolution |
 | `context_value` | `Any` | `None` | Context value passed to resolvers |
-| `execution_context_class` | `Type[ExecutionContext]` | `None` | Custom execution context class |
+| `executor_class` | `Type[Executor]` | `None` | Custom graphql-core `Executor` class (named `execution_context_class` before graphql-http 3.0) |
 
 ##### GraphiQL Parameters
 

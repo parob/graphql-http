@@ -358,14 +358,14 @@ class TestAdvancedServerExample:
         assert isinstance(elapsed, (int, float))
         assert elapsed >= 0
 
-    def test_advanced_server_custom_execution_context(self):
-        """Test custom execution context."""
+    def test_advanced_server_custom_executor(self):
+        """Test custom executor."""
 
         # Test that the class exists and can be instantiated
-        assert advanced_server.PerformanceExecutionContext is not None
+        assert advanced_server.PerformanceExecutor is not None
 
         # The full instantiation requires GraphQL internals, so just check class exists
-        assert hasattr(advanced_server.PerformanceExecutionContext, '__init__')
+        assert hasattr(advanced_server.PerformanceExecutor, '__init__')
 
     @patch('examples.advanced_server.GraphQLHTTP.run')
     def test_advanced_server_main_function(self, mock_run):
