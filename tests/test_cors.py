@@ -426,11 +426,11 @@ class TestGraphQLHTTPEdgeCases:
         formatted = server.format_error(error_with_status)
         assert formatted["extensions"]["statusCode"] == 403
 
-    def test_custom_execution_context_class(self, schema):
-        """Test custom execution context class."""
-        from graphql.execution import ExecutionContext
+    def test_custom_executor_class(self, schema):
+        """Test custom executor class."""
+        from graphql.execution.executor import Executor
 
-        class CustomExecutionContext(ExecutionContext):
+        class CustomExecutor(Executor):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
                 # Add custom behavior if needed
@@ -438,7 +438,7 @@ class TestGraphQLHTTPEdgeCases:
 
         server = GraphQLHTTP(
             schema=schema,
-            execution_context_class=CustomExecutionContext
+            executor_class=CustomExecutor
         )
         client = server.client()
 

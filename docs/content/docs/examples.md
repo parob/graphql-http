@@ -582,8 +582,8 @@ CMD ["python", "server.py"]
 **requirements.txt:**
 
 ```text
-graphql-http>=1.0.0
-graphql-core>=3.2.0
+graphql-http>=3.0.0
+graphql-core>=3.3.1,<3.4
 uvicorn>=0.23.0
 ```
 

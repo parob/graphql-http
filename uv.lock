@@ -658,7 +658,7 @@ wheels = [
 
 [[package]]
 name = "graphql-api"
-version = "1.7.0"
+version = "2.0.0"
 source = { registry = "https://pypi.python.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -668,18 +668,18 @@ dependencies = [
     { name = "requests" },
     { name = "typing-inspect" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/99/6be16a8b19da8c19a862f561f17761e5e24a35f46af5efb4b5e1f42eb0fe/graphql_api-1.7.0.tar.gz", hash = "sha256:f722deb5c6ecc17a49a7852a23c9ec87b2069b4333abed83aa7af6eabbdd3a0b", size = 324337, upload-time = "2026-10-22T23:51:48.019Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/c4/0a39de1485a02729623940ca2ddf396b07c96f18c276830de7c1dfeef7bc/graphql_api-2.0.0.tar.gz", hash = "sha256:960bfca69810dd9392b8b3adffbb965e1da8772ddc7826ed04c6c4569e4a791b", size = 324915, upload-time = "2026-10-26T00:39:13.098Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1c/45/e591e03d70ad3098b8a710defdb6060c454235a00ffab95e82f5e47aa10a/graphql_api-1.7.0-py3-none-any.whl", hash = "sha256:6b91f0de3ea73cb99e8427e8dbb47eeb76b51d2796525181f376cfd467ee06a6", size = 73999, upload-time = "2026-10-22T23:51:46.757Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/b5/21f4a53a740b194e4a38838be61897422ae7f35a572f3acaa0940ca51f1c/graphql_api-2.0.0-py3-none-any.whl", hash = "sha256:2a15d1392d2f94b49fc22a5bbe08b4a0aa91c1f1e0d0523e559174a55ea8ca30", size = 73878, upload-time = "2026-10-26T00:39:11.893Z" },
 ]
 
 [[package]]
 name = "graphql-core"
-version = "3.2.13"
+version = "3.3.1"
 source = { registry = "https://pypi.python.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4e/5e/aa0d4e701b50db0bab71b125dd19ddb0f98c638d008d6f7e3d8ce9cbc92e/graphql_core-3.2.13.tar.gz", hash = "sha256:bb81dd266d4ab7b591bd976f1b23639d97776cb9ac1a896b4a93c271e11ed618", size = 577471, upload-time = "2026-09-27T12:22:57.136Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/91/223fbace7c8648690d7fb77855e29bd248c9ed1e0833ed3002ab29bc1441/graphql_core-3.3.1.tar.gz", hash = "sha256:8d9b6f95fb66b58b260904cf9e191f422782620533ec8fa0c96ab941b6659a2a", size = 751402, upload-time = "2026-10-25T09:34:09.764Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/b4/b52a324b0b297ddc49b8ea31a51d39fae63132f694a267b9381d94e2e0af/graphql_core-3.2.13-py3-none-any.whl", hash = "sha256:b0eb04f2c31556b2310a77c8fb53c74e8b56570f8fea594d89c6ef7827dbb497", size = 268191, upload-time = "2026-09-27T12:22:55.661Z" },
+    { url = "https://files.pythonhosted.org/packages/57/0e/e51b006267e7fa785abf5d1f86a7d60b84f7f893e3ba4fe23df9be2000cf/graphql_core-3.3.1-py3-none-any.whl", hash = "sha256:43ebcd0d9a0662a71b1a2f6562ba863d253057ec11cbc45835b2e2683a0a3770", size = 349047, upload-time = "2026-10-25T09:34:07.725Z" },
 ]
 
 [[package]]
@@ -688,7 +688,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "graphql-api" },
     { name = "graphql-core" },
-    { name = "graphql-schema-diff" },
     { name = "httpx" },
     { name = "packaging" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -710,9 +709,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "graphql-api", specifier = ">=1.7.0" },
-    { name = "graphql-core" },
-    { name = "graphql-schema-diff" },
+    { name = "graphql-api", specifier = ">=2.0.0" },
+    { name = "graphql-core", specifier = ">=3.3.1,<3.4" },
     { name = "httpx" },
     { name = "packaging" },
     { name = "pyjwt", extras = ["crypto"] },
@@ -730,19 +728,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
-]
-
-[[package]]
-name = "graphql-schema-diff"
-version = "1.2.4"
-source = { registry = "https://pypi.python.org/simple" }
-dependencies = [
-    { name = "attrs" },
-    { name = "graphql-core" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/51/93/a7e2160e61dde26498f34615cafd8feff77d4c99813fa9b7c2377e8e0bf7/graphql_schema_diff-1.2.4.tar.gz", hash = "sha256:eac38d06ac6a4a06328025596f1d7de17e0bbc74ffcaf0bc3227debebebae575", size = 666165, upload-time = "2023-01-09T22:40:28.37Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/83/e4283cba1ed81c331dd3dba1f2f56bb1530d72345fb9c11cb7dd4f25e65e/graphql_schema_diff-1.2.4-py3-none-any.whl", hash = "sha256:300b9e0864cfcb062ddbc85e02985ff99afe60127ed416cb898df5cd4f5c6bfb", size = 37962, upload-time = "2023-01-09T22:40:23.598Z" },
 ]
 
 [[package]]

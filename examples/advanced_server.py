@@ -24,13 +24,13 @@ from graphql import (
     GraphQLList,
     GraphQLError,
 )
-from graphql.execution import ExecutionContext
+from graphql.execution.executor import Executor
 from graphql_http import GraphQLHTTP
 
 
-# Custom execution context for performance monitoring
-class PerformanceExecutionContext(ExecutionContext):
-    """Custom execution context that tracks performance metrics."""
+# Custom executor for performance monitoring
+class PerformanceExecutor(Executor):
+    """Custom executor that tracks performance metrics."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -347,8 +347,8 @@ def main():
             caching_middleware,      # Finally caching
         ],
 
-        # Custom execution context
-        execution_context_class=PerformanceExecutionContext,
+        # Custom executor
+        executor_class=PerformanceExecutor,
 
         # Custom context factory
         context_value=lambda: create_custom_context(None),

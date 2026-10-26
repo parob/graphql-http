@@ -35,7 +35,7 @@ app = GraphQLHTTP(
 | `root_value` | `Any` | `None` | Root value passed to resolvers |
 | `middleware` | `List[Callable]` | `[]` | GraphQL middleware functions |
 | `context_value` | `Any` | `None` | Context value passed to resolvers |
-| `execution_context_class` | `Type[ExecutionContext]` | `None` | Custom execution context |
+| `executor_class` | `Type[Executor]` | `None` | Custom graphql-core `Executor` class |
 
 ### GraphiQL Interface
 
